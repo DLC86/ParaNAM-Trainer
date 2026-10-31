@@ -161,6 +161,9 @@ def main():
         )
         run(
             "dpkg-deb",
+            "-Zxz",
+            "-z3",
+            "--threads-max=2",
             "--root-owner-group",
             "--build",
             package,

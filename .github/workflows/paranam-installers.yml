@@ -1,47 +1,42 @@
 name: ParaNAM native installers
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Native installer target
+        type: choice
+        default: all
+        options: [all, windows-cpu, windows-cuda, linux-cpu, linux-cuda, macos-arm64, macos-intel]
   push:
     tags: ['paranam-v*']
 permissions:
   contents: read
 jobs:
+  targets:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        env:
+          TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          targets = json.load(open('packaging/targets.json'))
+          selected = [t for t in targets if os.environ['TARGET'] in ('all', t['id'])]
+          assert selected, 'Unknown installer target'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(selected) + '\n')
+          PY
   build:
+    needs: targets
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
-        include:
-          - os: windows-latest
-            flavor: CPU
-            torch: '2.10.0'
-            index: https://download.pytorch.org/whl/cpu
-            numpy: 'numpy>=1.26,<3'
-          - os: windows-latest
-            flavor: CUDA
-            torch: '2.10.0'
-            index: https://download.pytorch.org/whl/cu128
-            numpy: 'numpy>=1.26,<3'
-          - os: ubuntu-22.04
-            flavor: CPU
-            torch: '2.10.0'
-            index: https://download.pytorch.org/whl/cpu
-            numpy: 'numpy>=1.26,<3'
-          - os: ubuntu-22.04
-            flavor: CUDA
-            torch: '2.10.0'
-            index: https://download.pytorch.org/whl/cu128
-            numpy: 'numpy>=1.26,<3'
-          - os: macos-15
-            flavor: Metal
-            torch: '2.10.0'
-            index: https://pypi.org/simple
-            numpy: 'numpy>=1.26,<3'
-          - os: macos-15-intel
-            flavor: CPU
-            torch: '2.2.2'
-            index: https://pypi.org/simple
-            numpy: 'numpy==1.26.4'
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -54,6 +49,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Free space for the bundled Linux CUDA runtime
+        if: runner.os == 'Linux' && matrix.flavor == 'CUDA'
+        run: |
+          # Ephemeral GitHub runner image only; none of these SDKs is used here.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
       - name: Linux native audio and Qt libraries
         if: runner.os == 'Linux'
         run: |

@@ -1,0 +1,50 @@
+[
+  {
+    "os": "windows-latest",
+    "flavor": "CPU",
+    "torch": "2.10.0",
+    "index": "https://download.pytorch.org/whl/cpu",
+    "numpy": "numpy>=1.26,<3",
+    "id": "windows-cpu"
+  },
+  {
+    "os": "windows-latest",
+    "flavor": "CUDA",
+    "torch": "2.10.0",
+    "index": "https://download.pytorch.org/whl/cu128",
+    "numpy": "numpy>=1.26,<3",
+    "id": "windows-cuda"
+  },
+  {
+    "os": "ubuntu-22.04",
+    "flavor": "CPU",
+    "torch": "2.10.0",
+    "index": "https://download.pytorch.org/whl/cpu",
+    "numpy": "numpy>=1.26,<3",
+    "id": "linux-cpu"
+  },
+  {
+    "os": "ubuntu-22.04",
+    "flavor": "CUDA",
+    "torch": "2.10.0",
+    "index": "https://download.pytorch.org/whl/cu128",
+    "numpy": "numpy>=1.26,<3",
+    "id": "linux-cuda"
+  },
+  {
+    "os": "macos-15",
+    "flavor": "Metal",
+    "torch": "2.10.0",
+    "index": "https://pypi.org/simple",
+    "numpy": "numpy>=1.26,<3",
+    "id": "macos-arm64"
+  },
+  {
+    "os": "macos-15-intel",
+    "flavor": "CPU",
+    "torch": "2.2.2",
+    "index": "https://pypi.org/simple",
+    "numpy": "numpy==1.26.4",
+    "id": "macos-intel"
+  }
+]
