@@ -76,13 +76,14 @@ def main():
     from validate_bundle import clean_environment, validate_training
 
     environment = clean_environment()
-    subprocess.run(
+    result = subprocess.run(
         [str(executable), "--self-test", str(smoke)],
         env=environment,
-        check=True,
         timeout=180,
     )
-    if not json.loads(smoke.read_text())["ok"]:
+    if smoke.exists():
+        print(smoke.read_text(encoding="utf-8"), flush=True)
+    if result.returncode != 0 or not smoke.exists() or not json.loads(smoke.read_text())["ok"]:
         raise RuntimeError("Frozen application smoke test failed")
     validate_training(executable, ROOT / "build")
     if sys.platform == "win32":

@@ -70,6 +70,16 @@ jobs:
         run: python -m pytest tests/paranam -q -o addopts= --basetemp .test-temp
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
+      - name: Preserve bundle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Diagnostics-${{ matrix.os }}-${{ matrix.flavor }}
+          path: |
+            build/bundle-smoke.json
+            build/bundle-training-*/training/*/worker.log
+            build/bundle-training-*/training/*/progress.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: ParaNAM-${{ matrix.os }}-${{ matrix.flavor }}
