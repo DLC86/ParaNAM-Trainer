@@ -500,7 +500,7 @@ class WizardWindow(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
         header.setMinimumSectionSize(55)
-        for column, width in enumerate((85, 310, 100, 240, 110, 380)):
+        for column, width in enumerate((70, 220, 85, 200, 110, 230)):
             self.capture_table.setColumnWidth(column, width)
         saved = self.settings.value("capture_columns")
         if saved is not None:
@@ -1253,6 +1253,12 @@ class WizardWindow(QMainWindow):
         static = project.capture_type == "static"
         self.scene.setVisible(not static)
         self.static_card.setVisible(static)
+        if self.worker is None:
+            self.capture_status.setText(
+                "Select a named capture below, set your rig, then record its training and validation signals."
+                if static
+                else "Select a capture below. Set the real controls to match the diagram."
+            )
         self.rig_ready.setText(
             "My rig is set for this named capture"
             if static
@@ -1289,7 +1295,7 @@ class WizardWindow(QMainWindow):
         self.capture_table.setHorizontalHeaderLabels(headers)
         if changed_kind:
             sizes = (
-                (210, 100, 360, 160, 400) if static else (85, 310, 100, 240, 110, 380)
+                (160, 85, 260, 120, 290) if static else (70, 220, 85, 200, 110, 230)
             )
             for column, width in enumerate(sizes):
                 header.resizeSection(column, width)
@@ -1427,7 +1433,7 @@ class WizardWindow(QMainWindow):
                         shutil.copy2(source, target)
             session = self._get_session()
             self.capture_status.setText(
-                "Recording… Timing is checked before the capture signal is played."
+                "Recording… Timing is checked at the beginning and end of this recording."
             )
             self.capture_progress.setValue(0)
 
