@@ -542,8 +542,12 @@ class WizardWindow(QMainWindow):
         if index > 0 and not self.workspace:
             self.notify_error("Create or open a project first.")
             return
-        if index >= 2 and not self.busy() and self.workspace.plan_changed():
-            if not self.apply_plan():
+        if index >= 2 and not self.busy():
+            try:
+                if self.workspace.plan_changed() and not self.apply_plan():
+                    return
+            except ValueError as error:
+                self.notify_error(error)
                 return
         self.pages.setCurrentIndex(index)
         for i, step in enumerate(self.steps):
@@ -1178,6 +1182,18 @@ class WizardWindow(QMainWindow):
                 in ("paused", "running", "scoring", "failed")
                 and training.job_can_resume(self.workspace, existing)
             )
+            if (
+                existing
+                and not resume
+                and training.job_progress(existing).get("status") == "paused"
+            ):
+                answer = QMessageBox.question(
+                    self,
+                    "Training settings changed",
+                    "The paused checkpoint belongs to different settings or captures. Start a new training run? The previous run will be kept.",
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
             self.job = training.make_job(self.workspace, resume=resume)
             process = QProcess(self)
             process.setWorkingDirectory(str(self.workspace.directory))
@@ -1196,9 +1212,7 @@ class WizardWindow(QMainWindow):
                 lambda: process.readAllStandardOutput()
             )
             process.finished.connect(self._training_finished)
-            process.errorOccurred.connect(
-                lambda error: self.notify_error(process.errorString())
-            )
+            process.errorOccurred.connect(self._process_error)
             self.process = process
             args = ["--train-worker", str(self.job)]
             if not getattr(sys, "frozen", False):
@@ -1215,6 +1229,21 @@ class WizardWindow(QMainWindow):
                 "Pause requested. Finishing this epoch, then saving a complete checkpoint…"
             )
             self.pause_button.setEnabled(False)
+
+    def _process_error(self, _error):
+        if self.process is None:
+            return
+        message = self.process.errorString()
+        if self.process.state() == QProcess.ProcessState.NotRunning:
+            self.process.deleteLater()
+            self.process = None
+            if self.job:
+                progress = training.job_progress(self.job)
+                progress.update(status="failed", message=message)
+                atomic_write_json(self.job / "progress.json", progress)
+            self.refresh_training()
+            self.update_enabled()
+        self.notify_error(message)
 
     def stop_training(self):
         if self.job and self.process:

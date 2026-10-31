@@ -392,6 +392,8 @@ def run_job(job):
     spec = read_json(job / "spec.json")
     workspace = Workspace(Path(spec["project"]))
     shared = job_progress(job)
+    elapsed_base = float(shared.get("elapsed", 0))
+    clock_start = time.monotonic()
     with FileLock(str(workspace.directory / "training" / "worker.lock"), timeout=0):
         if workspace.fingerprint() != spec["fingerprint"]:
             raise ValueError("Project changed since this training job was prepared")
@@ -409,6 +411,7 @@ def run_job(job):
                 checkpoint = job / f"resume-{member}.ckpt"
                 if checkpoint.exists():
                     learning["trainer_fit_kwargs"]["ckpt_path"] = str(checkpoint)
+                shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
                 progress = build_progress_callback(job, spec, member, shared)
                 train(
                     spec["data"],
@@ -464,12 +467,14 @@ def run_job(job):
                 ),
                 additions=len(additions),
             )
+            shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
             atomic_write_json(job / "progress.json", shared)
         except (TrainingPaused, TrainingStopped) as error:
             shared.update(
                 status="paused" if isinstance(error, TrainingPaused) else "stopped",
                 eta=None,
             )
+            shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
             atomic_write_json(job / "progress.json", shared)
         except Exception as error:
             shared.update(
@@ -478,5 +483,6 @@ def run_job(job):
                 traceback=traceback.format_exc(),
                 eta=None,
             )
+            shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
             atomic_write_json(job / "progress.json", shared)
             raise

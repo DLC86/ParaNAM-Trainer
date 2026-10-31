@@ -125,6 +125,31 @@ def test_changed_settings_cannot_resume_an_old_checkpoint(workspace):
     assert not training.job_can_resume(workspace, job)
 
 
+def test_real_active_learning_round_exports_nested_models_and_returns_to_capture(
+    workspace, monkeypatch
+):
+    from paranam.workspace import Workspace
+
+    workspace.preferences.update(
+        mode="active_learning", epochs=1, rounds=2, additions=1
+    )
+    workspace.save()
+    job = tiny_job(workspace, monkeypatch)
+    training.run_job(job)
+    progress = training.job_progress(job)
+    assert progress["status"] == "needs_captures", progress
+    assert progress["additions"] == 1
+    for member in range(2):
+        model = read_json(job / f"member-{member}" / "model_parametric.nam")
+        assert model["architecture"] == "HyperA2"
+        assert len(model["config"]["submodels"]) == 2
+    reopened = Workspace(workspace.directory)
+    assert len(reopened.project.pending_entries()) == 1
+    assert reopened.validation_matches()
+    assert not reopened.plan_changed()
+    assert not reopened.training_ready()
+
+
 def test_active_learning_excludes_validation_and_all_existing_settings(
     workspace, monkeypatch
 ):

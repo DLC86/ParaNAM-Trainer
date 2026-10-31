@@ -65,3 +65,19 @@ def test_capture_diagram_shows_numeric_and_named_switch_values(window, workspace
     assert not window.record_button.isEnabled()
     window.rig_ready.setChecked(True)
     assert window.record_button.isEnabled()
+
+
+def test_sidebar_handles_missing_custom_input_without_losing_the_project(
+    window, workspace, monkeypatch
+):
+    window._attach(workspace)
+    window.navigate(1)
+    window.signal_mode.setCurrentIndex(1)
+    messages = []
+    monkeypatch.setattr(
+        window, "notify_error", lambda error: messages.append(str(error))
+    )
+    window.navigate(2)
+    assert window.pages.currentIndex() == 1
+    assert len(messages) == 1 and "custom" in messages[0]
+    assert window.workspace is workspace

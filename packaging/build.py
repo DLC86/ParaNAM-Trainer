@@ -134,7 +134,7 @@ def main():
                 "Debian staging folder exists; use a clean build directory"
             )
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(bundle, target, symlinks=True)
+        shutil.copytree(bundle, target, symlinks=True, copy_function=os.link)
         desktop = package / "usr" / "share" / "applications"
         desktop.mkdir(parents=True, exist_ok=True)
         (desktop / "paranam-trainer.desktop").write_text(
@@ -165,15 +165,17 @@ def main():
             package,
             installers / f"ParaNAM-Trainer-{VERSION}-Linux-amd64-{args.flavor}.deb",
         )
-        # Portable folder for Linux distributions that do not use Debian packages.
-        run(
-            "tar",
-            "-C",
-            ROOT / "dist",
-            "-czf",
-            installers / f"ParaNAM-Trainer-{VERSION}-Linux-x86_64-{args.flavor}.tar.gz",
-            "ParaNAM Trainer",
-        )
+        if args.flavor == "CPU":
+            # Portable folder for Linux distributions that do not use Debian packages.
+            run(
+                "tar",
+                "-C",
+                ROOT / "dist",
+                "-czf",
+                installers
+                / f"ParaNAM-Trainer-{VERSION}-Linux-x86_64-{args.flavor}.tar.gz",
+                "ParaNAM Trainer",
+            )
 
 
 if __name__ == "__main__":
