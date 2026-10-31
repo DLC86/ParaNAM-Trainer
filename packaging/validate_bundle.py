@@ -36,7 +36,7 @@ def validate_training(executable, build_directory):
     from nam.capture.project import atomic_write_json
     from nam.data import np_to_wav, wav_to_np
     from paranam.workspace import Workspace, read_json
-    from paranam.training import make_job, job_progress
+    from paranam.training import make_job, job_progress, command
 
     directory = Path(build_directory).resolve() / (
         "bundle-training-" + uuid.uuid4().hex[:8]
@@ -51,7 +51,7 @@ def validate_training(executable, build_directory):
         n_train=1,
         n_validation=1,
         corners=False,
-        epochs=1,
+        epochs=2,
         batch_size=1,
         device="cpu",
     )
@@ -76,6 +76,19 @@ def validate_training(executable, build_directory):
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     spec["data"]["common"]["require_input_pre_silence"] = None
     atomic_write_json(job / "spec.json", spec)
+    # Exercise checkpoint writing AND reloading in two independent frozen processes.
+    command(job, "pause")
+    paused = subprocess.run(
+        [str(executable), "--train-worker", str(job)],
+        env=clean_environment(),
+        timeout=180,
+    )
+    progress = job_progress(job)
+    if paused.returncode != 0 or progress.get("status") != "paused":
+        print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        raise RuntimeError(f"Frozen training worker could not pause: {progress}")
+    assert (job / "resume-0.ckpt").is_file()
+    assert make_job(workspace, resume=True) == job
     result = subprocess.run(
         [str(executable), "--train-worker", str(job)],
         env=clean_environment(),

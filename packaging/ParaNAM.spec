@@ -9,6 +9,9 @@ data = [(str(root / "LICENSE"), "licenses"),
         (str(root / "THIRD_PARTY_NOTICES.md"), "licenses")]
 for package in ("nam", "paranam", "pytorch_lightning", "lightning_fabric", "librosa", "scipy", "torchmetrics"):
     data += collect_data_files(package)
+# Lightning checks these paths on disk before importing checkpoint version info.
+for package in ("pytorch_lightning", "lightning_fabric"):
+    data += collect_data_files(package, includes=["__about__.py", "__version__.py"], include_py_files=True)
 binaries = []
 for package in ("torch", "scipy", "numpy"):
     binaries += collect_dynamic_libs(package)
