@@ -1,0 +1,3 @@
+# These releases provide CPython 3.11 wheels for Intel macOS.
+numba==0.61.2
+llvmlite==0.44.0

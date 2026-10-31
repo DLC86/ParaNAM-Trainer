@@ -152,3 +152,4 @@ packaging/icon.ico
 !nam/_version.py
 
 !paranam/assets/*.wav
+!packaging/ParaNAM.spec

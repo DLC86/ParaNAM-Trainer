@@ -65,7 +65,7 @@ jobs:
       - name: Install bundled training engine
         run: python -m pip install --no-cache-dir "torch==${{ matrix.torch }}" --index-url "${{ matrix.index }}"
       - name: Install application and build dependencies
-        run: python -m pip install --no-cache-dir "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6>=6.8,<7" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
+        run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6>=6.8,<7" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
       - name: Test wizard and real pause/resume training
         run: python -m pytest tests/paranam -q -o addopts= --basetemp .test-temp
       - name: Freeze application and package installer
