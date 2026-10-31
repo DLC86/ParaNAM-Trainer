@@ -156,7 +156,8 @@ def validate_static(executable, build_directory):
         "modeled_by": "Installer check",
         "custom": {"retained": True},
     }
-    x = (0.1 * np.sin(np.arange(6500) * 0.03)).astype(np.float32)
+    # Exercise the real spectral training loss, which needs a full audio window.
+    x = (0.1 * np.sin(np.arange(20000) * 0.03)).astype(np.float32)
     np_to_wav(x, directory / "diagnostic.wav", rate=48000)
     for entry in ws.project.entries:
         target = directory / entry.y_path
@@ -168,7 +169,7 @@ def validate_static(executable, build_directory):
     spec = read_json(job / "spec.json")
     for split in ("train", "validation"):
         for entry in spec["data"][split]:
-            entry.update(x_path="diagnostic.wav", ny=32)
+            entry.update(x_path="diagnostic.wav", ny=8192)
     spec["data"]["common"]["require_input_pre_silence"] = None
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     atomic_write_json(job / "spec.json", spec)
