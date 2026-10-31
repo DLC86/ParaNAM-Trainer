@@ -1,0 +1,76 @@
+name: Publish verified ParaNAM installers
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful native installer workflow run
+        required: true
+        type: string
+      release_id:
+        description: Draft release targeting that run's exact commit
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run_id }}
+      RELEASE_ID: ${{ inputs.release_id }}
+    steps:
+      - name: Wait for and verify the native build
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO" --jq '.private' | grep -qx true
+          for attempt in $(seq 1 60); do
+            gh api "repos/$GH_REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/run.json"
+            if python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["status"] != "completed")' "$RUNNER_TEMP/run.json"; then break; fi
+            sleep 20
+          done
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          run = json.loads((root / 'run.json').read_text())
+          release = json.loads((root / 'release.json').read_text())
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Native build did not pass'
+          assert release['draft'] and release['prerelease'], 'Only draft previews may be published here'
+          assert release['target_commitish'] == run['head_sha'], 'Release and binaries must match'
+          PY
+      - name: Download the verified native installers
+        run: |
+          # This runner is ephemeral; these preinstalled SDKs are unused.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          gh run download "$RUN_ID" --pattern 'ParaNAM-*' --dir "$RUNNER_TEMP/packages"
+          gh api "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts" > "$RUNNER_TEMP/artifacts.json"
+      - name: Attach installers and publish the private preview
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          release = json.loads((root / 'release.json').read_text())
+          artifacts = {a['name']: a['id'] for a in json.loads((root / 'artifacts.json').read_text())['artifacts']}
+          files = sorted(p for p in (root / 'packages').rglob('*') if p.is_file())
+          assert len(files) >= 7, 'Expected Windows CPU/CUDA, both Macs, and Linux CPU/CUDA packages'
+          links = []
+          for path in files:
+              if path.stat().st_size >= 2**31:
+                  artifact = artifacts[path.parent.name]
+                  links.append(f"- [{path.name}](https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['RUN_ID']}/artifacts/{artifact})")
+                  continue
+              subprocess.run(['gh', 'release', 'upload', release['tag_name'], str(path), '--clobber'], check=True)
+          body = release['body'] or ''
+          if links:
+              body += '\n\nAdditional large CUDA installers (build downloads retained for 14 days):\n' + '\n'.join(links) + '\n'
+          notes = root / 'release-notes.md'
+          notes.write_text(body)
+          subprocess.run(['gh', 'release', 'edit', release['tag_name'], '--notes-file', str(notes), '--draft=false'], check=True)
+          print('Published:', release['tag_name'])
+          PY
