@@ -58,7 +58,7 @@ jobs:
           release = json.loads((root / 'release.json').read_text())
           artifacts = {a['name']: a['id'] for a in json.loads((root / 'artifacts.json').read_text())['artifacts']}
           files = sorted(p for p in (root / 'packages').rglob('*') if p.is_file())
-          assert len(files) >= 7, 'Expected Windows CPU/CUDA, both Macs, and Linux CPU/CUDA packages'
+          assert len(files) >= 5, 'Expected unified Windows, both Macs, and Linux packages'
           links = []
           for path in files:
               if path.stat().st_size >= 2**31:

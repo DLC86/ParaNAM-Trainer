@@ -16,6 +16,45 @@ def main():
     if sys.platform == "win32":
         os.environ.setdefault("SD_ENABLE_ASIO", "1")
     args = sys.argv[1:]
+    if args and args[0] == "--gpu-probe":
+        from .gpu_runtime import write_probe
+
+        return write_probe(args[1])
+    if args and args[0] == "--install-gpu":
+        from .gpu_runtime import install
+
+        result = Path(args[1]) if len(args) > 1 else None
+        try:
+            data = install()
+            if result:
+                import json
+
+                result.write_text(json.dumps({**data, "ok": True}), encoding="utf-8")
+            return 0
+        except Exception as error:
+            if result:
+                import json
+                import traceback
+
+                result.write_text(
+                    json.dumps(
+                        dict(
+                            ok=False, error=str(error), traceback=traceback.format_exc()
+                        )
+                    ),
+                    encoding="utf-8",
+                )
+            return 1
+    if args and args[0] == "--configure-installation":
+        from . import gpu_runtime
+
+        if "--with-nvidia" not in args:
+            gpu_runtime.remember_choice()
+            return 0
+        from .gpu_setup import show_setup
+
+        show_setup(selected=True)
+        return 0
     if args and args[0] == "--train-worker":
         import contextlib
         import traceback
@@ -24,6 +63,12 @@ def main():
         with (job / "worker.log").open("a", encoding="utf-8", buffering=1) as log:
             with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
                 try:
+                    if "--gpu-runtime" in args:
+                        from . import gpu_runtime
+
+                        gpu_runtime.activate()
+                        if not gpu_runtime.can_compute()[0]:
+                            os.environ["PARANAM_FORCE_CPU"] = "1"
                     from .training import run_job
 
                     run_job(job)
@@ -106,6 +151,14 @@ def main():
         sys.stderr = sys.stdout
     try:
         from .wizard import WizardWindow
+        from . import gpu_runtime
+
+        if sys.platform != "darwin" and not gpu_runtime.choice_made():
+            from .gpu_setup import show_setup
+
+            splash.hide()
+            show_setup()
+            splash.show()
 
         window = WizardWindow()
         window.show()

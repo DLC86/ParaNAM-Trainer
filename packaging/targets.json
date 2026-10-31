@@ -5,15 +5,7 @@
     "torch": "2.10.0",
     "index": "https://download.pytorch.org/whl/cpu",
     "numpy": "numpy>=1.26,<3",
-    "id": "windows-cpu"
-  },
-  {
-    "os": "windows-latest",
-    "flavor": "CUDA",
-    "torch": "2.10.0",
-    "index": "https://download.pytorch.org/whl/cu128",
-    "numpy": "numpy>=1.26,<3",
-    "id": "windows-cuda"
+    "id": "windows"
   },
   {
     "os": "ubuntu-22.04",
@@ -21,15 +13,7 @@
     "torch": "2.10.0",
     "index": "https://download.pytorch.org/whl/cpu",
     "numpy": "numpy>=1.26,<3",
-    "id": "linux-cpu"
-  },
-  {
-    "os": "ubuntu-22.04",
-    "flavor": "CUDA",
-    "torch": "2.10.0",
-    "index": "https://download.pytorch.org/whl/cu128",
-    "numpy": "numpy>=1.26,<3",
-    "id": "linux-cuda"
+    "id": "linux"
   },
   {
     "os": "macos-15",

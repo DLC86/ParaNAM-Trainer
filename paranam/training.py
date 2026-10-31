@@ -91,7 +91,13 @@ def make_job(workspace, resume=False):
                 "At least one validation capture is required to report a meaningful ESR."
             )
         # Every member and every final export uses the SAME nested Full/Lite architecture.
-        model = build_hyper_a2_model_config(workspace.project)
+        is_static = workspace.project.capture_type == "static"
+        if is_static:
+            from .static_training import model_config
+
+            model = model_config(workspace.project, prefs["static_size"])
+        else:
+            model = build_hyper_a2_model_config(workspace.project)
         learning = build_hyper_learning_config(workspace.project)
         learning["export_checkpoints"] = False
         learning["torch_compile"] = {
@@ -114,6 +120,8 @@ def make_job(workspace, resume=False):
             num_sanity_val_steps=0,
         )
         members = prefs["ensemble_members"] if prefs["mode"] == "active_learning" else 1
+        if is_static:
+            members = len(workspace.static_groups())
         atomic_write_json(
             job / "spec.json",
             {
@@ -125,6 +133,9 @@ def make_job(workspace, resume=False):
                 "model": model,
                 "learning": learning,
                 "preferences": prefs,
+                "static_captures": (
+                    list(prefs["static_captures"]) if is_static else None
+                ),
             },
         )
         atomic_write_json(
@@ -148,6 +159,12 @@ def make_job(workspace, resume=False):
 
 def build_progress_callback(job, spec, member, shared):
     from pytorch_lightning.callbacks import Callback
+
+    label = (
+        f"A2 {spec['preferences']['static_size'].title()}: {spec['static_captures'][member]['name']}"
+        if spec.get("static_captures")
+        else "HyperA2 Full + Lite"
+    )
 
     class ProgressCallback(Callback):
         def __init__(self):
@@ -211,9 +228,7 @@ def build_progress_callback(job, spec, member, shared):
             return read_json(job / "command.json", {}).get("action")
 
         def on_train_start(self, trainer, module):
-            self.write(
-                device=str(module.device), message="Training HyperA2 Full + Lite"
-            )
+            self.write(device=str(module.device), message="Training " + label)
 
         def on_train_epoch_start(self, trainer, module):
             self.epoch_started = time.monotonic()
@@ -236,7 +251,7 @@ def build_progress_callback(job, spec, member, shared):
                     message=(
                         "Pause requested — finishing this epoch safely"
                         if self.action() == "pause"
-                        else "Training HyperA2 Full + Lite"
+                        else "Training " + label
                     ),
                 )
 
@@ -400,6 +415,12 @@ def run_job(job):
         os.chdir(workspace.directory)
         torch.set_num_threads(max(1, min(8, (os.cpu_count() or 2) - 1)))
         try:
+            if spec.get("static_captures") is not None:
+                from .static_training import run_batch
+
+                return run_batch(
+                    job, spec, workspace, shared, elapsed_base, clock_start
+                )
             completed = shared.get("completed_members", [])
             for member in range(spec["members"]):
                 if member in completed:
@@ -408,6 +429,11 @@ def run_job(job):
                 output = job / f"member-{member}"
                 output.mkdir(exist_ok=True)
                 learning = json.loads(json.dumps(spec["learning"]))
+                if (
+                    spec["preferences"]["device"] == "auto"
+                    and os.environ.get("PARANAM_FORCE_CPU") == "1"
+                ):
+                    learning["trainer"]["accelerator"] = "cpu"
                 checkpoint = job / f"resume-{member}.ckpt"
                 if checkpoint.exists():
                     learning["trainer_fit_kwargs"]["ckpt_path"] = str(checkpoint)

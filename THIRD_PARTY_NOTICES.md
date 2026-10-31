@@ -17,8 +17,8 @@ training-inputs-v1 release. Source URLs, sample counts and SHA-256 hashes are
 recorded in paranam/assets/manifest.json. They are bundled for offline capture,
 credited to their respective authors, and are not synthetic substitutes.
 
-CUDA editions include the redistributable NVIDIA runtime libraries supplied by
-the official PyTorch wheels and their license notices. No CUDA toolkit or local
+Optional NVIDIA acceleration downloads the redistributable runtime libraries supplied
+by official PyTorch/NVIDIA wheels and retains their complete license notices. No CUDA toolkit or local
 compiler is used. An NVIDIA driver compatible with that wheel is provided by the
 operating system/user's normal graphics driver installation, not this application.
 

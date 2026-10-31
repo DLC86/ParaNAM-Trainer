@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFileDialog,
     QInputDialog,
+    QLineEdit,
     QMessageBox,
     QTableWidget,
     QTableWidgetItem,
@@ -56,7 +57,14 @@ from nam.capture.planner import corner_capture_count
 from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write_json
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
-from .widgets import THEME, RoutingDiagram, ControlScene, ControlDialog, load_font
+from .widgets import (
+    THEME,
+    RoutingDiagram,
+    ControlScene,
+    ControlDialog,
+    MetadataEditor,
+    load_font,
+)
 from . import training
 
 
@@ -114,6 +122,8 @@ class WizardWindow(QMainWindow):
         self._log_content = ""
         self._devices = []
         self._capture_entries = []
+        self._static_edit_id = None
+        self._capture_table_kind = None
         self._build()
         self._refresh_recent()
         self.refresh_devices()
@@ -134,7 +144,7 @@ class WizardWindow(QMainWindow):
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.1", "eyebrow"))
+        rail.addWidget(label("TRAINER  /  0.2", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -153,7 +163,8 @@ class WizardWindow(QMainWindow):
         rail.addStretch()
         rail.addWidget(label("ONE CAPTURE SET.\nA WHOLE RANGE OF TONE.", "eyebrow"))
         rail.addSpacing(12)
-        rail.addWidget(label("HyperA2\nFull + Lite, together.", "muted"))
+        self.model_badge = label("HyperA2\nFull + Lite, together.", "muted")
+        rail.addWidget(self.model_badge)
         root.addWidget(sidebar)
         right = QWidget()
         content = QVBoxLayout(right)
@@ -307,6 +318,18 @@ class WizardWindow(QMainWindow):
                 "muted",
             )
         )
+        kind_card, kind_box = card("Model type")
+        self.capture_kind = QComboBox()
+        self.capture_kind.addItem("Parametric — HyperA2 Full + Lite", "parametric")
+        self.capture_kind.addItem("Static batch — A2", "static")
+        kind_box.addWidget(self.capture_kind)
+        self.static_size = QComboBox()
+        self.static_size.addItem("A2 Full (default)", "full")
+        self.static_size.addItem("A2 Lite", "lite")
+        kind_box.addWidget(self.static_size)
+        layout.addWidget(kind_card)
+        self.capture_kind.currentIndexChanged.connect(self.save_preferences)
+        self.static_size.currentIndexChanged.connect(self.save_preferences)
         self.control_card, box = card("Rig controls")
         self.control_table = QTableWidget(0, 4)
         self.control_table.setHorizontalHeaderLabels(
@@ -357,6 +380,13 @@ class WizardWindow(QMainWindow):
         )
         self.signal_mode.currentIndexChanged.connect(self.save_preferences)
         layout.addWidget(self.signal_card)
+        self.metadata_card, metadata_box = card(
+            "Model metadata / defaults for static captures"
+        )
+        self.metadata_editor = MetadataEditor()
+        self.metadata_editor.changed.connect(self.save_metadata)
+        metadata_box.addWidget(self.metadata_editor)
+        layout.addWidget(self.metadata_card)
         self.plan_card, box = card("Capture plan & learning method")
         form = QFormLayout()
         self.mode = QComboBox()
@@ -365,10 +395,11 @@ class WizardWindow(QMainWindow):
             "Active learning — suggest informative captures in rounds",
             "active_learning",
         )
+        self.plan_form = form
         form.addRow("Training method", self.mode)
         form.addRow(
             "Model format",
-            label("HyperA2 · Full + Lite nested in one .nam file", "eyebrow"),
+            self._model_format_label(),
         )
         self.n_train, self.n_validation = QSpinBox(), QSpinBox()
         self.n_train.setRange(1, 1000000)
@@ -418,6 +449,24 @@ class WizardWindow(QMainWindow):
         layout.addWidget(label("Set. Record. Repeat.", "title"))
         self.capture_summary = label("Generate a capture plan to begin.", "muted")
         layout.addWidget(self.capture_summary)
+        self.static_card, static_box = card("Static capture")
+        self.static_name = QLineEdit()
+        self.static_name.setPlaceholderText("Name for this A2 model")
+        self.static_name.editingFinished.connect(self.rename_static)
+        static_box.addWidget(self.static_name)
+        static_box.addWidget(button("Add static capture…", self.add_static))
+        self.static_metadata = MetadataEditor(include_name=False)
+        self.static_metadata.changed.connect(self.save_static_metadata)
+        self.static_metadata.setVisible(False)
+        self.metadata_toggle = button(
+            "Edit metadata for this capture…",
+            lambda: self.static_metadata.setVisible(
+                not self.static_metadata.isVisible()
+            ),
+        )
+        static_box.addWidget(self.metadata_toggle)
+        static_box.addWidget(self.static_metadata)
+        layout.addWidget(self.static_card)
         self.scene = ControlScene()
         layout.addWidget(self.scene)
         row = QHBoxLayout()
@@ -436,13 +485,28 @@ class WizardWindow(QMainWindow):
             "muted",
         )
         layout.addWidget(self.capture_status)
-        self.capture_table = QTableWidget(0, 4)
+        self.capture_table = QTableWidget(0, 6)
         self.capture_table.setHorizontalHeaderLabels(
-            ["Split", "Control settings", "Status", "Quality"]
+            [
+                "Split",
+                "Control settings",
+                "Status",
+                "Latency",
+                "Peak (dBFS)",
+                "Warnings",
+            ]
         )
-        self.capture_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
+        header = self.capture_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(55)
+        for column, width in enumerate((85, 310, 100, 240, 110, 380)):
+            self.capture_table.setColumnWidth(column, width)
+        saved = self.settings.value("capture_columns")
+        if saved is not None:
+            header.restoreState(saved)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.sectionResized.connect(self.save_capture_columns)
         self.capture_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -457,7 +521,8 @@ class WizardWindow(QMainWindow):
 
     def _training(self, layout):
         layout.addWidget(label("TURN CAPTURES INTO AN INSTRUMENT", "eyebrow"))
-        layout.addWidget(label("Train your HyperA2.", "title"))
+        self.training_title = label("Train your HyperA2.", "title")
+        layout.addWidget(self.training_title)
         self.training_status = label(
             "Complete the capture plan to unlock training.", "muted"
         )
@@ -486,6 +551,9 @@ class WizardWindow(QMainWindow):
             )
         )
         layout.addWidget(self.training_settings)
+        if sys.platform != "darwin":
+            self.gpu_setup_button = button("NVIDIA GPU support…", self.configure_gpu)
+            box.addWidget(self.gpu_setup_button)
         grid = QGridLayout()
         self.metrics = {}
         for index, (name, text) in enumerate(
@@ -640,6 +708,13 @@ class WizardWindow(QMainWindow):
         self._loading = True
         try:
             prefs = workspace.preferences
+            self.capture_kind.setCurrentIndex(
+                max(0, self.capture_kind.findData(prefs["capture_type"]))
+            )
+            self.static_size.setCurrentIndex(
+                max(0, self.static_size.findData(prefs["static_size"]))
+            )
+            self.metadata_editor.set_metadata(workspace.project.user_metadata)
             for field, key in (
                 (self.n_train, "n_train"),
                 (self.n_validation, "n_validation"),
@@ -701,6 +776,7 @@ class WizardWindow(QMainWindow):
                 field.setValue(12 if value is None else value)
         finally:
             self._loading = False
+        self.save_preferences()
         self.refresh_controls()
         self.refresh_captures()
         self._diagram()
@@ -875,6 +951,7 @@ class WizardWindow(QMainWindow):
         self.worker.deleteLater()
         self.worker = None
         self.cancel_token = None
+        self.refresh_captures()
         self.update_enabled()
         if self._close_after_pause:
             self.close()
@@ -978,6 +1055,12 @@ class WizardWindow(QMainWindow):
     def refresh_recommendation(self, autofill=False):
         if not self.workspace:
             return
+        if self.capture_kind.currentData() == "static":
+            count = len(self.workspace.preferences["static_captures"])
+            self.recommendation.setText(
+                f"{count} named A2 model(s). Each records its own training signal and the fixed validation signal. Add and name captures in the next step."
+            )
+            return
         controls = [control_from_dict(c) for c in self.workspace.draft_controls]
         if not controls:
             self.recommendation.setText("Add at least one control to build a plan.")
@@ -1009,14 +1092,48 @@ class WizardWindow(QMainWindow):
         ):
             prefs[key] = field.value()
         prefs.update(
-            mode=self.mode.currentData(),
+            capture_type=self.capture_kind.currentData(),
+            static_size=self.static_size.currentData(),
+            mode=(
+                "normal"
+                if self.capture_kind.currentData() == "static"
+                else self.mode.currentData()
+            ),
             device=self.accelerator.currentData(),
             corners=self.corners.isChecked(),
             input_mode=self.signal_mode.currentData(),
         )
-        self.rounds.setEnabled(prefs["mode"] == "active_learning")
+        static = prefs["capture_type"] == "static"
+        self.model_badge.setText(
+            "A2 static batch" if static else "HyperA2\nFull + Lite, together."
+        )
+        self.control_card.setVisible(not static)
+        self.static_size.setVisible(static)
+        self.model_format.setText(
+            f"A2 {prefs['static_size'].title()} · one standard .nam per named capture"
+            if static
+            else "HyperA2 · Full + Lite nested in one .nam file"
+        )
+        self.mode.setEnabled(not static)
+        for widget in (self.n_train, self.n_validation, self.seed, self.corners):
+            widget.setEnabled(not static)
+        self.training_title.setText(
+            "Train your A2 batch." if static else "Train your HyperA2."
+        )
+        for widget in (
+            self.mode,
+            self.n_train,
+            self.n_validation,
+            self.seed,
+            self.corners,
+            self.rounds,
+            self.additions,
+        ):
+            self.plan_form.setRowVisible(widget, not static)
+        self.rounds.setEnabled(not static and prefs["mode"] == "active_learning")
         self.additions.setEnabled(prefs["mode"] == "active_learning")
         self.workspace.save()
+        self.refresh_recommendation()
         self.custom_button.setEnabled(prefs["input_mode"] == "custom")
 
     def apply_plan(self):
@@ -1041,55 +1158,200 @@ class WizardWindow(QMainWindow):
             self.notify_error(error)
             return False
 
+    def _model_format_label(self):
+        self.model_format = label(
+            "HyperA2 · Full + Lite nested in one .nam file", "eyebrow"
+        )
+        return self.model_format
+
+    def save_metadata(self, metadata):
+        if self.workspace and not self._loading and not self.busy():
+            self.workspace.project.user_metadata = dict(metadata)
+            self.workspace.save()
+
+    def save_static_metadata(self, metadata):
+        if (
+            self.workspace
+            and self._static_edit_id
+            and not self._loading
+            and not self.busy()
+        ):
+            self.workspace.set_static_metadata(self._static_edit_id, metadata)
+
+    def add_static(self):
+        if not self.workspace or self.busy():
+            return
+        name, ok = QInputDialog.getText(
+            self, "Add static capture", "Model/capture name"
+        )
+        if ok:
+            try:
+                capture = self.workspace.add_static_capture(name)
+                self.refresh_captures()
+                self.select_static_id(capture["id"])
+            except Exception as error:
+                self.notify_error(error)
+
+    def rename_static(self):
+        if self.workspace and self._static_edit_id and not self.busy():
+            try:
+                capture_id = self._static_edit_id
+                self.workspace.rename_static_capture(
+                    capture_id, self.static_name.text()
+                )
+                self.refresh_captures()
+                self.select_static_id(capture_id)
+            except Exception as error:
+                self.notify_error(error)
+
+    def select_static_id(self, capture_id):
+        row = next(
+            (
+                i
+                for i, e in enumerate(self._capture_entries)
+                if e.capture_id == capture_id
+            ),
+            None,
+        )
+        if row is not None:
+            self.capture_table.selectRow(row)
+            self.select_capture()
+
+    def save_capture_columns(self, *_):
+        if self._capture_table_kind:
+            self.settings.setValue(
+                "capture_columns/" + self._capture_table_kind,
+                self.capture_table.horizontalHeader().saveState(),
+            )
+
+    @staticmethod
+    def _capture_metrics(entry):
+        qa = entry.qa
+        warnings = [
+            m
+            for m in (qa.messages if qa else [])
+            if "loopback and amp-return" not in m.lower()
+            and not (m.startswith("Delay ") and "project's typical" in m)
+        ]
+        delay = (
+            entry.delay
+            if entry.delay is not None
+            else (qa.loopback_delay if qa else None)
+        )
+        latency = "—" if delay is None else f"{delay} samples"
+        if qa and (qa.subsample_shift is not None or qa.loopback_delay is not None):
+            latency += f" · subsample {(qa.subsample_shift or 0):+.3f}"
+        peak = f"{qa.peak:.1f}" if qa and qa.peak is not None else "—"
+        return latency, peak, " / ".join(warnings) or "—"
+
     def refresh_captures(self):
         if not self.workspace:
             return
         from .capture_order import order_captures
 
-        entries = order_captures(
-            self.workspace.project.entries, self.workspace.project.control_specs()
+        project = self.workspace.project
+        static = project.capture_type == "static"
+        self.scene.setVisible(not static)
+        self.static_card.setVisible(static)
+        self.rig_ready.setText(
+            "My rig is set for this named capture"
+            if static
+            else "My rig matches the control positions shown above"
         )
+        if static:
+            groups = self.workspace.static_groups()
+            entries = [
+                next((e for e in group if e.status != "captured"), group[0])
+                for group in groups
+            ]
+            headers = ["Name", "Status", "Latency", "Peak (dBFS)", "Warnings"]
+        else:
+            entries = order_captures(project.entries, project.control_specs())
+            headers = [
+                "Split",
+                "Control settings",
+                "Status",
+                "Latency",
+                "Peak (dBFS)",
+                "Warnings",
+            ]
         self._capture_entries = entries
         self.capture_table.blockSignals(True)
+        header = self.capture_table.horizontalHeader()
+        header.blockSignals(True)
+        kind = "static" if static else "parametric"
+        changed_kind = self._capture_table_kind != kind
+        self._capture_table_kind = kind
+        self.capture_table.setColumnCount(len(headers))
+        self.capture_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Interactive
+        )
+        self.capture_table.setHorizontalHeaderLabels(headers)
+        if changed_kind:
+            sizes = (
+                (210, 100, 360, 160, 400) if static else (85, 310, 100, 240, 110, 380)
+            )
+            for column, width in enumerate(sizes):
+                header.resizeSection(column, width)
+            saved = self.settings.value("capture_columns/" + kind)
+            if saved is not None:
+                header.restoreState(saved)
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.blockSignals(False)
         self.capture_table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
-            params = ", ".join(
-                (
-                    f"{name}={value:g}"
-                    if isinstance(value, (float, int))
-                    else f"{name}={value}"
+            if static:
+                group = groups[row]
+                metrics = [(e.split.title(), self._capture_metrics(e)) for e in group]
+                columns = [
+                    entry.capture_name or "Capture",
+                    (
+                        "Captured"
+                        if all(e.status == "captured" for e in group)
+                        else "Pending"
+                    ),
+                ]
+                columns += [
+                    " | ".join(
+                        f"{split}: {values[i]}"
+                        for split, values in metrics
+                        if values[i] != "—"
+                    )
+                    or "—"
+                    for i in range(3)
+                ]
+            else:
+                params = ", ".join(
+                    (
+                        f"{name}={value:g}"
+                        if isinstance(value, (float, int))
+                        else f"{name}={value}"
+                    )
+                    for name, value in entry.params.items()
                 )
-                for name, value in entry.params.items()
-            )
-            qa = (
-                " / ".join(entry.qa.messages)
-                if entry.qa and entry.qa.messages
-                else (
-                    f"{entry.qa.peak:.1f} dBFS"
-                    if entry.qa and entry.qa.peak is not None
-                    else "—"
-                )
-            )
-            for col, text in enumerate(
-                (entry.split.title(), params, entry.status.title(), qa)
-            ):
+                columns = [
+                    entry.split.title(),
+                    params,
+                    entry.status.title(),
+                    *self._capture_metrics(entry),
+                ]
+            for col, text in enumerate(columns):
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
-                if col == 2 and entry.status == "captured":
-                    item.setForeground(QColor("#65c9bf"))
                 self.capture_table.setItem(row, col, item)
         self.capture_table.blockSignals(False)
-        completed = sum(e.status == "captured" for e in entries)
+        completed = sum(e.status == "captured" for e in project.entries)
         self.capture_summary.setText(
-            f"{completed} of {len(entries)} captured  ·  {len(entries) - completed} remaining.\n"
-            "Ordered to change fewer controls and turn knobs less. Set the rig as shown."
+            f"{len(entries)} static model(s) · {completed} of {len(project.entries)} signals captured. Each model records training and validation without changing the rig between them."
+            if static
+            else f"{completed} of {len(entries)} captured · {len(entries) - completed} remaining. Ordered to change fewer controls and turn knobs less."
         )
         if entries:
-            index = next(
-                (i for i, entry in enumerate(entries) if entry.status != "captured"),
+            row = next(
+                (i for i, e in enumerate(entries) if e.status != "captured"),
                 len(entries) - 1,
             )
-            self.capture_table.selectRow(index)
+            self.capture_table.selectRow(row)
             self.select_capture()
         self.rig_ready.setChecked(False)
         self.update_enabled()
@@ -1099,10 +1361,25 @@ class WizardWindow(QMainWindow):
             self._capture_entries
         ):
             entry = self._capture_entries[self.capture_table.currentRow()]
-            self.scene.set_controls(
-                self.workspace.project.control_specs(), entry.params
-            )
+            if self.workspace.project.capture_type == "static":
+                self._static_edit_id = entry.capture_id
+                self.static_name.setText(entry.capture_name or "")
+                self.static_metadata.set_metadata(
+                    {**self.workspace.project.user_metadata, **entry.user_metadata}
+                )
+            else:
+                self._static_edit_id = None
+                self.scene.set_controls(
+                    self.workspace.project.control_specs(), entry.params
+                )
             self.rig_ready.setChecked(False)
+            if self.workspace.project.capture_type == "static":
+                self.record_button.setText(
+                    "Re-record this capture"
+                    if entry.status == "captured"
+                    else "Record training + validation"
+                )
+                return
             self.record_button.setText(
                 "Re-record this setting"
                 if entry.status == "captured"
@@ -1125,13 +1402,24 @@ class WizardWindow(QMainWindow):
             if problem:
                 raise ValueError(problem)
             entry = self._capture_entries[index]
-            if entry.status == "captured":
+            static = self.workspace.project.capture_type == "static"
+            group = (
+                [
+                    e
+                    for e in self.workspace.project.entries
+                    if e.capture_id == entry.capture_id
+                ]
+                if static
+                else [entry]
+            )
+            captures = [e for e in group if e.status != "captured"] or group
+            if any(e.status == "captured" for e in captures):
                 backup = (
                     self.workspace.directory
                     / "history"
                     / ("recapture-" + str(time.time_ns()))
                 )
-                for relative in (entry.y_path,):
+                for relative in (e.y_path for e in captures):
                     source = self.workspace.directory / relative
                     if source.exists():
                         target = backup / relative
@@ -1142,23 +1430,39 @@ class WizardWindow(QMainWindow):
                 "Recording… Timing is checked before the capture signal is played."
             )
             self.capture_progress.setValue(0)
-            self.run_audio(
-                lambda progress, cancel: session.capture_entry(
-                    entry, progress=progress, cancel=cancel
-                ),
-                self._capture_done,
-            )
+
+            def capture_signals(progress, cancel):
+                results = []
+                for offset, capture in enumerate(captures):
+                    results.append(
+                        session.capture_entry(
+                            capture,
+                            progress=(
+                                (
+                                    lambda value, i=offset: progress(
+                                        (i + value) / len(captures)
+                                    )
+                                )
+                                if progress
+                                else None
+                            ),
+                            cancel=cancel,
+                        )
+                    )
+                return results if static else results[0]
+
+            self.run_audio(capture_signals, self._capture_done)
         except Exception as error:
             self.notify_error(error)
 
     def _capture_done(self, qa):
+        reports = qa if isinstance(qa, list) else [qa]
         self.capture_progress.setValue(100)
-        self.capture_status.setText(
-            "Capture saved" + (f" · {qa.peak:.1f} dBFS" if qa.peak is not None else "")
-        )
+        self.capture_status.setText(f"Saved {len(reports)} signal recording(s)")
         self.refresh_captures()
-        if qa.messages:
-            QMessageBox.warning(self, "Capture quality check", "\n".join(qa.messages))
+        messages = [message for report in reports for message in report.messages]
+        if messages:
+            QMessageBox.warning(self, "Capture quality check", "\n".join(messages))
 
     def cancel_capture(self):
         if self.cancel_token:
@@ -1221,12 +1525,23 @@ class WizardWindow(QMainWindow):
             process.errorOccurred.connect(self._process_error)
             self.process = process
             args = ["--train-worker", str(self.job)]
+            from . import gpu_runtime
+
+            if self.workspace.preferences["device"] != "cpu" and gpu_runtime.ready():
+                args.append("--gpu-runtime")
             if not getattr(sys, "frozen", False):
                 args = ["-m", "paranam"] + args
             process.start(sys.executable, args)
             self.update_enabled()
         except Exception as error:
             self.notify_error(error)
+
+    def configure_gpu(self):
+        if self.busy():
+            return
+        from .gpu_setup import show_setup
+
+        show_setup(parent=self)
 
     def pause_training(self):
         if self.job and self.process:
@@ -1347,6 +1662,10 @@ class WizardWindow(QMainWindow):
         self.rig_ready.setEnabled(present and not active)
         self.cancel_button.setEnabled(self.worker is not None)
         self.capture_table.setEnabled(not active)
+        self.metadata_card.setEnabled(not active)
+        self.static_card.setEnabled(not active)
+        if hasattr(self, "gpu_setup_button"):
+            self.gpu_setup_button.setEnabled(not active)
         ready = present and self.workspace.training_ready()
         self.next_button.setEnabled(
             present and not active and (self.pages.currentIndex() != 2 or ready)

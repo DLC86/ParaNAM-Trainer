@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from nam.capture.params import KnobSpec, SwitchSpec, validate_knobs
 from nam.capture.project import (
     AudioSettingsModel,
     CaptureProject,
+    CaptureEntryModel,
     KnobModel,
     atomic_write_json,
     add_corner_captures,
@@ -22,6 +24,8 @@ from nam.capture.project import (
 )
 
 DEFAULTS = {
+    "capture_type": "parametric",
+    "static_size": "full",
     "mode": "normal",
     "epochs": 200,
     "batch_size": 4,
@@ -58,6 +62,23 @@ class Workspace:
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
+        if "capture_type" not in stored:
+            self.preferences["capture_type"] = self.project.capture_type
+        if not self.preferences.get("static_captures"):
+            groups = {}
+            for entry in self.project.entries:
+                if entry.capture_id:
+                    groups.setdefault(
+                        entry.capture_id,
+                        {
+                            "id": entry.capture_id,
+                            "name": entry.capture_name or "Capture",
+                            "metadata": dict(entry.user_metadata),
+                        },
+                    )
+            self.preferences["static_captures"] = list(groups.values()) or [
+                {"id": uuid.uuid4().hex, "name": "Capture 1"}
+            ]
         if not stored and self.project.entries:
             self.preferences.update(
                 n_train=self.project.n_train_lhs,
@@ -106,7 +127,72 @@ class Workspace:
         save_project(self.project, self.directory)
 
     def controls(self):
+        if self.preferences["capture_type"] == "static":
+            return ()
         return validate_knobs([control_from_dict(c) for c in self.draft_controls])
+
+    def static_groups(self):
+        groups = {}
+        for entry in self.project.entries:
+            if entry.capture_id:
+                groups.setdefault(entry.capture_id, []).append(entry)
+        return list(groups.values())
+
+    def add_static_capture(self, name):
+        name = str(name).strip()
+        if not name or any(
+            c["name"].casefold() == name.casefold()
+            for c in self.preferences["static_captures"]
+        ):
+            raise ValueError("Use a non-empty, unique capture name")
+        capture = {"id": uuid.uuid4().hex, "name": name}
+        self.preferences["static_captures"].append(capture)
+        if self.project.capture_type == "static":
+            self.project.entries.extend(
+                self._static_pair(capture, len(self.project.entries))
+            )
+            self.project.n_train_lhs = len(self.static_groups())
+        self.save()
+        return capture
+
+    @staticmethod
+    def _static_pair(capture, offset):
+        return [
+            CaptureEntryModel(
+                index=offset + i,
+                split=split,
+                params={},
+                capture_id=capture["id"],
+                capture_name=capture["name"],
+                user_metadata=dict(capture.get("metadata", {})),
+                y_path=f"captures/static-{capture['id']}-{split}.wav",
+            )
+            for i, split in enumerate(("train", "validation"))
+        ]
+
+    def rename_static_capture(self, capture_id, name):
+        name = str(name).strip()
+        if not name or any(
+            c["id"] != capture_id and c["name"].casefold() == name.casefold()
+            for c in self.preferences["static_captures"]
+        ):
+            raise ValueError("Use a non-empty, unique capture name")
+        for capture in self.preferences["static_captures"]:
+            if capture["id"] == capture_id:
+                capture["name"] = name
+        for entry in self.project.entries:
+            if entry.capture_id == capture_id:
+                entry.capture_name = name
+        self.save()
+
+    def set_static_metadata(self, capture_id, metadata):
+        for capture in self.preferences["static_captures"]:
+            if capture["id"] == capture_id:
+                capture["metadata"] = dict(metadata)
+        for entry in self.project.entries:
+            if entry.capture_id == capture_id:
+                entry.user_metadata = dict(metadata)
+        self.save()
 
     def desired_train_input(self):
         if self.preferences["input_mode"] == "standard":
@@ -119,6 +205,15 @@ class Workspace:
         return relative
 
     def plan_changed(self):
+        if self.preferences["capture_type"] != self.project.capture_type:
+            return True
+        if self.preferences["capture_type"] == "static":
+            actual = [g[0].capture_id for g in self.static_groups()]
+            return (
+                self.desired_train_input() != self.project.train_input
+                or not self.validation_matches()
+                or actual != [c["id"] for c in self.preferences["static_captures"]]
+            )
         if not self.project.entries:
             return True
         return (
@@ -171,6 +266,33 @@ class Workspace:
     def generate_plan(self):
         controls = self.controls()
         prefs = self.preferences
+        if prefs["capture_type"] == "static":
+            replacement = CaptureProject(
+                name=self.project.name,
+                knobs=[],
+                capture_type="static",
+                user_metadata=dict(self.project.user_metadata),
+                train_input=self.desired_train_input(),
+                validation_input="input_validation.wav",
+                sample_rate=self.project.sample_rate,
+                audio=self.project.audio.model_copy(deep=True),
+                input_level_dbu=self.project.input_level_dbu,
+                output_level_dbu=self.project.output_level_dbu,
+                train_window=self.project.train_window.model_copy(deep=True),
+                validation_window=self.project.validation_window.model_copy(deep=True),
+                n_train_lhs=len(prefs["static_captures"]),
+            )
+            for capture in prefs["static_captures"]:
+                replacement.entries.extend(
+                    self._static_pair(capture, len(replacement.entries))
+                )
+            self.archive_captures()
+            from .signals import install_signals
+
+            install_signals(self.directory)
+            self.project = replacement
+            self.save()
+            return replacement
         switches_only = all(isinstance(c, SwitchSpec) for c in controls)
         validation_count = prefs["n_validation"]
         if validation_count < 1:
@@ -209,6 +331,7 @@ class Workspace:
                 for e in planned
             )
         replacement.audio = self.project.audio.model_copy(deep=True)
+        replacement.user_metadata = dict(self.project.user_metadata)
         replacement.sample_rate = self.project.sample_rate
         replacement.input_level_dbu = self.project.input_level_dbu
         replacement.output_level_dbu = self.project.output_level_dbu
@@ -242,7 +365,18 @@ class Workspace:
         if not self.project.entries or not self.validation_matches():
             return False
         return all(
-            e.status == "captured" and (self.directory / e.y_path).is_file()
+            e.status == "captured"
+            and (self.directory / e.y_path).is_file()
+            and (
+                e.qa is None
+                or (
+                    e.qa.end_timing_detected is not False
+                    and (
+                        e.qa.clock_drift_samples is None
+                        or abs(e.qa.clock_drift_samples) < 0.1 - 1e-9
+                    )
+                )
+            )
             for e in self.project.entries
         )
 
@@ -251,6 +385,18 @@ class Workspace:
         from nam.capture.export import build_data_config
 
         data = {
+            "capture_type": self.project.capture_type,
+            "static_size": (
+                self.preferences["static_size"]
+                if self.project.capture_type == "static"
+                else None
+            ),
+            "static_batch": (
+                self.preferences["static_captures"]
+                if self.project.capture_type == "static"
+                else None
+            ),
+            "metadata": self.project.user_metadata,
             "controls": [c.to_dict() for c in self.project.control_specs()],
             "data": build_data_config(self.project),
             "calibration": [

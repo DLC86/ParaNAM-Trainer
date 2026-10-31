@@ -38,6 +38,7 @@ import json as _json
 import math as _math
 import os as _os
 import tempfile as _tempfile
+import time as _time
 from dataclasses import dataclass as _dataclass
 from pathlib import Path as _Path
 from typing import Callable as _Callable
@@ -73,6 +74,10 @@ from .project import save_project as _save_project
 CLIPPING_THRESHOLD = 0.999
 # Matches the ensemble-disagreement threshold inside the wrapped NAM calibration.
 DELAY_DISAGREEMENT_SAMPLES = 10
+# A fixed per-capture offset can be corrected; changing latency during a capture
+# cannot. The peak estimator resolves about 0.008 samples, so this allows a small
+# measurement-noise margin while rejecting relevant sub-sample clock drift.
+MAX_CAPTURE_DRIFT_SAMPLES = 0.1
 # When a clean loopback is used to measure the delay, the amp-return blip is still
 # detected as a cross-check. On a correctly patched rig the two travel the same route and
 # agree to within a sample; a larger gap means a mispatched loopback or a genuine routing
@@ -524,7 +529,7 @@ def build_playback(
     """
     rendered = _BlipPreamble(sample_rate)
     tail = _np.zeros(int(TAIL_SECONDS * sample_rate), dtype=_np.float32)
-    playback = _np.concatenate([rendered.render(), x, tail])
+    playback = _np.concatenate([rendered.render(), x, rendered.render(), tail])
     preamble = _PlayedPreamble.from_playback(playback, rendered.n_samples, sample_rate)
     return playback, preamble
 
@@ -553,7 +558,7 @@ def playback_input_path(project_dir: _Path, x_path: str) -> _Path:
     return (
         _Path(project_dir)
         / _CAPTURES_RAW_DIRNAME
-        / f"{stem}{_PLAYBACK_INPUT_SUFFIX}.wav"
+        / f"{stem}{_PLAYBACK_INPUT_SUFFIX}-timing-v2.wav"
     )
 
 
@@ -812,9 +817,8 @@ class CaptureSession:
 
         With a loopback the clean loopback delay is authoritative (it is undistorted no
         matter how hard the amp is driven) and the amp return is measured only as a
-        cross-check. Without one the amp return is authoritative and there is no
-        cross-check. ``disagreement`` is set when both are detected but their delays
-        differ by more than :data:`LOOPBACK_CROSSCHECK_SAMPLES`.
+        informational measurement. Without one the amp return is authoritative.
+        ``disagreement`` remains false: rig filtering is not an interface-clock error.
 
         A loopback that is configured but whose blips are not detected (e.g. an
         unplugged cable) is a hard failure, not a fallback: silently substituting the
@@ -829,12 +833,10 @@ class CaptureSession:
         loopback_latency = _measure_delay(loopback_recording, preamble)
         if not loopback_latency.detected:
             return loopback_latency, amp_latency, False, True
-        disagreement = (
-            amp_latency.delay is not None
-            and abs(loopback_latency.delay - amp_latency.delay)
-            > LOOPBACK_CROSSCHECK_SAMPLES
-        )
-        return loopback_latency, amp_latency, disagreement, False
+        # The rig's filters/distortion can change its impulse response independently
+        # of the clean timing path. Keep the measurement as information, never as a
+        # loopback/reamplification disagreement or an alignment decision.
+        return loopback_latency, amp_latency, False, False
 
     @staticmethod
     def _aligned_target(
@@ -1144,6 +1146,13 @@ class CaptureSession:
         delay, shift = self._alignment(latency, loopback_used, lead)
         y = self._aligned_target(main, preamble, len(x), shift)
 
+        ending_offset = preamble.n_samples + len(x)
+        ending_preamble = _PlayedPreamble.from_playback(
+            playback[ending_offset:], preamble.n_samples, sample_rate
+        )
+        timing_recording = loopback if loopback_used else main
+        end_latency = _measure_delay(timing_recording[ending_offset:], ending_preamble)
+
         qa = self._qa(
             entry,
             y,
@@ -1153,7 +1162,53 @@ class CaptureSession:
             crosscheck=crosscheck,
             alignment_shift=shift,
             delay=delay,
+            end_latency=end_latency,
         )
+
+        if (
+            not latency.ok
+            or not end_latency.ok
+            or qa.clock_drift_samples is None
+            or abs(qa.clock_drift_samples) >= MAX_CAPTURE_DRIFT_SAMPLES - 1e-9
+        ):
+            self._write_raw_recordings(
+                entry,
+                main,
+                loopback,
+                sample_rate,
+                preamble_samples=preamble.n_samples,
+                input_samples=len(x),
+            )
+            target = (self.project_dir / entry.y_path).resolve()
+            root = self.project_dir.resolve()
+            if not target.is_relative_to(root):
+                raise CaptureSessionError("Capture path is outside the project")
+            if target.exists():
+                backup = (
+                    root
+                    / "history"
+                    / ("rejected-timing-" + str(_time.time_ns()))
+                    / target.relative_to(root)
+                )
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                target.rename(backup)
+            entry.status = "pending"
+            entry.delay = None
+            entry.captured_at = None
+            entry.stream_config = None
+            entry.qa = qa
+            _save_project(self.project, self.project_dir)
+            _update_data_json(self.project, self.project_dir)
+            drift = (
+                "could not be verified"
+                if qa.clock_drift_samples is None
+                else f"changed by {qa.clock_drift_samples:+.3f} samples"
+            )
+            raise CaptureSessionError(
+                f"Capture discarded: timing {drift} between the beginning and end "
+                f"(allowed variation is below {MAX_CAPTURE_DRIFT_SAMPLES:g} sample). "
+                "Increase the audio-interface buffer and record this capture again."
+            )
 
         self._write_raw_recordings(
             entry,
@@ -1291,6 +1346,7 @@ class CaptureSession:
         crosscheck: _Optional[_LatencyResult] = None,
         alignment_shift: float = 0.0,
         delay: _Optional[int] = None,
+        end_latency: _Optional[_LatencyResult] = None,
     ) -> _QAModel:
         messages: list[str] = []
         if self.project.audio.host_api == "ASIO" and not loopback_used:
@@ -1360,18 +1416,9 @@ class CaptureSession:
                     "app allows for -- please report this."
                 )
 
-        delay_disagreement = False
-        if delay is not None:
-            other_delays = self._comparable_delays(entry)
-            if other_delays and (
-                abs(delay - int(_np.median(other_delays))) >= DELAY_DISAGREEMENT_SAMPLES
-            ):
-                delay_disagreement = True
-                messages.append(
-                    f"Delay {delay} differs from this project's typical "
-                    f"{int(_np.median(other_delays))} by {DELAY_DISAGREEMENT_SAMPLES}+ "
-                    "samples at these audio settings. Did the routing change?"
-                )
+        # Every capture carries its own measured delay into data.json. A change
+        # between recordings is compensated individually, not a QA failure.
+        delay_disagreement = None
 
         if peak < 1e-4:
             messages.append(
@@ -1383,20 +1430,39 @@ class CaptureSession:
         # then a blend of two arrival times, so it will differ from the amp return no
         # matter how the rig is patched. Saying "check the loopback patch" there sends
         # the user after a cable when the fault is a dropout during the count-in.
-        if loopback_disagreement and not latency.disagreement_too_high:
-            messages.append(
-                f"The loopback and amp-return timing blips disagree by more than "
-                f"{LOOPBACK_CROSSCHECK_SAMPLES} samples. Pedal EQ/distortion can affect "
-                "this comparison; alignment uses the clean loopback. Check routing "
-                "if the offset is unexpected."
-            )
+        end_delay = clock_drift = None
+        if end_latency is not None:
+            if not end_latency.ok:
+                messages.append(
+                    "The timing marks at the end of this recording could not be measured reliably. Check the loopback/clock and record this capture again."
+                )
+            elif latency.ok:
+                start_delay = (
+                    latency.peak_delay
+                    if latency.peak_delay is not None
+                    else latency.delay
+                )
+                end_delay = (
+                    end_latency.peak_delay
+                    if end_latency.peak_delay is not None
+                    else end_latency.delay
+                )
+                if start_delay is not None and end_delay is not None:
+                    clock_drift = end_delay - start_delay
+                    if abs(clock_drift) >= MAX_CAPTURE_DRIFT_SAMPLES - 1e-9:
+                        messages.append(
+                            f"Timing changed by {clock_drift:+.2f} samples between the beginning and end of this recording. Check the audio clock/dropouts and record this capture again."
+                        )
 
         return _QAModel(
             peak=peak_dbfs,
             clipping=clipping,
             impulse_detected=latency.detected,
             delay_disagreement=delay_disagreement,
-            loopback_disagreement=loopback_disagreement if loopback_used else None,
+            loopback_disagreement=None,
+            end_delay=end_delay,
+            clock_drift_samples=clock_drift,
+            end_timing_detected=end_latency.ok if end_latency is not None else None,
             loopback_delay=latency.delay if loopback_used else None,
             amp_return_delay=(
                 crosscheck.delay if loopback_used and crosscheck else latency.delay
@@ -1450,6 +1516,8 @@ class CaptureSession:
                 "raw": amp_path.name,
                 "raw_loopback": loopback_path.name if loopback is not None else None,
                 "preamble_samples": preamble_samples,
+                "postamble_samples": _BlipPreamble(sample_rate).n_samples,
+                "input_samples": input_samples,
                 "tail_samples": len(main) - preamble_samples - input_samples,
             },
             note=_predates_raw_recording_note(self.project),

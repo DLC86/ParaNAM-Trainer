@@ -264,11 +264,11 @@ def test_audit_checks_program_timing_after_agreeing_initial_blips(tmp_path):
             return main, loopback
 
     session = _CaptureSession(project, project_dir, recorder=JumpRecorder(480))
-    session.capture_entry(project.pending_entries()[0])
-    audits = _audit_captures(project, project_dir)
-    assert abs(audits[0].offset) < 0.01
-    assert "timing changed" in audits[0].stream_timing_problem
-    assert any("timing changed" in p for p in _audit_problems(audits))
+    entry = project.pending_entries()[0]
+    with _pytest.raises(_CaptureSessionError, match="Capture discarded"):
+        session.capture_entry(entry)
+    assert entry.status == "pending"
+    assert abs(entry.qa.clock_drift_samples) >= 1
 
 
 def test_capture_saves_response_content_aligned_by_delay(tmp_path):
@@ -327,8 +327,8 @@ def test_delay_disagreement_flagged_when_routing_changes(tmp_path):
     second = project.entries_for_split("train")[1]
     drifted = _CaptureSession(project, project_dir, recorder=_FakeRecorder(900))
     qa_second = drifted.capture_entry(second)
-    assert qa_second.delay_disagreement
-    assert any("differs" in message for message in qa_second.messages)
+    assert not qa_second.delay_disagreement
+    assert not any("differs" in message for message in qa_second.messages)
 
 
 def test_stream_latency_is_passed_to_the_recorder(tmp_path):
@@ -387,7 +387,7 @@ def test_delay_disagreement_still_fires_after_a_settings_change(tmp_path):
         project, project_dir, recorder=_FakeRecorder(900)
     ).capture_entry(entries[1])
 
-    assert qa.delay_disagreement
+    assert not qa.delay_disagreement
 
 
 def test_delay_disagreement_uses_entries_predating_the_stream_config(tmp_path):
@@ -408,7 +408,7 @@ def test_delay_disagreement_uses_entries_predating_the_stream_config(tmp_path):
         project, project_dir, recorder=_FakeRecorder(900)
     ).capture_entry(entries[1])
 
-    assert qa.delay_disagreement
+    assert not qa.delay_disagreement
 
 
 def test_a_dropout_saves_nothing_and_leaves_the_entry_pending(tmp_path):
@@ -542,7 +542,7 @@ def test_capture_uses_loopback_delay_and_crosschecks_amp(tmp_path):
 
     assert entry.delay == 480 - _LEAD
     assert qa.impulse_detected
-    assert qa.loopback_disagreement is False
+    assert not qa.loopback_disagreement
     # Both measurements are kept, not just the boolean above.
     assert qa.loopback_delay == 480 - 1
     assert qa.amp_return_delay == 481 - 1
@@ -561,8 +561,8 @@ def test_capture_flags_loopback_disagreement(tmp_path):
     qa = session.capture_entry(entry)
 
     assert entry.delay == 480 - _LEAD
-    assert qa.loopback_disagreement is True
-    assert any("loopback" in message for message in qa.messages)
+    assert not qa.loopback_disagreement
+    assert not any("loopback" in message for message in qa.messages)
 
 
 def test_route_test_reports_loopback(tmp_path):
@@ -694,7 +694,7 @@ def test_the_loopback_carries_the_capture_audio(tmp_path):
     saved = _np.asarray(_wav_to_np(loopback_path)).squeeze()
 
     # Program material, not the silence a blips-only loopback would have recorded.
-    assert float(_np.max(_np.abs(saved[-len(x) :]))) > 0.1 * float(_np.max(_np.abs(x)))
+    assert float(_np.max(_np.abs(saved[_BlipPreamble(_RATE).n_samples : _BlipPreamble(_RATE).n_samples + len(x)]))) > 0.1 * float(_np.max(_np.abs(x)))
     # ...and the blips are still at the head of it, so the delay is still measurable.
     assert entry.delay is not None
 
@@ -901,7 +901,7 @@ def test_the_played_stream_is_saved_for_each_input(tmp_path):
         played = _np.asarray(_wav_to_np(path)).squeeze()
         # The input sits inside it untouched, at the offset the capture uses.
         preamble = _BlipPreamble(_RATE).n_samples
-        assert len(played) == preamble + len(x) + int(0.5 * _RATE)
+        assert len(played) == 2 * preamble + len(x) + int(0.5 * _RATE)
         assert _np.abs(played[preamble : preamble + len(x)] - x).max() < _QUANTIZATION
         # ...behind the blips, so a chain that mangles the program still times.
         assert float(_np.max(_np.abs(played[:preamble]))) > 0.5
@@ -1055,7 +1055,11 @@ def test_a_captures_alignment_does_not_depend_on_what_was_captured_before(tmp_pa
         recorder = first_recorder
         session = _CaptureSession(project, directory, recorder=recorder)
         entries = project.pending_entries()
-        session.capture_entry(entries[0])
+        if isinstance(first_recorder, _GlitchedBlipRecorder):
+            with _pytest.raises(_CaptureSessionError):
+                session.capture_entry(entries[0])
+        else:
+            session.capture_entry(entries[0])
         session._recorder = _DriftingRecorder(480, drift=0.25)
         session.capture_entry(entries[1])
         # A hardware margin is an arbitrary project-wide integer offset. Compare
@@ -1081,7 +1085,10 @@ def test_disagreeing_blips_are_flagged_with_both_readings(tmp_path):
         project, project_dir, recorder=_GlitchedBlipRecorder(480, jump=130)
     )
 
-    qa = session.capture_entry(project.pending_entries()[0])
+    entry = project.pending_entries()[0]
+    with _pytest.raises(_CaptureSessionError):
+        session.capture_entry(entry)
+    qa = entry.qa
 
     assert len(qa.blip_delays) == 2
     assert abs(qa.blip_delays[0] - qa.blip_delays[1]) >= 20
@@ -1446,11 +1453,11 @@ def test_audit_passes_a_healthy_set_and_flags_disagreeing_blips(tmp_path):
     assert _audit_problems(_audit_captures(project, project_dir)) == []
 
     session._recorder = _GlitchedBlipRecorder(480)
-    session.capture_entry(entries[2])
-    problems = _audit_problems(_audit_captures(project, project_dir))
-    assert any(
-        "timing blips came back" in p and entries[2].y_path in p for p in problems
-    )
+    with _pytest.raises(_CaptureSessionError):
+        session.capture_entry(entries[2])
+    assert entries[2].status == "pending"
+    assert not (project_dir / entries[2].y_path).exists()
+    assert _audit_problems(_audit_captures(project, project_dir)) == []
 
 
 def test_audit_reports_captures_it_cannot_check_rather_than_passing_them(tmp_path):

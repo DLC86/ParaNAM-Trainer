@@ -211,6 +211,9 @@ class QAModel(_BaseModel):
     # cross-check tolerance (a mispatched loopback or a routing change). ``None`` when
     # no loopback was used for this capture.
     loopback_disagreement: _Optional[bool] = None
+    end_delay: _Optional[float] = None
+    clock_drift_samples: _Optional[float] = None
+    end_timing_detected: _Optional[bool] = None
     # The two measured delays themselves, not just the boolean above. A mispatched
     # loopback once went undetected across a whole project because the tolerance was
     # wider than the drift; a per-capture record of both numbers is what makes that
@@ -234,6 +237,9 @@ class QAModel(_BaseModel):
 
 class CaptureEntryModel(_BaseModel):
     index: int
+    capture_id: _Optional[str] = None
+    capture_name: _Optional[str] = None
+    user_metadata: dict[str, _Any] = _Field(default_factory=dict)
     split: Literal["train", "validation"]
     params: dict[str, float | str]
     y_path: str
@@ -255,6 +261,8 @@ class CaptureEntryModel(_BaseModel):
 class CaptureProject(_BaseModel):
     version: int = _PROJECT_VERSION
     name: str = ""
+    capture_type: Literal["parametric", "static"] = "parametric"
+    user_metadata: dict[str, _Any] = _Field(default_factory=dict)
     knobs: list[KnobModel | SwitchModel]
     seed: int = 0
     train_input: str = "input_train.wav"

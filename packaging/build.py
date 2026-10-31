@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def run(*args):
@@ -19,7 +19,7 @@ def run(*args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--flavor", default="CPU", choices=("CPU", "CUDA", "Metal"))
+    parser.add_argument("--flavor", default="CPU", choices=("CPU", "Metal"))
     parser.add_argument("--skip-freeze", action="store_true")
     args = parser.parse_args()
     from PIL import Image, ImageDraw
@@ -48,6 +48,14 @@ def main():
     installers = ROOT / "installers"
     installers.mkdir(exist_ok=True)
     if not args.skip_freeze:
+        if sys.platform in ("win32", "linux"):
+            import torch
+
+            if torch.version.cuda is not None:
+                raise RuntimeError(
+                    "Unified installers must be built from a CPU PyTorch environment"
+                )
+            run(sys.executable, "packaging/make_gpu_manifest.py")
         run(
             sys.executable,
             "-m",
@@ -73,7 +81,7 @@ def main():
         executable = bundle / "ParaNAM Trainer"
     # Test the frozen bundle, not the developer's Python environment.
     smoke = ROOT / "build" / "bundle-smoke.json"
-    from validate_bundle import clean_environment, validate_training
+    from validate_bundle import clean_environment, validate_training, validate_static
 
     environment = clean_environment()
     result = subprocess.run(
@@ -83,9 +91,14 @@ def main():
     )
     if smoke.exists():
         print(smoke.read_text(encoding="utf-8"), flush=True)
-    if result.returncode != 0 or not smoke.exists() or not json.loads(smoke.read_text())["ok"]:
+    if (
+        result.returncode != 0
+        or not smoke.exists()
+        or not json.loads(smoke.read_text())["ok"]
+    ):
         raise RuntimeError("Frozen application smoke test failed")
     validate_training(executable, ROOT / "build")
+    validate_static(executable, ROOT / "build")
     if sys.platform == "win32":
         compiler = shutil.which("ISCC")
         if not compiler:
@@ -166,7 +179,7 @@ def main():
             "--root-owner-group",
             "--build",
             package,
-            installers / f"ParaNAM-Trainer-{VERSION}-Linux-amd64-{args.flavor}.deb",
+            installers / f"ParaNAM-Trainer-{VERSION}-Linux-amd64.deb",
         )
         if args.flavor == "CPU":
             # Portable folder for Linux distributions that do not use Debian packages.
@@ -175,8 +188,7 @@ def main():
                 "-C",
                 ROOT / "dist",
                 "-czf",
-                installers
-                / f"ParaNAM-Trainer-{VERSION}-Linux-x86_64-{args.flavor}.tar.gz",
+                installers / f"ParaNAM-Trainer-{VERSION}-Linux-x86_64.tar.gz",
                 "ParaNAM Trainer",
             )
 

@@ -132,14 +132,18 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
                 "x_path": project.input_for_split(entry.split),
                 "y_path": entry.y_path,
                 "delay": 0 if entry.delay is None else entry.delay,
-                "params": dict(entry.params),
+                **(
+                    {"params": dict(entry.params)}
+                    if project.capture_type != "static"
+                    else {}
+                ),
                 "start_seconds": window.start_seconds,
                 "stop_seconds": window.stop_seconds,
                 "ny": window.ny,
             }
         )
     return {
-        "type": "parametric",
+        "type": "dataset" if project.capture_type == "static" else "parametric",
         "common": {"delay": 0},
         "train": splits["train"],
         "validation": splits["validation"],
@@ -170,8 +174,56 @@ def build_al_data_config(project: CaptureProject) -> dict[str, _Any]:
 # how the knobs reach it (concatenated onto the input vs. generated weight deltas) and in
 # their learning settings, which are NOT shared -- each pair below mirrors the training run
 # that produced it.
-_WAVENET_KERNEL_SIZES = [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6]
-_WAVENET_DILATIONS = [1, 3, 7, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239]
+_WAVENET_KERNEL_SIZES = [
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    15,
+    15,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+]
+_WAVENET_DILATIONS = [
+    1,
+    3,
+    7,
+    17,
+    41,
+    101,
+    239,
+    1,
+    3,
+    7,
+    17,
+    41,
+    101,
+    239,
+    1,
+    13,
+    1,
+    3,
+    7,
+    17,
+    41,
+    101,
+    239,
+]
 _WAVENET_HEAD: dict[str, _Any] = {"out_channels": 1, "kernel_size": 16, "bias": True}
 
 # The reference (5-knob) ConcatWaveNet run widened the stock 8 channels to 16 to carry the
@@ -208,9 +260,12 @@ def _training_param_specs(project: CaptureProject) -> list[dict[str, _Any]]:
 
 def _calibration_metadata(project: CaptureProject) -> dict[str, _Any]:
     metadata = {
-        key: value
-        for key in ("input_level_dbu", "output_level_dbu")
-        if (value := getattr(project, key)) is not None
+        **project.user_metadata,
+        **{
+            key: value
+            for key in ("input_level_dbu", "output_level_dbu")
+            if (value := getattr(project, key)) is not None
+        },
     }
     return {"metadata": metadata} if metadata else {}
 

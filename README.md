@@ -1,12 +1,12 @@
 # ParaNAM Trainer
 
-A desktop wizard for capturing a parametric rig and training **HyperA2 Full + Lite
-inside one nested `.nam` model**. Based on DLC86's `Knobs+Switch` trainer branch,
+A desktop wizard for parametric **HyperA2 Full + Lite inside one nested `.nam` model**
+and batches of independent static **A2 Full or Lite** models. Based on DLC86's `Knobs+Switch` trainer branch,
 with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.1.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.1.0-preview)**
+**[Download the 0.2.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.2.0-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts
@@ -16,17 +16,23 @@ included. A normal audio-interface driver is still required.
 
 | Computer | Package | Training acceleration |
 | --- | --- | --- |
-| Windows 10/11 x64 | Setup `.exe` | CPU or separate self-contained NVIDIA CUDA edition |
+| Windows 10/11 x64 | Setup `.exe` | CPU included; optional NVIDIA download |
 | macOS Apple Silicon | `.dmg`, drag the app to Applications | Apple Metal / CPU |
 | macOS Intel | `.dmg`, drag the app to Applications | CPU |
-| Ubuntu/Debian-compatible Linux x64 | `.deb`, open in the graphical package installer | CPU or separate self-contained NVIDIA CUDA edition |
-| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU, subject to OS library compatibility |
+| Ubuntu/Debian-compatible Linux x64 | `.deb`, open in the graphical package installer | CPU included; optional NVIDIA download |
+| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU included; optional NVIDIA download |
 
 Linux packages target Ubuntu 22.04 or newer and the corresponding system ABI.
-The desktop package installer resolves standard OS audio/display libraries. CUDA
-editions bundle the NVIDIA runtime used by PyTorch; they use the normal compatible
-NVIDIA display driver, not a separately installed CUDA toolkit. The CPU edition
-works without an NVIDIA GPU. Builds are unsigned until signing credentials are
+The desktop package installer resolves standard OS audio/display libraries. There is
+one installer per OS/architecture. Windows offers an unchecked NVIDIA option during
+setup; Linux offers the same choice on first launch. Both can manage it later from
+Training settings. CPU training and offline capture work without downloading anything.
+The optional engine downloads compatible, checksum-verified PyTorch/NVIDIA wheels
+from official sources into a per-user folder, retaining all their runtime dependencies
+and license files. Matching installed components are reused and interrupted downloads
+can resume. No CUDA toolkit, Python installation or terminal is required. A compatible
+NVIDIA graphics driver is still required for GPU execution; otherwise Auto uses CPU.
+macOS uses Apple Metal where supported and does not offer CUDA. Builds are unsigned until signing credentials are
 configured; macOS may require allowing the app through its normal security UI.
 
 The **ParaNAM native installers** workflow builds on each target OS, tests the
@@ -40,12 +46,17 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    interface and channels. The connection diagram shows the reamp/rig/return path
    and optional clean timing loopback. Test the connection and optionally enter
    input/output dBu calibration.
-2. **Controls & plan.** Add/edit knobs and named multi-position switches, choose
+2. **Controls & plan.** Choose Parametric or Static batch (A2 Full by default, Lite
+   selectable). Enter model metadata: name, author, gear type, manufacturer, model,
+   tone type and notes. Existing custom metadata is preserved. In Parametric, add/edit knobs and named multi-position switches, choose
    Normal or Active learning, and select Standard or Custom training input. Capture
    counts include all switch combinations; corners are repeated for every state.
 3. **Capture your rig.** Follow the graphic knob/switch settings, confirm the rig
    matches, and record each entry. The list tracks completed/pending captures and
-   quality warnings. Training unlocks after the entire plan is captured.
+   quality warnings in separate resizable **Latency**, **Peak (dBFS)** and **Warnings**
+   columns. Latency includes subsample correction. Static mode instead shows named
+   batch items with editable per-model metadata; each records training and fixed
+   validation automatically without changing the rig between them. Training unlocks after the entire plan is captured.
    Pending captures are automatically ordered to reduce manual changes: first the
    number of controls to move, then the total knob rotation. Identical settings
    stay together, including separate training/validation recordings. On resuming,
@@ -55,7 +66,9 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
    epoch, best validation ESR, elapsed time and an estimate based on completed epoch
    durations. Export is always `models/round-N/ParaNAM_HyperA2.nam`, containing both
-   Full and Lite with Full as the playback default.
+   Full and Lite with Full as the playback default. Static batches export one standard
+   WaveNet A2 `.nam` per named item under `models/<run>/`, with its metadata and
+   input/output dBu calibration.
 
 **Back** and the step sidebar let you revisit settings. Drafts are saved. A changed
 capture plan is confirmed before recordings are archived into `history/`; they are
@@ -75,6 +88,17 @@ The files' sources, sample counts and SHA-256 hashes are in
 [paranam/assets/manifest.json](paranam/assets/manifest.json). Recordings are still
 made separately for training and validation through the actual rig. Switch-only
 projects validate the same categorical states with the independent validation audio.
+
+## Capture timing
+
+Each recording is aligned independently using the clean loopback when enabled.
+Amp-return versus loopback differences and changes in latency between recordings
+do not generate discrepancy errors. Timing marks before and after the entire input
+verify clock stability. A change of **0.1 sample or more**, including fractional
+changes below one sample, or unreliable timing detection rejects the recording.
+The item stays pending, is excluded from training, and must be recorded again; the
+app suggests increasing the audio-interface buffer. Diagnostic raw audio remains
+available. Replaced accepted audio is archived rather than silently reused.
 
 ## Pause, stop and resume
 
@@ -113,8 +137,10 @@ python packaging/build.py --flavor CPU
 
 Run the build on its target OS. Windows builds additionally use Inno Setup 6+;
 macOS uses hdiutil; Linux uses dpkg-deb. GitHub Actions provisions these tools.
-`--flavor CUDA` must be built from an environment containing the official CUDA
-PyTorch wheel; choosing the flag alone does not add GPU libraries.
+Windows/Linux bundles must be built from CPU PyTorch. The build resolves and pins
+the optional GPU download manifest against the official CPU/CUDA wheel closures.
+Native CI verifies the frozen CPU application and optional external GPU engine;
+macOS builds use `--flavor Metal`. AVX2 nam-cpu-trainer integration is deferred.
 
 The original trainer documentation is preserved in
 [README_UPSTREAM.md](README_UPSTREAM.md). See [LICENSE](LICENSE) and

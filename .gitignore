@@ -153,3 +153,4 @@ packaging/icon.ico
 
 !paranam/assets/*.wav
 !packaging/ParaNAM.spec
+paranam/assets/gpu-*.json

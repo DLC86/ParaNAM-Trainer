@@ -48,7 +48,7 @@ exe = EXE(pyz, analysis.scripts, [], exclude_binaries=True, name="ParaNAM Traine
 bundle = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=False, name="ParaNAM Trainer")
 if sys.platform == "darwin":
     app = BUNDLE(bundle, name="ParaNAM Trainer.app", bundle_identifier="com.dlc86.paranamtrainer",
-                 info_plist={"CFBundleShortVersionString":"0.1.0",
+                 info_plist={"CFBundleShortVersionString":"0.2.0",
                              "NSMicrophoneUsageDescription":"Record your rig and timing loopback to create an amp model.",
                              "NSHighResolutionCapable":True})
 

@@ -516,7 +516,8 @@ def test_run_active_learning_round_writes_configs_and_delegates_to_run_round(
 
     script_path = tmp_path / _al_runner.RUNNER_SCRIPT_FILENAME
     assert script_path.is_file()
-    assert script_path.stat().st_mode & _stat.S_IXUSR
+    if __import__("os").name != "nt":
+        assert script_path.stat().st_mode & _stat.S_IXUSR
 
     assert (tmp_path / _PROJECT_FILENAME).read_text() == project_json_before
 

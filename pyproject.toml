@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paranam-trainer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-contained ParaNAM capture and HyperA2 training wizard"
 authors = [
     {name = "Steven Atkinson", email = "steven@atkinson.mn"},
@@ -82,7 +82,7 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
-"paranam" = ["assets/*.wav", "assets/*.ttf", "assets/*.txt", "assets/manifest.json"]
+"paranam" = ["assets/*.wav", "assets/*.ttf", "assets/*.txt", "assets/*.json"]
 "nam.train._resources" = ["*.json"]
 
 [tool.pytest.ini_options]

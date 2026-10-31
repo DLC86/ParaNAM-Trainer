@@ -2,7 +2,7 @@
 
 import math
 
-from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QWidget,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QStackedWidget,
     QMessageBox,
+    QPlainTextEdit,
 )
 
 from nam.capture.params import KnobSpec, SwitchSpec
@@ -393,3 +394,81 @@ class ControlDialog(QDialog):
             QMessageBox.warning(self, "Check control settings", str(error))
             return
         self.accept()
+
+
+class MetadataEditor(QWidget):
+    """NAM metadata editor that retains unexposed/custom fields unchanged."""
+
+    changed = Signal(dict)
+
+    def __init__(self, include_name=True, parent=None):
+        super().__init__(parent)
+        from nam.models.metadata import GearType, ToneType
+
+        self._loading_metadata = False
+        self._metadata = {}
+        self.fields = {}
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        labels = [("name", "Name")] if include_name else []
+        labels += [
+            ("modeled_by", "Author"),
+            ("gear_make", "Manufacturer"),
+            ("gear_model", "Gear model"),
+        ]
+        for key, label in labels:
+            widget = QLineEdit()
+            widget.editingFinished.connect(self.emit_metadata)
+            self.fields[key] = widget
+            form.addRow(label, widget)
+        for key, label, enum in (
+            ("gear_type", "Gear type", GearType),
+            ("tone_type", "Tone type", ToneType),
+        ):
+            widget = QComboBox()
+            widget.addItem("Unspecified", None)
+            for value in enum:
+                widget.addItem(value.value.replace("_", " ").title(), value.value)
+            widget.currentIndexChanged.connect(self.emit_metadata)
+            self.fields[key] = widget
+            form.addRow(label, widget)
+        notes = QPlainTextEdit()
+        notes.setMaximumHeight(90)
+        notes.textChanged.connect(self.emit_metadata)
+        self.fields["notes"] = notes
+        form.addRow("Notes", notes)
+
+    def set_metadata(self, metadata):
+        self._loading_metadata = True
+        try:
+            self._metadata = dict(metadata)
+            for key, widget in self.fields.items():
+                value = metadata.get(key)
+                if isinstance(widget, QComboBox):
+                    if value is not None and widget.findData(value) < 0:
+                        widget.addItem(str(value), value)
+                    widget.setCurrentIndex(max(0, widget.findData(value)))
+                elif isinstance(widget, QPlainTextEdit):
+                    widget.setPlainText(str(value or ""))
+                else:
+                    widget.setText(str(value or ""))
+        finally:
+            self._loading_metadata = False
+
+    def emit_metadata(self, *_):
+        if self._loading_metadata:
+            return
+        data = dict(self._metadata)
+        for key, widget in self.fields.items():
+            if isinstance(widget, QComboBox):
+                value = widget.currentData()
+            elif isinstance(widget, QPlainTextEdit):
+                value = widget.toPlainText().strip()
+            else:
+                value = widget.text().strip()
+            if value is None or value == "":
+                data.pop(key, None)
+            else:
+                data[key] = value
+        self._metadata = data
+        self.changed.emit(data)
