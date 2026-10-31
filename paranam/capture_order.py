@@ -48,8 +48,9 @@ def _route_cost(route, points, anchor, knob_mask):
     total = [0, 0, 0]
     previous = anchor
     for index in route:
-        cost = _edge(previous, points[index], knob_mask)
-        total = [a + b for a, b in zip(total, cost)]
+        if previous is not None:
+            cost = _edge(previous, points[index], knob_mask)
+            total = [a + b for a, b in zip(total, cost)]
         previous = points[index]
     return tuple(total)
 
@@ -58,7 +59,9 @@ def _nearest(points, anchor, knob_mask):
     coordinates = np.asarray(points, dtype=np.int64)
     knob_mask = np.asarray(knob_mask, dtype=bool)
     remaining = np.arange(len(points))
-    current = np.asarray(anchor, dtype=np.int64)
+    # Before the first recording the actual hardware state is unknown. Start at
+    # an endpoint rather than favouring the software default in mid-rotation.
+    current = np.asarray(anchor if anchor is not None else min(points), dtype=np.int64)
     route = []
     while remaining.size:
         distance = np.abs(coordinates[remaining] - current)
@@ -90,7 +93,11 @@ def _refine(route, points, anchor, knob_mask, budget=25000):
                     return route
                 a = anchor if left == 0 else points[route[left - 1]]
                 b, c = points[route[left]], points[route[right]]
-                old, new = _edge(a, b, knob_mask), _edge(a, c, knob_mask)
+                old, new = (
+                    (_edge(a, b, knob_mask), _edge(a, c, knob_mask))
+                    if a is not None
+                    else ((0, 0, 0), (0, 0, 0))
+                )
                 if right + 1 < len(route):
                     d = points[route[right + 1]]
                     old = tuple(x + y for x, y in zip(old, _edge(c, d, knob_mask)))
@@ -118,7 +125,7 @@ def order_captures(entries, controls):
     pending = [e for e in entries if e.status != "captured"]
     if not pending or not controls:
         return completed + pending
-    anchor = _point(completed[-1].params if completed else {}, controls)
+    anchor = _point(completed[-1].params, controls) if completed else None
     knob_mask = tuple(not isinstance(c, SwitchSpec) for c in controls)
     groups = {}
     for entry in pending:

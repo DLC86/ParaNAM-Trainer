@@ -16,8 +16,10 @@ def entry(index, params, **kwargs):
     )
 
 
-def changes(entries, anchor):
+def changes(entries, anchor=None):
     total = 0
+    if anchor is None:
+        anchor = entries[0].params
     for capture in entries:
         total += sum(capture.params[k] != value for k, value in anchor.items())
         anchor = capture.params
@@ -25,7 +27,8 @@ def changes(entries, anchor):
 
 
 def test_single_knob_follows_short_monotonic_path_without_changing_entries():
-    controls = [KnobSpec("Gain", 0, 10, default=0)]
+    # A midpoint software default must not cause backtracking on a fresh plan.
+    controls = [KnobSpec("Gain", 0, 10, default=5)]
     original = [entry(i, {"Gain": x}) for i, x in enumerate([10, 0, 8, 2, 6, 4])]
     snapshot = [e.model_dump() for e in original]
     ordered = order_captures(original, controls)
@@ -37,7 +40,8 @@ def test_single_knob_follows_short_monotonic_path_without_changing_entries():
 def test_knob_rotation_is_normalized_to_each_control_range():
     controls = [KnobSpec("A", 0, 100000, default=0), KnobSpec("B", 0, 1, default=0)]
     original = [entry(0, {"A": 0, "B": 1}), entry(1, {"A": 10000, "B": 0})]
-    assert order_captures(original, controls)[0] is original[1]
+    previous = entry(2, {"A": 0, "B": 0}, status="captured")
+    assert order_captures([*original, previous], controls)[1] is original[1]
 
 
 def test_grid_with_multiple_switches_keeps_every_combination_and_reduces_changes():
@@ -111,7 +115,7 @@ def test_random_routes_never_increase_control_changes_against_original_plan():
             for i in range(30)
         ]
         ordered = order_captures(original, controls)
-        assert changes(ordered, anchor) <= changes(original, anchor)
+        assert changes(ordered) <= changes(original)
         assert len(ordered) == len(original)
         assert {id(e) for e in ordered} == {id(e) for e in original}
 
