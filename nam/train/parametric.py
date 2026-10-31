@@ -999,6 +999,16 @@ def _create_parametric_checkpoint_callbacks(
     but using ``_ParametricModelCheckpoint`` so each `.ckpt` also gets a `.nam` export.
     """
     validate_inside_epoch = "val_check_interval" in learning_config["trainer"]
+    checkpoint_class = (
+        _ParametricModelCheckpoint
+        if learning_config.get("export_checkpoints", True)
+        else _ModelCheckpoint
+    )
+    metadata_kwargs = (
+        {"output_scale": output_scale, "user_metadata": user_metadata}
+        if learning_config.get("export_checkpoints", True)
+        else {}
+    )
     if validate_inside_epoch:
         kwargs = {
             "every_n_train_steps": learning_config["trainer"]["val_check_interval"]
@@ -1010,28 +1020,25 @@ def _create_parametric_checkpoint_callbacks(
             )
         }
 
-    checkpoint_best = _ParametricModelCheckpoint(
+    checkpoint_best = checkpoint_class(
         filename="{epoch:04d}_{step}_{ESR:.3e}_{MSE:.3e}",
         save_top_k=3,
         monitor="val_loss",
-        output_scale=output_scale,
-        user_metadata=user_metadata,
+        **metadata_kwargs,
         **kwargs,
     )
-    checkpoint_epoch = _ParametricModelCheckpoint(
+    checkpoint_epoch = checkpoint_class(
         filename="checkpoint_epoch_{epoch:04d}",
         every_n_epochs=1,
-        output_scale=output_scale,
-        user_metadata=user_metadata,
+        **metadata_kwargs,
     )
     callbacks = [checkpoint_best]
     if not validate_inside_epoch:
         callbacks.append(checkpoint_epoch)
         return callbacks
-    checkpoint_last = _ParametricModelCheckpoint(
+    checkpoint_last = checkpoint_class(
         filename="checkpoint_last_{epoch:04d}_{step}",
-        output_scale=output_scale,
-        user_metadata=user_metadata,
+        **metadata_kwargs,
         **kwargs,
     )
     callbacks.extend([checkpoint_last, checkpoint_epoch])
@@ -1131,6 +1138,7 @@ def main(
     outdir: _Path,
     no_show: bool = False,
     make_plots=True,
+    extra_callbacks=(),
 ):
     raw_metadata = model_config.get("metadata")
     user_metadata = _UserMetadata.model_validate(raw_metadata) if raw_metadata else None
@@ -1192,6 +1200,7 @@ def main(
     callbacks = _create_parametric_callbacks(
         learning_config, output_scale, user_metadata
     )
+    callbacks.extend(extra_callbacks)
     trainer = _pl.Trainer(
         callbacks=callbacks,
         default_root_dir=outdir,

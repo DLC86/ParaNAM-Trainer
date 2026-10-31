@@ -1,0 +1,20 @@
+[
+  {
+    "file": "standard.wav",
+    "source": "https://www.tone3000.com/T3K-sweep-v3.wav",
+    "sha256": "70f8ec7f25686a1bd77f25973de8e51a6721e957e81eec121822e5e53366bc41",
+    "sample_rate": 48000,
+    "frames": 9120000,
+    "channels": 1,
+    "seconds": 190.0
+  },
+  {
+    "file": "validation.wav",
+    "source": "https://github.com/phillipmself/neural-amp-modeler-parametric/releases/download/training-inputs-v1/validation.wav",
+    "sha256": "24c00c6351caa09df3e45c3d6b67cc2275994ef93c74ba7002019ac94c01adf4",
+    "sample_rate": 48000,
+    "frames": 336000,
+    "channels": 1,
+    "seconds": 7.0
+  }
+]

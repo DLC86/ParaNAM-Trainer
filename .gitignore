@@ -143,3 +143,12 @@ tests/resources/*.reapeaks
 AGENTS.md
 
 .DS_Store
+# ParaNAM application build outputs
+.build-tools/
+.test-temp/
+.test-tools/
+installers/
+packaging/icon.ico
+!nam/_version.py
+
+!paranam/assets/*.wav

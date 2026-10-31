@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=61", "wheel", "setuptools-scm"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neural-amp-modeler"
-description = "Neural Amp Modeler"
+name = "paranam-trainer"
+version = "0.1.0"
+description = "Self-contained ParaNAM capture and HyperA2 training wizard"
 authors = [
     {name = "Steven Atkinson", email = "steven@atkinson.mn"},
 ]
@@ -23,11 +24,12 @@ dependencies = [
     "torch",
     # `transformers` is not required, but if you have it, it needs to be recent
     # enough so I'm adding it.
-    "transformers>=4",
+    "PySide6>=6.8,<7",
+    "filelock",
     "tqdm",
     "wavio>=0.0.5",
 ]
-dynamic = ["version"]
+
 
 [project.optional-dependencies]
 # Optional features
@@ -50,6 +52,9 @@ capture-app = [
 [project.urls]
 homepage = "https://github.com/sdatkinson/"
 
+[project.gui-scripts]
+paranam-trainer = "paranam.__main__:main"
+
 [project.scripts]
 nam = "nam.cli:nam_gui"
 nam-capture = "nam.capture.gui.main:main"
@@ -57,27 +62,10 @@ nam-full = "nam.cli:nam_full"
 nam-full-parametric = "nam.cli:nam_full_parametric"
 nam-hello-world = "nam.cli:nam_hello_world"
 
-[tool.setuptools_scm]
-version_scheme = "guess-next-dev"
-local_scheme = "no-local-version"
-write_to = "nam/_version.py"
-# Derive the version only from real version tags. The default match pattern also
-# accepts a trailing number on any tag name, so a release tag for non-code assets
-# (e.g. training-inputs-v1) would otherwise be read as version 1.
-[tool.setuptools_scm.scm.git]
-describe_command = [
-    "git",
-    "describe",
-    "--dirty",
-    "--tags",
-    "--long",
-    "--match",
-    "v[0-9]*",
-]
-
 [tool.setuptools]
 include-package-data = true
 packages = [
+    "paranam",
     "nam",
     "nam.capture",
     "nam.capture.gui",
@@ -94,6 +82,7 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
+"paranam" = ["assets/*.wav", "assets/*.ttf", "assets/*.txt", "assets/manifest.json"]
 "nam.train._resources" = ["*.json"]
 
 [tool.pytest.ini_options]
