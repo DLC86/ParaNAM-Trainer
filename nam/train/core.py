@@ -11,7 +11,6 @@ Used by the GUI and Colab trainers.
 import hashlib as _hashlib
 import importlib.resources as _resources
 import json as _json
-import tkinter as _tk
 from copy import deepcopy as _deepcopy
 from functools import partial as _partial
 from pathlib import Path as _Path
@@ -1107,6 +1106,9 @@ def _print_nasty_checks_warning():
 
 
 def _nasty_checks_modal():
+    # The Qt capture application and headless training do not use this legacy UI.
+    import tkinter as _tk
+
     msg = "You are ignoring the checks!\nYour model might turn out bad!"
 
     root = _tk.Tk()

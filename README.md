@@ -17,7 +17,7 @@ included. A normal audio-interface driver is still required.
 | macOS Apple Silicon | `.dmg`, drag the app to Applications | Apple Metal / CPU |
 | macOS Intel | `.dmg`, drag the app to Applications | CPU |
 | Ubuntu/Debian-compatible Linux x64 | `.deb`, open in the graphical package installer | CPU or separate self-contained NVIDIA CUDA edition |
-| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU / CUDA, subject to OS library compatibility |
+| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU, subject to OS library compatibility |
 
 Linux packages target Ubuntu 22.04 or newer and the corresponding system ABI.
 The desktop package installer resolves standard OS audio/display libraries. CUDA
