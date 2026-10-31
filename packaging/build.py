@@ -154,7 +154,7 @@ def main():
             "Maintainer: DLC86\nSection: sound\nPriority: optional\n"
             "Depends: libc6 (>= 2.35), libasound2, libpulse0, libgl1, libegl1, libopengl0, "
             "libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, "
-            "libxcb-render-util0, libxcb-xinerama0, libxcb-xkb1, libfontconfig1, libdbus-1-3\n"
+            "libxcb-render-util0, libxcb-xinerama0, libxcb-xkb1, libxcb-shape0, libfontconfig1, libdbus-1-3\n"
             "Description: Guided parametric amp capture and HyperA2 training\n"
             " Bundles Python, Qt, PyTorch and the capture/training dependencies.\n",
             encoding="utf-8",
