@@ -6,6 +6,9 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
+**[Download the 0.1.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.1.0-preview)**
+(sign in with an account that can access this private repository).
+
 Download the package for your computer from this repository's installer artifacts
 or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,
 or a terminal. Python, Qt, PyTorch, audio libraries and both capture signals are
