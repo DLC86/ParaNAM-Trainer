@@ -81,3 +81,40 @@ def test_sidebar_handles_missing_custom_input_without_losing_the_project(
     assert window.pages.currentIndex() == 1
     assert len(messages) == 1 and "custom" in messages[0]
     assert window.workspace is workspace
+
+
+def test_capture_rows_record_the_displayed_setting_after_route_reordering(
+    window, workspace, monkeypatch
+):
+    from nam.capture.project import CaptureEntryModel, KnobModel
+    from paranam import wizard
+
+    workspace.project.knobs = [
+        KnobModel.from_knob_spec(KnobSpec("Gain", 0, 10, default=0))
+    ]
+    original = [
+        CaptureEntryModel(
+            index=i, split="train", params={"Gain": value}, y_path=f"captures/{i}.wav"
+        )
+        for i, value in enumerate([10, 0, 5])
+    ]
+    workspace.project.entries = original
+    window._attach(workspace)
+    assert window._capture_entries[0] is original[1]
+    assert window.scene.values["Gain"] == 0
+    window.device.addItem("Test interface", {"available": True})
+    window.device.setCurrentIndex(window.device.count() - 1)
+    window.rig_ready.setChecked(True)
+    recorded = []
+
+    class Session:
+        def capture_entry(self, capture, **kwargs):
+            recorded.append(capture)
+
+    monkeypatch.setattr(window, "save_audio", lambda: None)
+    monkeypatch.setattr(window, "_get_session", lambda: Session())
+    monkeypatch.setattr(wizard, "timebase_problem", lambda *args: None)
+    monkeypatch.setattr(window, "run_audio", lambda action, done: action(None, None))
+    window.record()
+    assert recorded == [original[1]]
+    assert workspace.project.entries == original

@@ -113,6 +113,7 @@ class WizardWindow(QMainWindow):
         self._close_after_pause = False
         self._log_content = ""
         self._devices = []
+        self._capture_entries = []
         self._build()
         self._refresh_recent()
         self.refresh_devices()
@@ -1043,7 +1044,12 @@ class WizardWindow(QMainWindow):
     def refresh_captures(self):
         if not self.workspace:
             return
-        entries = self.workspace.project.entries
+        from .capture_order import order_captures
+
+        entries = order_captures(
+            self.workspace.project.entries, self.workspace.project.control_specs()
+        )
+        self._capture_entries = entries
         self.capture_table.blockSignals(True)
         self.capture_table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
@@ -1076,7 +1082,7 @@ class WizardWindow(QMainWindow):
         completed = sum(e.status == "captured" for e in entries)
         self.capture_summary.setText(
             f"{completed} of {len(entries)} captured  ·  {len(entries) - completed} remaining.\n"
-            "Set the actual rig controls as shown before each recording."
+            "Ordered to change fewer controls and turn knobs less. Set the rig as shown."
         )
         if entries:
             index = next(
@@ -1090,9 +1096,9 @@ class WizardWindow(QMainWindow):
 
     def select_capture(self):
         if self.workspace and 0 <= self.capture_table.currentRow() < len(
-            self.workspace.project.entries
+            self._capture_entries
         ):
-            entry = self.workspace.project.entries[self.capture_table.currentRow()]
+            entry = self._capture_entries[self.capture_table.currentRow()]
             self.scene.set_controls(
                 self.workspace.project.control_specs(), entry.params
             )
@@ -1107,7 +1113,7 @@ class WizardWindow(QMainWindow):
         if not self.workspace or self.busy() or not self.rig_ready.isChecked():
             return
         index = self.capture_table.currentRow()
-        if index < 0:
+        if index < 0 or index >= len(self._capture_entries):
             return
         try:
             if not self.device.currentData():
@@ -1118,7 +1124,7 @@ class WizardWindow(QMainWindow):
             problem = timebase_problem(self.workspace.project, self.workspace.directory)
             if problem:
                 raise ValueError(problem)
-            entry = self.workspace.project.entries[index]
+            entry = self._capture_entries[index]
             if entry.status == "captured":
                 backup = (
                     self.workspace.directory

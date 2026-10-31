@@ -43,6 +43,12 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 3. **Capture your rig.** Follow the graphic knob/switch settings, confirm the rig
    matches, and record each entry. The list tracks completed/pending captures and
    quality warnings. Training unlocks after the entire plan is captured.
+   Pending captures are automatically ordered to reduce manual changes: first the
+   number of controls to move, then the total knob rotation. Identical settings
+   stay together, including separate training/validation recordings. On resuming,
+   the route starts from the last recorded setting; active-learning suggestions
+   follow the same rule. A deterministic nearest-neighbour route plus bounded
+   2-opt improves the route without changing capture IDs or training data order.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
    epoch, best validation ESR, elapsed time and an estimate based on completed epoch
    durations. Export is always `models/round-N/ParaNAM_HyperA2.nam`, containing both
