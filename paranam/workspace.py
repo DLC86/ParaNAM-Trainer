@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,9 +45,15 @@ DEFAULTS = {
 
 
 def read_json(path: Path, default=None):
-    if not path.exists():
-        return default
-    return json.loads(path.read_text(encoding="utf-8"))
+    for attempt in range(10):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return default
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.01)
 
 
 def control_from_dict(data):

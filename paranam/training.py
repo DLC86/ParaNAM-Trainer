@@ -15,7 +15,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from nam.capture.project import atomic_write_json
+from nam.capture.project import atomic_write_json, replace_file
 from .workspace import Workspace, read_json
 
 TERMINAL = {"completed", "paused", "stopped", "failed", "needs_captures"}
@@ -123,7 +123,7 @@ def make_job(workspace, resume=False):
                     step, completed, source = recovered
                     temporary = target.with_suffix(".pending.ckpt")
                     shutil.copy2(source, temporary)
-                    os.replace(temporary, target)
+                    replace_file(temporary, target)
                     atomic_write_json(
                         job / f"resume-{member}.json",
                         dict(
@@ -246,7 +246,7 @@ def build_progress_callback(job, spec, member, shared):
             temporary = job / f"resume-{member}.pending.ckpt"
             target = job / f"resume-{member}.ckpt"
             trainer.save_checkpoint(temporary)
-            os.replace(temporary, target)
+            replace_file(temporary, target)
             info = dict(
                 completed_epoch=completed,
                 restart_epoch=completed + 1,

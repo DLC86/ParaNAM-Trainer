@@ -12,6 +12,7 @@ from __future__ import annotations
 import json as _json
 import os as _os
 import tempfile as _tempfile
+import time as _time
 from datetime import datetime as _datetime
 from datetime import timezone as _timezone
 from pathlib import Path as _Path
@@ -53,6 +54,18 @@ _PROJECT_VERSION = 1
 _DEFAULT_NY = 8192
 
 
+def replace_file(source, target) -> None:
+    """Retry brief Windows sharing violations without replacing a good file early."""
+    for attempt in range(10):
+        try:
+            _os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            _time.sleep(0.01)
+
+
 def atomic_write_json(path: _Path, payload: _Any) -> None:
     """
     Write JSON so a crash mid-write never leaves a truncated file: write to a
@@ -67,7 +80,7 @@ def atomic_write_json(path: _Path, payload: _Any) -> None:
         with _os.fdopen(fd, "w") as fp:
             _json.dump(payload, fp, indent=4)
             fp.write("\n")
-        _os.replace(tmp_path, path)
+        replace_file(tmp_path, path)
     except BaseException:
         try:
             _os.unlink(tmp_path)
