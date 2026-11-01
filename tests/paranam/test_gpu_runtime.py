@@ -89,6 +89,86 @@ def test_cancel_never_marks_gpu_component_ready(tmp_path, monkeypatch):
     assert not gpu.ready()
 
 
+def installed_engine(tmp_path, monkeypatch):
+    manifest = {
+        "platform": "windows-x86_64",
+        "python": "3.11",
+        "torch": "2.10.0+cu128",
+        "cuda": "12.8",
+        "wheels": [
+            {
+                "name": "torch",
+                "sha256": "b" * 64,
+                "url": "https://download.pytorch.org/old.whl",
+                "size": 100,
+            }
+        ],
+    }
+    manifest["id"] = gpu.manifest_id(manifest)
+    monkeypatch.setenv("PARANAM_RUNTIME_ROOT", str(tmp_path))
+    target = gpu.runtime_path(manifest)
+    package = target / "site-packages/torch"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("# installed GPU engine")
+    (target / "ready.json").write_text(
+        json.dumps(
+            {"id": manifest["id"], "torch": manifest["torch"], "cuda": manifest["cuda"]}
+        )
+    )
+    (target / "installed-wheels.json").write_text(json.dumps(["b" * 64]))
+    return manifest, target
+
+
+def test_app_update_reuses_020_engine_without_download_or_reinstallation(
+    tmp_path, monkeypatch
+):
+    manifest, target = installed_engine(tmp_path, monkeypatch)
+    original = (target / "site-packages/torch/__init__.py").read_bytes()
+    manifest["wheels"][0].update(
+        url="https://download-r2.pytorch.org/new.whl", size=101
+    )
+    manifest["id"] = gpu.manifest_id(manifest)
+    monkeypatch.setattr(gpu, "load_manifest", lambda: manifest)
+
+    def forbidden(*args):
+        pytest.fail(
+            "Updating the app must not download or reinstall an unchanged GPU engine"
+        )
+
+    monkeypatch.setattr(gpu, "_download", forbidden)
+    monkeypatch.setattr(gpu, "_extract", forbidden)
+    checks = []
+    result = dict(torch=manifest["torch"], cuda="12.8", available=True)
+
+    def probe(path, current):
+        checks.append(path)
+        assert current == manifest
+        return result
+
+    monkeypatch.setattr(gpu, "probe", probe)
+    assert gpu.ready()
+    assert gpu.install() == result
+    assert checks == [target]
+    assert gpu.installed_runtime() == target
+    assert not gpu.runtime_path(manifest).exists()
+    assert (target / "site-packages/torch/__init__.py").read_bytes() == original
+
+
+@pytest.mark.parametrize("change", ["torch", "cuda", "wheel", "incomplete"])
+def test_update_does_not_reuse_different_or_incomplete_engines(
+    tmp_path, monkeypatch, change
+):
+    manifest, target = installed_engine(tmp_path, monkeypatch)
+    if change == "wheel":
+        manifest["wheels"][0]["sha256"] = "c" * 64
+    elif change == "incomplete":
+        (target / "ready.json").unlink()
+    else:
+        manifest[change] = "different"
+    manifest["id"] = gpu.manifest_id(manifest)
+    assert gpu.installed_runtime(manifest) is None
+
+
 def test_cpu_choice_does_not_start_download(qapp, tmp_path, monkeypatch):
     from paranam.gpu_setup import GPUSetupDialog
 

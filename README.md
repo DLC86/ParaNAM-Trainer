@@ -35,6 +35,12 @@ NVIDIA graphics driver is still required for GPU execution; otherwise Auto uses 
 macOS uses Apple Metal where supported and does not offer CUDA. Builds are unsigned until signing credentials are
 configured; macOS may require allowing the app through its normal security UI.
 
+From 0.2.0 onward the downloaded GPU engine lives outside the application folder
+and survives app updates. Future builds reuse its verified wheel checksums even
+when download URLs or size metadata change, checking the installed engine without
+downloading or extracting it again. A genuinely different required engine needs
+its matching GPU component. The old bundled 0.1.0 CUDA edition is not migrated.
+
 The **ParaNAM native installers** workflow builds on each target OS, tests the
 application, freezes it, smoke-tests the frozen bundle, and uploads native packages.
 Apple Silicon and Intel builds are separate because PyTorch's supported binaries

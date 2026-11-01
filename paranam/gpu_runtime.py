@@ -108,23 +108,53 @@ def runtime_path(manifest):
     return runtime_root() / identifier
 
 
-def ready(manifest=None):
+def installed_runtime(manifest=None):
+    """Find a verified engine, including 0.2.0 installs from earlier app builds.
+
+    Manifest IDs also cover download locations and sizes. Those can change without
+    changing any engine bytes, so compare the installed wheel checksums as well.
+    Never consider interrupted staging directories or a different engine version.
+    """
     try:
         manifest = manifest or load_manifest()
     except (OSError, ValueError):
-        return False
+        return None
     if not manifest:
-        return False
+        return None
     target = runtime_path(manifest)
-    try:
-        marker = json.loads((target / "ready.json").read_text())
-        return (
-            marker.get("id") == manifest["id"]
-            and marker.get("torch") == manifest["torch"]
-            and (target / "site-packages" / "torch" / "__init__.py").is_file()
-        )
-    except (OSError, ValueError):
-        return False
+    root = runtime_root().resolve()
+    required = {wheel["sha256"] for wheel in manifest["wheels"]}
+    candidates = [target, *sorted(root.glob("*"))]
+    for candidate in candidates:
+        if not re.fullmatch(r"[a-f0-9]{64}", candidate.name):
+            continue
+        if not candidate.resolve().is_relative_to(root):
+            continue
+        try:
+            marker = json.loads((candidate / "ready.json").read_text(encoding="utf-8"))
+            if (
+                marker.get("id") != candidate.name
+                or marker.get("torch") != manifest.get("torch")
+                or marker.get("cuda") != manifest.get("cuda")
+                or not (candidate / "site-packages" / "torch" / "__init__.py").is_file()
+            ):
+                continue
+            if candidate == target:
+                return candidate
+            installed = set(
+                json.loads(
+                    (candidate / "installed-wheels.json").read_text(encoding="utf-8")
+                )
+            )
+            if required and installed == required:
+                return candidate
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
+
+
+def ready(manifest=None):
+    return installed_runtime(manifest) is not None
 
 
 def remember_choice():
@@ -290,9 +320,10 @@ def install(progress=lambda *args: None, cancelled=lambda: False):
     root.mkdir(parents=True, exist_ok=True)
     with FileLock(str(root / "install.lock"), timeout=0):
         target = runtime_path(manifest)
-        if ready(manifest):
+        existing = installed_runtime(manifest)
+        if existing is not None:
             progress(0, 0, "Checking the installed NVIDIA support")
-            result = probe(target, manifest)
+            result = probe(existing, manifest)
             remember_choice()
             return result
         total = sum(w.get("size", 0) for w in manifest["wheels"])
@@ -358,9 +389,9 @@ def activate(path=None):
     if not manifest:
         raise RuntimeError("No GPU component is available")
     if path is None:
-        if not ready(manifest):
+        path = installed_runtime(manifest)
+        if path is None:
             raise RuntimeError("Install NVIDIA support from Training settings first")
-        path = runtime_path(manifest)
     path = Path(path).resolve()
     if not path.is_relative_to(runtime_root().resolve()):
         raise ValueError("GPU engine must be inside the application's runtime folder")
