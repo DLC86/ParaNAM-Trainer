@@ -18,7 +18,7 @@ from PySide6.QtCore import (
     QStandardPaths,
     QUrl,
 )
-from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtGui import QDesktopServices, QColor, QTextCursor
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -66,6 +66,8 @@ from .widgets import (
     load_font,
 )
 from . import training
+from .audio_devices import capabilities
+from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 
 
 def label(text, style=None):
@@ -144,7 +146,7 @@ class WizardWindow(QMainWindow):
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.2", "eyebrow"))
+        rail.addWidget(label("TRAINER  /  0.3", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -230,7 +232,7 @@ class WizardWindow(QMainWindow):
         device_row.addWidget(button("Refresh", self.refresh_devices))
         form.addRow("Interface", device_row)
         self.output_channel, self.input_channel, self.loop_output, self.loop_input = [
-            QSpinBox() for _ in range(4)
+            QComboBox() for _ in range(4)
         ]
         for spin in (
             self.output_channel,
@@ -238,9 +240,10 @@ class WizardWindow(QMainWindow):
             self.loop_output,
             self.loop_input,
         ):
-            spin.setRange(1, 128)
-        self.loop_output.setValue(2)
-        self.loop_input.setValue(2)
+            spin.addItem("Channel name unavailable", 1)
+            spin.addItem("Channel name unavailable", 2)
+        self.loop_output.setCurrentIndex(1)
+        self.loop_input.setCurrentIndex(1)
         form.addRow("Output → reamp / rig", self.output_channel)
         form.addRow("Input ← load box / microphone", self.input_channel)
         self.loop_enabled = QCheckBox(
@@ -251,10 +254,7 @@ class WizardWindow(QMainWindow):
         form.addRow("Loopback output → cable", self.loop_output)
         form.addRow("Loopback input ← cable", self.loop_input)
         self.buffer = QComboBox()
-        for value in (0, 32, 64, 128, 256, 512, 1024, 2048):
-            self.buffer.addItem(
-                "Driver default" if value == 0 else f"{value} samples", value
-            )
+        self.buffer.addItem("Driver managed", 0)
         form.addRow("Buffer size", self.buffer)
         box.addLayout(form)
         self.diagram = RoutingDiagram()
@@ -276,21 +276,30 @@ class WizardWindow(QMainWindow):
         layout.addWidget(self.audio_card)
         self.calibration_card, box = card("Level calibration · optional")
         self.input_calibration, self.output_calibration = QCheckBox(
-            "Input level at 0 dBFS"
-        ), QCheckBox("Output level at 0 dBFS")
+            "Send level at capture output setting"
+        ), QCheckBox("Return level at 0 dBFS")
         self.input_dbu, self.output_dbu = QDoubleSpinBox(), QDoubleSpinBox()
         form = QFormLayout()
         for checkbox, spin in (
             (self.input_calibration, self.input_dbu),
             (self.output_calibration, self.output_dbu),
         ):
-            spin.setRange(-40, 80)
+            spin.setRange(-200, 200)
+            spin.setDecimals(3)
             spin.setValue(12)
             spin.setSuffix(" dBu")
             form.addRow(checkbox, spin)
             checkbox.toggled.connect(self.save_calibration)
             spin.valueChanged.connect(self.save_calibration)
         box.addLayout(form)
+        self.capture_level = OutputLevelEdit(0.0)
+        self.capture_level.editingFinished.connect(self.save_capture_level)
+        attenuation_form = QFormLayout()
+        attenuation_form.addRow(
+            "Capture / validation output (dBFS peak)", self.capture_level
+        )
+        box.addLayout(attenuation_form)
+        box.addWidget(button("Calibrate send and return…", self.calibrate_levels))
         box.addWidget(
             label(
                 "These values are embedded in the exported .nam model for plugin level calibration.",
@@ -305,7 +314,7 @@ class WizardWindow(QMainWindow):
             self.loop_input,
             self.loop_output,
         ):
-            spin.valueChanged.connect(self.save_audio)
+            spin.currentIndexChanged.connect(self.save_audio)
         self.loop_enabled.toggled.connect(self.save_audio)
         self.buffer.currentIndexChanged.connect(self.save_audio)
 
@@ -751,25 +760,38 @@ class WizardWindow(QMainWindow):
             if audio.input_device and not matched_device:
                 self.device.addItem(f"Unavailable: {audio.input_device}", None)
                 self.device.setCurrentIndex(self.device.count() - 1)
+            self._populate_audio_controls(self.device.currentData())
             for field, value in (
                 (self.input_channel, audio.input_channel),
                 (self.output_channel, audio.output_channel),
                 (self.loop_input, audio.loopback_input_channel or 2),
                 (self.loop_output, audio.loopback_output_channel or 2),
             ):
-                field.setValue(value)
+                index = field.findData(value)
+                if index < 0:
+                    field.addItem(f"Unavailable channel {value}", value)
+                    index = field.count() - 1
+                field.setCurrentIndex(index)
             self.loop_enabled.setChecked(audio.loopback_enabled)
-            self.buffer.setCurrentIndex(max(0, self.buffer.findData(audio.blocksize)))
+            index = self.buffer.findData(audio.blocksize)
+            if index >= 0:
+                self.buffer.setCurrentIndex(index)
+            self.capture_level.set_level(prefs["capture_level_dbfs"])
+            calibration = prefs.get("pending_calibration", {})
             for check, field, value in (
                 (
                     self.input_calibration,
                     self.input_dbu,
-                    workspace.project.input_level_dbu,
+                    calibration.get(
+                        "input_level_dbu", workspace.project.input_level_dbu
+                    ),
                 ),
                 (
                     self.output_calibration,
                     self.output_dbu,
-                    workspace.project.output_level_dbu,
+                    calibration.get(
+                        "output_level_dbu", workspace.project.output_level_dbu
+                    ),
                 ),
             ):
                 check.setChecked(value is not None)
@@ -813,15 +835,49 @@ class WizardWindow(QMainWindow):
         self._device_changed()
 
     def _device_changed(self, *_):
+        self.close_audio()
         info = self.device.currentData()
+        self._populate_audio_controls(info)
+        self.save_audio()
+
+    def _populate_audio_controls(self, info):
         if info:
-            self.input_channel.setMaximum(info.max_input_channels)
-            self.loop_input.setMaximum(info.max_input_channels)
-            self.output_channel.setMaximum(info.max_output_channels)
-            self.loop_output.setMaximum(info.max_output_channels)
+            result = capabilities(info)
+            same_device = getattr(self, "_audio_device_key", None) == (
+                info.host_api,
+                info.name,
+            )
+            self._audio_device_key = (info.host_api, info.name)
+            previous_buffer = self.buffer.currentData() if same_device else None
+            for combo, names, default in (
+                (self.input_channel, result.inputs, 1),
+                (self.loop_input, result.inputs, 2),
+                (self.output_channel, result.outputs, 1),
+                (self.loop_output, result.outputs, 2),
+            ):
+                previous = combo.currentData() or default
+                combo.blockSignals(True)
+                combo.clear()
+                for number, name in enumerate(names, 1):
+                    combo.addItem(name, number)
+                combo.setCurrentIndex(max(0, combo.findData(previous)))
+                combo.blockSignals(False)
+            self.buffer.blockSignals(True)
+            self.buffer.clear()
+            for size in result.buffers:
+                self.buffer.addItem(f"{size} samples", size)
+            if not result.buffers:
+                self.buffer.addItem("Driver managed (size not exposed)", 0)
+            wanted = (
+                previous_buffer
+                if previous_buffer in result.buffers
+                else result.default_buffer
+            )
+            self.buffer.setCurrentIndex(max(0, self.buffer.findData(wanted)))
+            self.buffer.setToolTip(result.note)
+            self.buffer.blockSignals(False)
             if min(info.max_input_channels, info.max_output_channels) < 2:
                 self.loop_enabled.setChecked(False)
-        self.save_audio()
 
     def audio_settings(self):
         info = self.device.currentData()
@@ -829,23 +885,25 @@ class WizardWindow(QMainWindow):
             host_api=info.host_api if info else None,
             input_device=info.name if info else None,
             output_device=info.name if info else None,
-            input_channel=self.input_channel.value(),
-            output_channel=self.output_channel.value(),
+            input_channel=self.input_channel.currentData() or 1,
+            output_channel=self.output_channel.currentData() or 1,
             loopback_input_channel=(
-                self.loop_input.value() if self.loop_enabled.isChecked() else None
+                self.loop_input.currentData() if self.loop_enabled.isChecked() else None
             ),
             loopback_output_channel=(
-                self.loop_output.value() if self.loop_enabled.isChecked() else None
+                self.loop_output.currentData()
+                if self.loop_enabled.isChecked()
+                else None
             ),
             blocksize=self.buffer.currentData() or 0,
         )
 
     def _diagram(self):
         self.diagram.channels = (
-            self.output_channel.value(),
-            self.input_channel.value(),
-            self.loop_output.value(),
-            self.loop_input.value(),
+            self.output_channel.currentData() or 1,
+            self.input_channel.currentData() or 1,
+            self.loop_output.currentData() or 2,
+            self.loop_input.currentData() or 2,
         )
         self.diagram.loopback = self.loop_enabled.isChecked()
         self.diagram.update()
@@ -864,14 +922,96 @@ class WizardWindow(QMainWindow):
     def save_calibration(self, *_):
         if self._loading or not self.workspace or self.busy():
             return
-        self.workspace.project.input_level_dbu = (
-            self.input_dbu.value() if self.input_calibration.isChecked() else None
-        )
-        self.workspace.project.output_level_dbu = (
+        send = self.input_dbu.value() if self.input_calibration.isChecked() else None
+        returned = (
             self.output_dbu.value() if self.output_calibration.isChecked() else None
         )
+        if (
+            self.workspace.preferences["capture_level_dbfs"]
+            != self.workspace.project.capture_level_dbfs
+        ):
+            self.workspace.preferences["pending_calibration"] = dict(
+                input_level_dbu=send, output_level_dbu=returned
+            )
+        else:
+            self.workspace.preferences.pop("pending_calibration", None)
+            self.workspace.project.input_level_dbu = send
+            self.workspace.project.output_level_dbu = returned
         self.workspace.save()
         self.refresh_training()
+
+    def save_capture_level(self, *_):
+        if self._loading or self.busy():
+            return
+        try:
+            level = self.capture_level.level()
+            if (
+                self.workspace
+                and level != self.workspace.preferences["capture_level_dbfs"]
+            ):
+                self.workspace.preferences["capture_level_dbfs"] = level
+                # The send metadata describes THIS attenuated capture setting.
+                # Changing it requires a fresh voltage measurement.
+                self.input_calibration.setChecked(False)
+                self.save_calibration()
+                self.workspace.save()
+                self.close_audio()
+                self.refresh_training()
+        except ValueError as error:
+            self.notify_error(error)
+
+    def _set_capture_level(self, level):
+        self.capture_level.set_level(level)
+        self.save_capture_level()
+
+    def _apply_level_calibration(self, check, field, value):
+        self._loading = True
+        try:
+            field.setValue(value)
+            check.setChecked(True)
+        finally:
+            self._loading = False
+        self.save_calibration()
+
+    def calibrate_levels(self):
+        if not self.workspace or not self.device.currentData():
+            self.notify_error(
+                "Create/open a project and select your audio interface before calibrating."
+            )
+            return
+        try:
+            self.close_audio()
+            dialog = LevelCalibrationDialog(
+                self.device.currentData(),
+                self.input_channel.currentData(),
+                self.output_channel.currentData(),
+                self.buffer.currentData() or 0,
+                self.capture_level.level(),
+                self.workspace.preferences.get("calibration_frequency", 1000.0),
+                self,
+                channel_names=(
+                    self.input_channel.currentText(),
+                    self.output_channel.currentText(),
+                ),
+            )
+            dialog.level_changed.connect(self._set_capture_level)
+            dialog.send_calibrated.connect(
+                lambda value: self._apply_level_calibration(
+                    self.input_calibration, self.input_dbu, value
+                )
+            )
+            dialog.return_calibrated.connect(
+                lambda value: self._apply_level_calibration(
+                    self.output_calibration, self.output_dbu, value
+                )
+            )
+            dialog.exec()
+            self.workspace.preferences["calibration_frequency"] = (
+                dialog.frequency.value()
+            )
+            self.workspace.save()
+        except ValueError as error:
+            self.notify_error(error)
 
     def import_inputs(self):
         if not self.workspace or self.busy():
@@ -963,6 +1103,7 @@ class WizardWindow(QMainWindow):
             )
             return
         try:
+            self.save_audio()
             session = self._get_session()
             self.route_status.setText("Checking return signal and timing…")
             self.run_audio(
@@ -1294,9 +1435,7 @@ class WizardWindow(QMainWindow):
         )
         self.capture_table.setHorizontalHeaderLabels(headers)
         if changed_kind:
-            sizes = (
-                (160, 85, 260, 120, 290) if static else (70, 220, 85, 200, 110, 230)
-            )
+            sizes = (160, 85, 260, 120, 290) if static else (70, 220, 85, 200, 110, 230)
             for column, width in enumerate(sizes):
                 header.resizeSection(column, width)
             saved = self.settings.value("capture_columns/" + kind)
@@ -1632,8 +1771,18 @@ class WizardWindow(QMainWindow):
             with logfile.open("rb") as stream:
                 stream.seek(max(0, logfile.stat().st_size - 18000))
                 content = stream.read().decode("utf-8", errors="replace")
+                content = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", content).replace(
+                    "\r", "\n"
+                )
             if content != self._log_content:
+                scrollbar = self.details.verticalScrollBar()
+                position = scrollbar.value()
+                follow = position >= scrollbar.maximum() - 2
                 self.details.setPlainText(content)
+                if follow:
+                    self.details.moveCursor(QTextCursor.MoveOperation.End)
+                else:
+                    scrollbar.setValue(position)
                 self._log_content = content
         self.update_enabled()
 

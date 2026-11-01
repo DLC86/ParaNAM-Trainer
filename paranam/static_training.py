@@ -61,7 +61,9 @@ def train(data_config, model_config, learning, output, callback):
         ]
         best = pl.callbacks.ModelCheckpoint(monitor="val_loss", save_top_k=1)
         trainer = pl.Trainer(
-            callbacks=[best, callback], default_root_dir=output, **learning["trainer"]
+            callbacks=[best, callback, pl.callbacks.TQDMProgressBar(refresh_rate=10)],
+            default_root_dir=output,
+            **learning["trainer"],
         )
         trainer.fit(model, *loaders, **learning.get("trainer_fit_kwargs", {}))
         if best.best_model_path:
@@ -104,6 +106,7 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         output = job / f"member-{member}"
         output.mkdir(exist_ok=True)
         learning = copy.deepcopy(spec["learning"])
+        learning["trainer"]["enable_progress_bar"] = True
         checkpoint = job / f"resume-{member}.ckpt"
         if checkpoint.exists():
             learning.setdefault("trainer_fit_kwargs", {})["ckpt_path"] = str(checkpoint)

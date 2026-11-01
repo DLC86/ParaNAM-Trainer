@@ -548,13 +548,17 @@ def _wav_frame_count(path: _Path) -> _Optional[int]:
         return None
 
 
-def playback_input_path(project_dir: _Path, x_path: str) -> _Path:
+def playback_input_path(
+    project_dir: _Path, x_path: str, level_dbfs: float = 0.0
+) -> _Path:
     """
     Where the "as played" copy of an input WAV lives: the input with the blip preamble in
     front and the tail behind, in ``captures_raw/``. Named after the input it was built
     from, so a project with more than two inputs gets one of these per input.
     """
     stem = _Path(x_path).stem
+    if level_dbfs:
+        stem += f"-send-{level_dbfs:.17g}dB"
     return (
         _Path(project_dir)
         / _CAPTURES_RAW_DIRNAME
@@ -700,6 +704,15 @@ class CaptureSession:
         self._write_playback_inputs(rate)
         return rate
 
+    def _send_gain(self) -> float:
+        level = self.project.capture_level_dbfs
+        gain = 0.0 if level is None else float(10 ** (level / 20))
+        if not gain:
+            raise CaptureSessionError(
+                "Capture output is muted (-inf). Choose a finite output level before recording."
+            )
+        return gain
+
     def _write_playback_inputs(self, sample_rate: int) -> None:
         """
         Save each input WAV as it will actually be played -- preamble, input, tail -- into
@@ -720,9 +733,14 @@ class CaptureSession:
             x_path = self.project.input_for_split(split)
             playback, _ = build_playback(self._inputs[split], sample_rate)
             path = playback_input_path(self.project_dir, x_path)
-            if _wav_frame_count(path) == len(playback):
-                continue
-            self._write_wav(path, playback, sample_rate)
+            if _wav_frame_count(path) != len(playback):
+                self._write_wav(path, playback, sample_rate)
+            if self.project.capture_level_dbfs:
+                path = playback_input_path(
+                    self.project_dir, x_path, self.project.capture_level_dbfs
+                )
+                if _wav_frame_count(path) != len(playback):
+                    self._write_wav(path, playback * self._send_gain(), sample_rate)
 
     def _input_for_split(self, split: str) -> tuple[_np.ndarray, int]:
         if split not in self._inputs:
@@ -1085,7 +1103,11 @@ class CaptureSession:
             else None
         )
         main, loopback = self._playrec(
-            playback, sample_rate, progress, cancel, loopback_playback
+            playback * self._send_gain(),
+            sample_rate,
+            progress,
+            cancel,
+            loopback_playback,
         )
         latency, crosscheck, disagreement, loopback_failed = self._resolve_latency(
             main, loopback, preamble
@@ -1129,7 +1151,11 @@ class CaptureSession:
         )
 
         main, loopback = self._playrec(
-            playback, sample_rate, progress, cancel, loopback_playback
+            playback * self._send_gain(),
+            sample_rate,
+            progress,
+            cancel,
+            loopback_playback,
         )
 
         latency, crosscheck, loopback_disagreement, loopback_failed = (
@@ -1512,7 +1538,15 @@ class CaptureSession:
             {
                 "y_path": entry.y_path,
                 "x_path": x_path,
-                "playback": playback_input_path(self.project_dir, x_path).name,
+                "playback": playback_input_path(
+                    self.project_dir,
+                    x_path,
+                    0.0 if loopback is not None else self.project.capture_level_dbfs,
+                ).name,
+                "main_playback": playback_input_path(
+                    self.project_dir, x_path, self.project.capture_level_dbfs
+                ).name,
+                "capture_level_dbfs": self.project.capture_level_dbfs,
                 "raw": amp_path.name,
                 "raw_loopback": loopback_path.name if loopback is not None else None,
                 "preamble_samples": preamble_samples,

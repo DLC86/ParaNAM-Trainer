@@ -262,6 +262,9 @@ class CaptureProject(_BaseModel):
     version: int = _PROJECT_VERSION
     name: str = ""
     capture_type: Literal["parametric", "static"] = "parametric"
+    capture_level_dbfs: _Optional[float] = _Field(
+        default=0.0, le=0, allow_inf_nan=False
+    )
     user_metadata: dict[str, _Any] = _Field(default_factory=dict)
     knobs: list[KnobModel | SwitchModel]
     seed: int = 0

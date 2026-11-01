@@ -6,7 +6,7 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.2.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.2.0-preview)**
+**[Download the 0.3.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.3.0-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts
@@ -51,7 +51,10 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 1. **Project & routing.** Create/open a project or pick a recent one. Choose your
    interface and channels. The connection diagram shows the reamp/rig/return path
    and optional clean timing loopback. Test the connection and optionally enter
-   input/output dBu calibration.
+   send/return dBu calibration. Channel selectors use driver labels, and buffer
+   choices come from the driver: 2048 samples is selected when available, otherwise
+   its highest supported value. When an API exposes no names or sizes, the UI says
+   so and uses its driver-managed buffer instead of offering invented choices.
 2. **Controls & plan.** Choose Parametric or Static batch (A2 Full by default, Lite
    selectable). Enter model metadata: name, author, gear type, manufacturer, model,
    tone type and notes. Existing custom metadata is preserved. In Parametric, add/edit knobs and named multi-position switches, choose
@@ -71,10 +74,13 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    2-opt improves the route without changing capture IDs or training data order.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
    epoch, best validation ESR, elapsed time and an estimate based on completed epoch
-   durations. Export is always `models/round-N/ParaNAM_HyperA2.nam`, containing both
+   durations. Epoch progress bars are also retained in the training details log. Export is always `models/round-N/ParaNAM_HyperA2.nam`, containing both
    Full and Lite with Full as the playback default. Static batches export one standard
    WaveNet A2 `.nam` per named item under `models/<run>/`, with its metadata and
-   input/output dBu calibration.
+   send/return dBu calibration. Channel selectors use driver labels, and buffer
+   choices come from the driver: 2048 samples is selected when available, otherwise
+   its highest supported value. When an API exposes no names or sizes, the UI says
+   so and uses its driver-managed buffer instead of offering invented choices.
 
 **Back** and the step sidebar let you revisit settings. Drafts are saved. A changed
 capture plan is confirmed before recordings are archived into `history/`; they are
@@ -94,6 +100,35 @@ The files' sources, sample counts and SHA-256 hashes are in
 [paranam/assets/manifest.json](paranam/assets/manifest.json). Recordings are still
 made separately for training and validation through the actual rig. Switch-only
 projects validate the same categorical states with the independent validation audio.
+
+## Guided level calibration and capture output
+
+Open **Calibrate send and return** in Level calibration. The tone starts only when
+**Start sine** is pressed; **Stop sine** and closing the dialog stop the output.
+Its default is 1000 Hz at 0 dBFS peak. Frequency is adjustable from 20 to 20000 Hz;
+output level accepts negative dBFS values or `-inf` for silence.
+
+1. Disconnect the gear and speakers. Drive the cable that will feed the gear,
+   including any reamp box, and measure its RMS voltage with a suitable meter.
+   Enter the voltage and apply send calibration: `send_dBu = 20 log10(V_RMS / 0.775)`.
+2. Stop the tone, then connect that same measured cable directly to the selected
+   return input, bypassing the gear. Restart the tone and confirm the direct patch.
+   The app measures digital RMS, expresses it as sine-equivalent peak dBFS, and
+   calculates `return_dBu = send_dBu - measured_dBFS`. Clipping blocks calibration
+   and prompts the user to lower input gain. Silence/noise is not accepted as a sine.
+3. Apply return calibration. Send and return values support three decimal places.
+
+The selected sine level is also the playback attenuation for **both training and
+validation captures**, including the main send's timing marks. Original training
+reference WAVs stay unchanged: the model learns the attenuated physical rig, and
+its input dBu metadata describes that effective send setting. Do not extrapolate
+send calibration back to the unattenuated DAC level. The separate timing loopback
+retains its normal reference level for reliable timing; raw audio stores both
+playback references and the applied attenuation. Muted capture playback is refused.
+
+Changing attenuation invalidates send calibration and requires a new capture plan;
+previous recordings and their calibration are archived, preventing mixed levels
+in one model. Return calibration remains valid while the input gain is unchanged.
 
 ## Capture timing
 

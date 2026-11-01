@@ -24,6 +24,7 @@ from nam.capture.project import (
 )
 
 DEFAULTS = {
+    "capture_level_dbfs": 0.0,
     "capture_type": "parametric",
     "static_size": "full",
     "mode": "normal",
@@ -62,6 +63,8 @@ class Workspace:
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
+        if "capture_level_dbfs" not in stored:
+            self.preferences["capture_level_dbfs"] = self.project.capture_level_dbfs
         if "capture_type" not in stored:
             self.preferences["capture_type"] = self.project.capture_type
         if not self.preferences.get("static_captures"):
@@ -205,6 +208,8 @@ class Workspace:
         return relative
 
     def plan_changed(self):
+        if self.preferences["capture_level_dbfs"] != self.project.capture_level_dbfs:
+            return True
         if self.preferences["capture_type"] != self.project.capture_type:
             return True
         if self.preferences["capture_type"] == "static":
@@ -264,20 +269,32 @@ class Workspace:
         return target
 
     def generate_plan(self):
+        from .calibration import gain_from_dbfs
+
+        if not gain_from_dbfs(self.preferences["capture_level_dbfs"]):
+            raise ValueError(
+                "Capture output is muted (-inf). Choose a finite output level before creating a capture plan."
+            )
         controls = self.controls()
         prefs = self.preferences
+        calibration = prefs.get("pending_calibration", {})
         if prefs["capture_type"] == "static":
             replacement = CaptureProject(
                 name=self.project.name,
                 knobs=[],
                 capture_type="static",
+                capture_level_dbfs=prefs["capture_level_dbfs"],
                 user_metadata=dict(self.project.user_metadata),
                 train_input=self.desired_train_input(),
                 validation_input="input_validation.wav",
                 sample_rate=self.project.sample_rate,
                 audio=self.project.audio.model_copy(deep=True),
-                input_level_dbu=self.project.input_level_dbu,
-                output_level_dbu=self.project.output_level_dbu,
+                input_level_dbu=calibration.get(
+                    "input_level_dbu", self.project.input_level_dbu
+                ),
+                output_level_dbu=calibration.get(
+                    "output_level_dbu", self.project.output_level_dbu
+                ),
                 train_window=self.project.train_window.model_copy(deep=True),
                 validation_window=self.project.validation_window.model_copy(deep=True),
                 n_train_lhs=len(prefs["static_captures"]),
@@ -291,6 +308,7 @@ class Workspace:
 
             install_signals(self.directory)
             self.project = replacement
+            prefs.pop("pending_calibration", None)
             self.save()
             return replacement
         switches_only = all(isinstance(c, SwitchSpec) for c in controls)
@@ -331,10 +349,15 @@ class Workspace:
                 for e in planned
             )
         replacement.audio = self.project.audio.model_copy(deep=True)
+        replacement.capture_level_dbfs = prefs["capture_level_dbfs"]
         replacement.user_metadata = dict(self.project.user_metadata)
         replacement.sample_rate = self.project.sample_rate
-        replacement.input_level_dbu = self.project.input_level_dbu
-        replacement.output_level_dbu = self.project.output_level_dbu
+        replacement.input_level_dbu = calibration.get(
+            "input_level_dbu", self.project.input_level_dbu
+        )
+        replacement.output_level_dbu = calibration.get(
+            "output_level_dbu", self.project.output_level_dbu
+        )
         replacement.train_window = self.project.train_window.model_copy(deep=True)
         replacement.validation_window = self.project.validation_window.model_copy(
             deep=True
@@ -347,6 +370,7 @@ class Workspace:
 
         install_signals(self.directory)
         self.project = replacement
+        prefs.pop("pending_calibration", None)
         self.save()
         return replacement
 
@@ -362,6 +386,8 @@ class Workspace:
         )
 
     def training_ready(self):
+        if self.preferences["capture_level_dbfs"] != self.project.capture_level_dbfs:
+            return False
         if not self.project.entries or not self.validation_matches():
             return False
         return all(
@@ -385,6 +411,11 @@ class Workspace:
         from nam.capture.export import build_data_config
 
         data = {
+            **(
+                {"capture_level_dbfs": self.project.capture_level_dbfs}
+                if self.project.capture_level_dbfs != 0.0
+                else {}
+            ),
             "capture_type": self.project.capture_type,
             "static_size": (
                 self.preferences["static_size"]

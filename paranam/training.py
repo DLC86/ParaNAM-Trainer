@@ -114,7 +114,7 @@ def make_job(workspace, resume=False):
             max_epochs=prefs["epochs"],
             accelerator=prefs["device"],
             devices=1,
-            enable_progress_bar=False,
+            enable_progress_bar=True,
             enable_model_summary=False,
             logger=False,
             num_sanity_val_steps=0,
@@ -429,6 +429,7 @@ def run_job(job):
                 output = job / f"member-{member}"
                 output.mkdir(exist_ok=True)
                 learning = json.loads(json.dumps(spec["learning"]))
+                learning["trainer"]["enable_progress_bar"] = True
                 if (
                     spec["preferences"]["device"] == "auto"
                     and os.environ.get("PARANAM_FORCE_CPU") == "1"
@@ -446,7 +447,10 @@ def run_job(job):
                     output,
                     no_show=True,
                     make_plots=False,
-                    extra_callbacks=[progress],
+                    extra_callbacks=[
+                        progress,
+                        pl.callbacks.TQDMProgressBar(refresh_rate=10),
+                    ],
                 )
                 completed.append(member)
                 shared.update(

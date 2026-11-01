@@ -69,12 +69,12 @@ def test_both_training_methods_only_build_nested_hyper_a2(workspace, mode, membe
     assert spec["model"]["net"]["name"] == "HyperA2"
     assert spec["model"]["net"]["config"]["size"] == "full"
     assert spec["learning"]["torch_compile"]["enabled"] is False
-    assert spec["learning"]["trainer"]["enable_progress_bar"] is False
+    assert spec["learning"]["trainer"]["enable_progress_bar"] is True
 
 
 @pytest.mark.parametrize("epochs", [1, 2])
 def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
-    workspace, monkeypatch, epochs
+    workspace, monkeypatch, epochs, capsys
 ):
     workspace.preferences["epochs"] = epochs
     workspace.save()
@@ -101,6 +101,10 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     assert [s["name"] for s in final["config"]["submodels"]] == ["lite", "full"]
     assert final["metadata"]["input_level_dbu"] == 18
     assert final["metadata"]["output_level_dbu"] == 12
+    captured = capsys.readouterr()
+    assert (
+        "Epoch" in captured.out + captured.err and "100%" in captured.out + captured.err
+    )
     resumed = torch.load(job / "resume-0.ckpt", map_location="cpu", weights_only=False)
     assert resumed["global_step"] >= checkpoint["global_step"]
     if epochs > 1:
