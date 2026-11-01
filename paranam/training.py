@@ -44,16 +44,54 @@ def command(job, action):
     atomic_write_json(Path(job) / "command.json", {"action": action})
 
 
+_legacy_checkpoint_cache = {}
+
+
+def legacy_checkpoint(job, member):
+    """Find a completed-epoch Lightning checkpoint in an older failed job."""
+    files = sorted((Path(job) / f"member-{member}" / "checkpoints").glob("*.ckpt"))
+    try:
+        key = tuple(
+            (str(path), path.stat().st_size, path.stat().st_mtime_ns) for path in files
+        )
+    except OSError:
+        return None
+    if key in _legacy_checkpoint_cache:
+        return _legacy_checkpoint_cache[key]
+    import torch
+
+    candidates = []
+    for path in files:
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=False)
+            epoch = int(state["epoch"])
+            processed = state["loops"]["fit_loop"]["epoch_progress"]["current"][
+                "processed"
+            ]
+            if processed >= epoch + 1 and state.get("optimizer_states"):
+                candidates.append((int(state["global_step"]), epoch + 1, path))
+        except Exception:
+            # A process may have died while writing an old non-atomic checkpoint.
+            continue
+    result = max(candidates, default=None)
+    _legacy_checkpoint_cache[key] = result
+    return result
+
+
 def job_can_resume(workspace, job):
     if not job:
         return False
     spec = read_json(Path(job) / "spec.json", {})
     progress = job_progress(job)
-    if spec.get("fingerprint") != workspace.fingerprint():
+    if spec.get("fingerprint") != workspace.fingerprint(
+        batch_size=spec.get("preferences", {}).get("batch_size")
+    ):
         return False
     member = progress.get("member", 0)
-    return (Path(job) / f"resume-{member}.ckpt").is_file() or member >= spec.get(
-        "members", 1
+    return (
+        (Path(job) / f"resume-{member}.ckpt").is_file()
+        or member >= spec.get("members", 1)
+        or legacy_checkpoint(job, member) is not None
     )
 
 
@@ -76,6 +114,35 @@ def make_job(workspace, resume=False):
                 raise ValueError(
                     "The saved checkpoint does not match this project's current captures/settings."
                 )
+            spec = read_json(job / "spec.json")
+            member = job_progress(job).get("member", 0)
+            target = job / f"resume-{member}.ckpt"
+            if not target.exists():
+                recovered = legacy_checkpoint(job, member)
+                if recovered:
+                    step, completed, source = recovered
+                    temporary = target.with_suffix(".pending.ckpt")
+                    shutil.copy2(source, temporary)
+                    os.replace(temporary, target)
+                    atomic_write_json(
+                        job / f"resume-{member}.json",
+                        dict(
+                            completed_epoch=completed,
+                            restart_epoch=completed + 1,
+                            global_step=step,
+                        ),
+                    )
+            # Restarting a complete epoch allows a different physical batch size or
+            # device after OOM/device failure, while keeping model/data checks strict.
+            for split in ("train_dataloader", "val_dataloader"):
+                spec["learning"][split]["batch_size"] = workspace.preferences[
+                    "batch_size"
+                ]
+            for key in ("batch_size", "device"):
+                spec["preferences"][key] = workspace.preferences[key]
+            spec["learning"]["trainer"]["accelerator"] = workspace.preferences["device"]
+            spec["fingerprint"] = workspace.fingerprint()
+            atomic_write_json(job / "spec.json", spec)
             atomic_write_json(job / "command.json", {})
             return job
         previous = current_job(workspace.directory)
@@ -175,6 +242,35 @@ def build_progress_callback(job, spec, member, shared):
             self.epoch_started = None
             self.resume_epoch = shared.get("epoch", 0)
 
+        def save_boundary(self, trainer, completed):
+            temporary = job / f"resume-{member}.pending.ckpt"
+            target = job / f"resume-{member}.ckpt"
+            trainer.save_checkpoint(temporary)
+            os.replace(temporary, target)
+            info = dict(
+                completed_epoch=completed,
+                restart_epoch=completed + 1,
+                global_step=trainer.global_step,
+                best_esr=self.best,
+            )
+            atomic_write_json(job / f"resume-{member}.json", info)
+            self.write(checkpoint=str(target), resume_available=True, **info)
+
+        def check_action(self):
+            action = self.action()
+            if action == "pause":
+                info = read_json(job / f"resume-{member}.json", {})
+                self.write(
+                    status="paused",
+                    batch_fraction=0,
+                    message=f"Paused. Resume restarts epoch {info.get('restart_epoch', 1)} from the last complete checkpoint.",
+                    **info,
+                )
+                raise TrainingPaused()
+            if action == "stop":
+                self.write(status="stopped", message="Training cancelled")
+                raise TrainingStopped()
+
         def state_dict(self):
             import random
             import numpy as np
@@ -228,16 +324,49 @@ def build_progress_callback(job, spec, member, shared):
             return read_json(job / "command.json", {}).get("action")
 
         def on_train_start(self, trainer, module):
-            self.write(device=str(module.device), message="Training " + label)
+            import torch
+
+            device_name = (
+                torch.cuda.get_device_name(module.device)
+                if module.device.type == "cuda"
+                else str(module.device)
+            )
+            batches = trainer.num_training_batches
+            batches = int(batches) if math.isfinite(batches) else None
+            self.write(
+                device=str(module.device),
+                device_name=device_name,
+                batch_size=spec["preferences"]["batch_size"],
+                train_batches=batches,
+                message="Training " + label,
+            )
+            print(
+                f"Training device: {device_name}; batch size: {spec['preferences']['batch_size']}; batches per epoch: {batches}; model: {label}",
+                flush=True,
+            )
+            if not (job / f"resume-{member}.ckpt").exists():
+                self.save_boundary(trainer, 0)
+            self.check_action()
+
+        def on_train_batch_start(self, trainer, module, batch, batch_idx):
+            self.check_action()
+
+        def on_validation_batch_start(
+            self, trainer, module, batch, batch_idx, dataloader_idx=0
+        ):
+            self.check_action()
+
+        def on_validation_batch_end(
+            self, trainer, module, outputs, batch, batch_idx, dataloader_idx=0
+        ):
+            self.check_action()
 
         def on_train_epoch_start(self, trainer, module):
             self.epoch_started = time.monotonic()
             self.write(epoch=trainer.current_epoch + 1, batch_fraction=0)
 
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
-            if self.action() == "stop":
-                self.write(status="stopped", message="Training cancelled")
-                raise TrainingStopped()
+            self.check_action()
             # Throttle disk/GUI updates on short CPU batches.
             if batch_idx % 10 == 0:
                 batches = trainer.num_training_batches
@@ -248,16 +377,13 @@ def build_progress_callback(job, spec, member, shared):
                 )
                 self.write(
                     batch_fraction=fraction,
-                    message=(
-                        "Pause requested — finishing this epoch safely"
-                        if self.action() == "pause"
-                        else "Training " + label
-                    ),
+                    message="Training " + label,
                 )
 
         def on_validation_end(self, trainer, module):
             if trainer.sanity_checking:
                 return
+            self.check_action()
             metric = trainer.callback_metrics.get("ESR")
             esr = float(metric.detach().cpu()) if metric is not None else None
             if esr is not None and math.isfinite(esr):
@@ -273,31 +399,29 @@ def build_progress_callback(job, spec, member, shared):
             eta = remaining * sum(self.epoch_times) / len(self.epoch_times)
             self.write(
                 epoch=trainer.current_epoch + 1,
-                completed_epoch=trainer.current_epoch + 1,
                 eta=eta,
                 batch_fraction=1,
             )
-            if self.action() in ("pause", "stop"):
-                # Complete Lightning's epoch-end hooks and loop counters before
-                # checkpointing. Saving from inside validation leaves a partial epoch
-                # whose metric accumulators cannot be reconstructed after a restart.
-                trainer.should_stop = True
 
         def on_fit_end(self, trainer, module):
-            temporary = job / f"resume-{member}.pending.ckpt"
-            trainer.save_checkpoint(temporary)
-            os.replace(temporary, job / f"resume-{member}.ckpt")
-            self.write(checkpoint=str(job / f"resume-{member}.ckpt"))
-            if self.action() == "pause":
-                self.write(
-                    status="paused",
-                    message="Saved — safe to close the app and resume later",
-                )
-                raise TrainingPaused()
-            if self.action() == "stop":
-                raise TrainingStopped()
+            self.save_boundary(trainer, trainer.current_epoch)
+            self.check_action()
 
     return ProgressCallback()
+
+
+def epoch_checkpoint(progress, job):
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    class EpochCheckpoint(ModelCheckpoint):
+        """Run after module epoch-end hooks, like Lightning's native checkpoints."""
+
+        def on_train_epoch_end(self, trainer, module):
+            progress.save_boundary(trainer, trainer.current_epoch + 1)
+
+    return EpochCheckpoint(
+        dirpath=job, save_top_k=0, save_last=False, save_on_train_epoch_end=True
+    )
 
 
 def _propose_captures(workspace, job, spec, shared):
@@ -435,6 +559,12 @@ def run_job(job):
                     and os.environ.get("PARANAM_FORCE_CPU") == "1"
                 ):
                     learning["trainer"]["accelerator"] = "cpu"
+                pinned = (
+                    learning["trainer"]["accelerator"] != "cpu"
+                    and torch.cuda.is_available()
+                )
+                for split in ("train_dataloader", "val_dataloader"):
+                    learning[split]["pin_memory"] = pinned
                 checkpoint = job / f"resume-{member}.ckpt"
                 if checkpoint.exists():
                     learning["trainer_fit_kwargs"]["ckpt_path"] = str(checkpoint)
@@ -449,6 +579,7 @@ def run_job(job):
                     make_plots=False,
                     extra_callbacks=[
                         progress,
+                        epoch_checkpoint(progress, job),
                         pl.callbacks.TQDMProgressBar(refresh_rate=10),
                     ],
                 )
@@ -489,6 +620,7 @@ def run_job(job):
                 additions = _propose_captures(workspace, job, spec, shared)
             shared.update(
                 status="needs_captures" if additions else "completed",
+                epoch=spec["preferences"]["epochs"],
                 eta=0,
                 message=(
                     f"{len(additions)} new captures suggested"
@@ -507,11 +639,15 @@ def run_job(job):
             shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
             atomic_write_json(job / "progress.json", shared)
         except Exception as error:
+            member = shared.get("member", 0)
+            saved = read_json(job / f"resume-{member}.json", {})
             shared.update(
                 status="failed",
                 message=str(error),
                 traceback=traceback.format_exc(),
                 eta=None,
+                resume_available=(job / f"resume-{member}.ckpt").is_file(),
+                **saved,
             )
             shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
             atomic_write_json(job / "progress.json", shared)

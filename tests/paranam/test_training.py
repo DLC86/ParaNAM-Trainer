@@ -83,13 +83,13 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     training.run_job(job)
     progress = training.job_progress(job)
     assert progress["status"] == "paused"
-    assert progress["completed_epoch"] == 1
-    assert progress["best_esr"] is not None
+    assert progress["completed_epoch"] == 0
+    assert progress["restart_epoch"] == 1
     checkpoint = torch.load(
         job / "resume-0.ckpt", map_location="cpu", weights_only=False
     )
     assert checkpoint["optimizer_states"] and checkpoint["lr_schedulers"]
-    assert checkpoint["global_step"] > 0
+    assert checkpoint["global_step"] == 0
     assert training.job_can_resume(workspace, job)
     assert training.make_job(workspace, resume=True) == job
     training.run_job(job)
@@ -118,6 +118,96 @@ def test_stop_does_not_publish_an_incomplete_model(workspace, monkeypatch):
     assert training.job_progress(job)["status"] == "stopped"
     assert not (workspace.directory / "models").exists()
     assert all(e.status == "captured" for e in workspace.project.entries)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_mid_epoch_pause_restarts_only_the_incomplete_epoch(
+    workspace, monkeypatch, legacy
+):
+    from nam.train.parametric import _ParametricLightningModule
+
+    job = tiny_job(workspace, monkeypatch)
+    original = _ParametricLightningModule.training_step
+    calls, requested = [], []
+
+    def step(module, batch, index):
+        calls.append((module.current_epoch, index))
+        result = original(module, batch, index)
+        if module.current_epoch == 1 and not requested:
+            requested.append(True)
+            training.command(job, "pause")
+        return result
+
+    monkeypatch.setattr(_ParametricLightningModule, "training_step", step)
+    training.run_job(job)
+    assert training.job_progress(job)["status"] == "paused"
+    assert training.job_progress(job)["completed_epoch"] == 1
+    checkpoint = torch.load(
+        job / "resume-0.ckpt", map_location="cpu", weights_only=False
+    )
+    assert checkpoint["global_step"] == 1
+    if legacy:
+        (job / "resume-0.ckpt").unlink()
+        (job / "resume-0.json").unlink()
+        assert training.job_can_resume(workspace, job)
+    before = len(calls)
+    training.make_job(workspace, resume=True)
+    training.run_job(job)
+    assert calls[before:] == [(1, 0)]
+    assert training.job_progress(job)["status"] == "completed"
+    final = torch.load(job / "resume-0.ckpt", map_location="cpu", weights_only=False)
+    assert final["global_step"] == 2
+    assert final["lr_schedulers"][0]["last_epoch"] == 2
+
+
+def test_partial_or_corrupt_legacy_checkpoints_are_not_offered_for_resume(tmp_path):
+    folder = tmp_path / "member-0/checkpoints"
+    folder.mkdir(parents=True)
+    torch.save(
+        dict(
+            epoch=0,
+            global_step=3,
+            optimizer_states=[{}],
+            loops={"fit_loop": {"epoch_progress": {"current": {"processed": 0}}}},
+        ),
+        folder / "partial.ckpt",
+    )
+    (folder / "corrupt.ckpt").write_bytes(b"unfinished checkpoint")
+    assert training.legacy_checkpoint(tmp_path, 0) is None
+
+
+def test_error_can_resume_from_last_complete_epoch_with_a_smaller_batch(
+    workspace, monkeypatch
+):
+    from nam.train.parametric import _ParametricLightningModule
+
+    workspace.preferences["batch_size"] = 2
+    workspace.save()
+    job = tiny_job(workspace, monkeypatch)
+    original = _ParametricLightningModule.training_step
+    failed = []
+
+    def step(module, batch, index):
+        if module.current_epoch == 1 and not failed:
+            failed.append(True)
+            raise RuntimeError("simulated GPU memory error")
+        return original(module, batch, index)
+
+    monkeypatch.setattr(_ParametricLightningModule, "training_step", step)
+    with pytest.raises(RuntimeError, match="simulated GPU"):
+        training.run_job(job)
+    progress = training.job_progress(job)
+    assert progress["status"] == "failed" and progress["resume_available"]
+    assert progress["completed_epoch"] == 1 and progress["restart_epoch"] == 2
+    workspace.preferences["batch_size"] = 1
+    workspace.save()
+    assert training.job_can_resume(workspace, job)
+    assert training.make_job(workspace, resume=True) == job
+    assert (
+        read_json(job / "spec.json")["learning"]["train_dataloader"]["batch_size"] == 1
+    )
+    training.run_job(job)
+    assert training.job_progress(job)["status"] == "completed"
 
 
 def test_changed_settings_cannot_resume_an_old_checkpoint(workspace):

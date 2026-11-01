@@ -85,7 +85,9 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 **Back** and the step sidebar let you revisit settings. Drafts are saved. A changed
 capture plan is confirmed before recordings are archived into `history/`; they are
 preserved, not deleted or silently relabelled. A saved training checkpoint may only
-resume against the same captured data, control definitions and training settings.
+resume against the same captured data, control definitions and model settings.
+Batch size and execution device may be changed before resuming, for example after
+a GPU-memory error.
 
 ## Included input signals
 
@@ -143,15 +145,35 @@ available. Replaced accepted audio is archived rather than silently reused.
 
 ## Pause, stop and resume
 
-**Pause & save** finishes the current epoch, then saves model weights, optimizer,
-scheduler, loop counters and random-generator state. The window can close safely
-once saved. Open the project after restarting the computer and choose **Resume
-training**. Closing during training offers to pause safely first.
+**Pause & save** stops at the next train/validation batch boundary, without
+waiting for the epoch to finish. The incomplete epoch is discarded. Resume reloads
+the optimizer, scheduler, loop counters and RNG from the last complete epoch and
+restarts the interrupted epoch. If paused before completing the first epoch, it
+restarts from the saved initial state. A running GPU operation must reach the
+batch boundary; it is not interrupted inside a CUDA kernel.
 
-**Stop** cancels at the next training batch boundary, retaining the captured WAVs and
-previous saved runs. It does not publish an incomplete current model. Detailed logs
-remain in the project's training folder. ETA covers training in the current round,
-not the time needed to manually capture future active-learning suggestions.
+An atomic rolling checkpoint is saved initially and after every complete epoch,
+so unexpected training errors and process interruption also leave a recovery point.
+Fix the error and choose **Resume training**; batch size may be lowered after OOM,
+or the execution device changed. Older jobs with a complete native Lightning
+checkpoint can be recovered even if they have no ParaNAM resume file. Corrupt or
+partial-epoch checkpoints are not used. The window can close safely after Pause.
+
+**Stop** cancels at the next batch boundary, retaining captured WAVs and previous
+saved runs. It does not publish an incomplete current model. Details remain in the
+training log. ETA covers the current round's training, not future manual captures.
+
+## GPU training throughput
+
+New projects default to batch **32**, matching the reference HyperWaveNet recipe;
+existing projects keep their chosen batch. The log and training status show the
+actual device, batch size and batches per epoch. CUDA data transfers use pinned
+host memory. Both Full and Lite are still trained and exported together.
+
+A controlled RTX 3070 Laptop microbenchmark found HyperA2 at batch 32 processed
+about **5 times** as many windows per second as batch 4. At the same batch 32,
+Full+Lite cost about **1.5 times** HyperWaveNet. These are isolated GPU measurements,
+not a promised epoch time on other GPUs. See [measurement details](docs/paranam-performance.md).
 
 ## Active learning
 

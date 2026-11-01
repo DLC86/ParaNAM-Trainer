@@ -37,6 +37,7 @@ def train(data_config, model_config, learning, output, callback):
         get_joint_dataset_hooks,
     )
     from nam.train.lightning_module import LightningModule
+    from .training import epoch_checkpoint
 
     model = LightningModule.init_from_config(model_config)
     data = copy.deepcopy(data_config)
@@ -61,7 +62,12 @@ def train(data_config, model_config, learning, output, callback):
         ]
         best = pl.callbacks.ModelCheckpoint(monitor="val_loss", save_top_k=1)
         trainer = pl.Trainer(
-            callbacks=[best, callback, pl.callbacks.TQDMProgressBar(refresh_rate=10)],
+            callbacks=[
+                best,
+                callback,
+                epoch_checkpoint(callback, output.parent),
+                pl.callbacks.TQDMProgressBar(refresh_rate=10),
+            ],
             default_root_dir=output,
             **learning["trainer"],
         )
@@ -80,6 +86,7 @@ def train(data_config, model_config, learning, output, callback):
 
 def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
     import pytorch_lightning as pl
+    import torch
     from .training import build_progress_callback, read_json
 
     completed = shared.get("completed_members", [])
@@ -117,6 +124,11 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             and os.environ.get("PARANAM_FORCE_CPU") == "1"
         ):
             learning["trainer"]["accelerator"] = "cpu"
+        pinned = (
+            learning["trainer"]["accelerator"] != "cpu" and torch.cuda.is_available()
+        )
+        for split in ("train_dataloader", "val_dataloader"):
+            learning[split]["pin_memory"] = pinned
         shared.update(
             elapsed=elapsed_base + time.monotonic() - clock_start,
             message=f"Training A2 {spec['preferences']['static_size'].title()}: {capture['name']}",

@@ -111,9 +111,25 @@ def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, siz
     )
     monkeypatch.setattr("nam.models.base._Base._metadata_gain", lambda *a, **k: 0.5)
     monkeypatch.chdir(ws.directory)
-    training.command(job, "pause")
+    if size == "lite":
+        training.command(job, "pause")
+    else:
+        from nam.train.lightning_module import LightningModule
+
+        original = LightningModule.training_step
+        requested = []
+
+        def pause_second_epoch(module, batch, index):
+            result = original(module, batch, index)
+            if module.current_epoch == 1 and not requested:
+                requested.append(True)
+                training.command(job, "pause")
+            return result
+
+        monkeypatch.setattr(LightningModule, "training_step", pause_second_epoch)
     training.run_job(job)
     assert training.job_progress(job)["status"] == "paused"
+    assert training.job_progress(job)["completed_epoch"] == (0 if size == "lite" else 1)
     assert not (ws.directory / "models").exists()
     assert training.make_job(ws, resume=True) == job
     training.run_job(job)

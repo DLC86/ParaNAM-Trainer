@@ -543,7 +543,10 @@ class WizardWindow(QMainWindow):
         self.epochs.setValue(200)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 128)
-        self.batch_size.setValue(4)
+        self.batch_size.setValue(32)
+        self.batch_size.setToolTip(
+            "32 matches the reference HyperWaveNet trainer and improves GPU throughput. Reduce it if GPU memory is insufficient; it can also be changed before resuming."
+        )
         self.accelerator = QComboBox()
         self.accelerator.addItem(
             "Automatic — use a supported GPU when available", "auto"
@@ -555,7 +558,7 @@ class WizardWindow(QMainWindow):
         box.addLayout(form)
         box.addWidget(
             label(
-                "Full and Lite are trained together. Pause saves the optimizer and training state at the end of the current epoch.",
+                "Full and Lite are trained together. Pause stops at the next batch boundary; resume restarts the interrupted epoch from its last complete checkpoint.",
                 "muted",
             )
         )
@@ -1692,7 +1695,7 @@ class WizardWindow(QMainWindow):
         if self.job and self.process:
             training.command(self.job, "pause")
             self.training_status.setText(
-                "Pause requested. Finishing this epoch, then saving a complete checkpoint…"
+                "Pausing at the next batch boundary. The interrupted epoch will restart from its last complete checkpoint."
             )
             self.pause_button.setEnabled(False)
 
@@ -1741,10 +1744,17 @@ class WizardWindow(QMainWindow):
             return
         status = progress.get("status", "starting")
         message = progress.get("message", status.replace("_", " ").title())
+        if status == "failed" and progress.get("resume_available"):
+            message += f"\nA checkpoint is available. Resume restarts epoch {progress.get('restart_epoch', 1)}. You can reduce batch size after a memory error."
         if self.process is None and status in ("running", "scoring", "starting"):
             message = "Previous session interrupted. Resume from the last complete saved epoch."
         self.training_status.setText(
             f"Round {progress.get('round', 1)} · Model {min(progress.get('member', 0) + 1, progress.get('members', 1))} / {progress.get('members', 1)}\n{message}"
+            + (
+                f"\n{progress['device_name']} · batch {progress.get('batch_size')} · {progress.get('train_batches')} batches per epoch"
+                if progress.get("device_name")
+                else ""
+            )
         )
         epoch, epochs = progress.get("epoch", 0), progress.get("epochs", 1)
         self.metrics["epoch"].setText(f"{epoch} / {epochs}")
@@ -1867,7 +1877,7 @@ class WizardWindow(QMainWindow):
                 answer = QMessageBox.question(
                     self,
                     "Save training before closing?",
-                    "Pause at the end of the current epoch and close when the checkpoint is safely saved? You can resume after restarting the computer.",
+                    "Pause at the next batch boundary and close? Resume will restart the interrupted epoch from the last complete checkpoint, even after restarting the computer.",
                 )
                 if answer != QMessageBox.StandardButton.Yes:
                     event.ignore()

@@ -29,7 +29,7 @@ DEFAULTS = {
     "static_size": "full",
     "mode": "normal",
     "epochs": 200,
-    "batch_size": 4,
+    "batch_size": 32,
     "device": "auto",
     "rounds": 2,
     "additions": 8,
@@ -406,7 +406,7 @@ class Workspace:
             for e in self.project.entries
         )
 
-    def fingerprint(self):
+    def fingerprint(self, *, batch_size=None):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import build_data_config
 
@@ -461,4 +461,6 @@ class Workspace:
             path = self.directory / relative
             stat = path.stat()
             data["files"].append([relative, stat.st_size, stat.st_mtime_ns])
+        if batch_size is not None:
+            data["settings"]["batch_size"] = batch_size
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

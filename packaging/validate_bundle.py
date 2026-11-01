@@ -93,6 +93,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
         print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
         raise RuntimeError(f"Frozen training worker could not pause: {progress}")
     assert (job / "resume-0.ckpt").is_file()
+    assert (
+        progress["completed_epoch"] == 0
+    ), "Pause must not wait for an epoch to finish"
     assert make_job(workspace, resume=True) == job
     result = subprocess.run(
         [
@@ -185,6 +188,7 @@ def validate_static(executable, build_directory):
             print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
             raise RuntimeError(f"Frozen static batch failed: {progress}")
         if expected == "paused":
+            assert progress["completed_epoch"] == 0
             assert not (directory / "models").exists()
             assert make_job(ws, resume=True) == job
     assert len(progress["exports"]) == 2
