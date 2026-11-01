@@ -37,6 +37,16 @@ def test_silence_noise_and_clipping_are_not_accepted_as_calibration():
     assert measure_sine(x, 48000, 1000)["clipping"]
 
 
+@pytest.mark.parametrize("frequency", [20.0, 21.0, 50.0])
+def test_return_rms_is_unbiased_for_real_callback_window_lengths(frequency):
+    samples = (
+        0.25 * np.sin(np.arange(24576) * 2 * np.pi * frequency / 48000 + 0.7) + 0.01
+    )
+    measured = measure_sine(samples, 48000, frequency)
+    assert measured["valid"]
+    assert measured["dbfs"] == pytest.approx(20 * math.log10(0.25), abs=0.001)
+
+
 def test_tone_send_and_return_share_capture_attenuation(qapp):
     dialog = LevelCalibrationDialog(DEVICE, 1, 2, 2048, -12.0)
     assert dialog.frequency.value() == 1000

@@ -37,9 +37,17 @@ def volts_to_dbu(volts):
 
 
 def measure_sine(samples, rate, frequency):
-    y = np.asarray(samples, dtype=np.float64)
-    y = y - y.mean()
     peak = float(np.max(np.abs(samples)))
+    # Callback block lengths need not contain an integer number of cycles. Trim
+    # to whole periods so low-frequency RMS is not biased by the window's phase.
+    periods = int(len(samples) * frequency / rate)
+    length = (
+        min(len(samples), round(periods * rate / frequency))
+        if periods
+        else len(samples)
+    )
+    y = np.asarray(samples[:length], dtype=np.float64)
+    y = y - y.mean()
     phase = np.arange(len(y)) * (2 * np.pi * frequency / rate)
     basis = np.column_stack((np.sin(phase), np.cos(phase)))
     fit = np.linalg.lstsq(basis, y, rcond=None)[0]
