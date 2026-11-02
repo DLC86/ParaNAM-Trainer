@@ -236,7 +236,8 @@ def make_job(workspace, resume=False):
                 drop_last=(split == "train_dataloader"),
             )
         learning["val_dataloader"]["batch_size"] = 1
-        learning["trainer"].pop("gradient_clip_val", None)
+        if is_static:
+            learning["trainer"].pop("gradient_clip_val", None)
         learning["trainer"].update(
             max_epochs=prefs["epochs"],
             accelerator=prefs["device"],

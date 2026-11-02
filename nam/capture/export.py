@@ -314,6 +314,7 @@ def build_hyper_a2_model_config(project: CaptureProject) -> dict[str, _Any]:
     config["size"] = "full"
     config["hypernet"].update(mode="full", selector={})
     model["optimizer"]["lr"] = 0.004
+    model["hypernet_lr_scale"] = 0.1
     model["loss"]["training_recipe"] = "a2"
     model["net"]["name"] = "HyperA2"
     return model
@@ -438,8 +439,7 @@ def build_hyper_learning_config(project: CaptureProject) -> dict[str, _Any]:
 
 
 def build_hyper_a2_learning_config(project: CaptureProject) -> dict[str, _Any]:
-    learning = _build_learning_config(gradient_clip_val=None)
-    learning["trainer"].pop("gradient_clip_val", None)
+    learning = _build_learning_config(gradient_clip_val=1.0)
     learning["train_dataloader"]["batch_size"] = 16
     learning["val_dataloader"]["batch_size"] = 1
     learning["torch_compile"] = {"enabled": False}

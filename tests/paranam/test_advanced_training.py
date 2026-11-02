@@ -30,7 +30,11 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
     assert all(item["ny"] is None for item in spec["data"]["validation"])
     assert spec["learning"]["val_dataloader"]["batch_size"] == 1
     assert spec["learning"]["train_dataloader"]["drop_last"] is True
-    assert "gradient_clip_val" not in spec["learning"]["trainer"]
+    if kind == "static":
+        assert "gradient_clip_val" not in spec["learning"]["trainer"]
+    else:
+        assert spec["learning"]["trainer"]["gradient_clip_val"] == 1.0
+        assert spec["model"]["hypernet_lr_scale"] == 0.1
     assert not spec["data"].get("joint")  # User explicitly excludes RMS normalization.
     if kind == "parametric":
         assert spec["model"]["net"]["config"]["hypernet"]["mode"] == "full"

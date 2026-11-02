@@ -280,13 +280,15 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
     def net(self) -> _nn.Module:
         return self._net
 
-    def _make_optimizer(self, default_class="Adam", **defaults):
+    def _make_optimizer(self, default_class="Adam", *, parameters=None, **defaults):
         config = {**defaults, **self._optimizer_config}
         name = config.pop("class", default_class)
         optimizers = {"Adam": _torch.optim.Adam, "AdamW": _torch.optim.AdamW}
         if name not in optimizers:
             raise ValueError(f"Unsupported optimizer {name!r}; choose Adam or AdamW")
-        return optimizers[name](self.parameters(), **config)
+        return optimizers[name](
+            self.parameters() if parameters is None else parameters, **config
+        )
 
     def configure_optimizers(self):
         optimizer = self._make_optimizer()

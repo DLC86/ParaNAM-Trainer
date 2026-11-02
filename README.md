@@ -86,7 +86,12 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    Weight Decay are inside **Advanced training settings**, initially collapsed.
    Both modes follow the A2 recipe: LR 0.004, decay 0.994, NY 8192, MRSTFT enabled
    with weight 0.0005, and weight decay 3.17e-7. Existing saved custom values are
-   retained. Validation uses each full recording with batch 1. RMS normalization
+   retained. New HyperA2 runs use 0.1 times the selected LR for the hypernetwork
+   (0.0004 at the default audio-weight LR of 0.004), gradient norm clipping at 1.0
+   and nonfinite-gradient protection. This fixes the unstable all-weight updates
+   introduced in 0.4.2; see [the diagnosis](docs/a2-training-comparison.md#hypernetwork-stability-fix).
+   Start a new run to use this recipe; resuming an old run retains its saved recipe.
+   Validation uses each full recording with batch 1. RMS normalization
    is disabled, preserving capture output levels across control settings.
    Changing the recipe requires a new run; batch size and device can be changed
    when resuming.

@@ -1,4 +1,5 @@
 import json as _json
+from math import isfinite as _isfinite
 from dataclasses import dataclass as _dataclass
 from dataclasses import fields as _fields
 from pathlib import Path as _Path
@@ -631,6 +632,7 @@ class _ParametricLightningModule(_LightningModule):
         optimizer_config=None,
         scheduler_config=None,
         loss_config=None,
+        hypernet_lr_scale=1.0,
     ):
         super().__init__(
             net,
@@ -640,6 +642,11 @@ class _ParametricLightningModule(_LightningModule):
                 _ParametricLossConfig() if loss_config is None else loss_config
             ),
         )
+        if not _isfinite(hypernet_lr_scale) or not 0 < hypernet_lr_scale <= 1:
+            raise ValueError("hypernet_lr_scale must be finite and in (0, 1]")
+        if hypernet_lr_scale != 1.0 and not isinstance(net, _HyperA2):
+            raise ValueError("hypernet_lr_scale requires HyperA2")
+        self._hypernet_lr_scale = float(hypernet_lr_scale)
         self._mel_mrstft = None
         # Fail here rather than on the first training step: a net that conditions on the
         # control vector as a whole has no meaning to give a control that moves within
@@ -658,7 +665,20 @@ class _ParametricLightningModule(_LightningModule):
         parsed["loss_config"] = _ParametricLossConfig.init_from_config(
             config.get("loss", {})
         )
+        parsed["hypernet_lr_scale"] = config.get("hypernet_lr_scale", 1.0)
         return parsed
+
+    def on_save_checkpoint(self, checkpoint):
+        super().on_save_checkpoint(checkpoint)
+        checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
+
+    def on_load_checkpoint(self, checkpoint):
+        if checkpoint.get("hypernet_lr_scale", 1.0) != self._hypernet_lr_scale:
+            raise ValueError(
+                "Checkpoint uses a different hypernetwork learning rate scale. "
+                "Start a new training run to use the stabilized HyperA2 recipe."
+            )
+        super().on_load_checkpoint(checkpoint)
 
     def set_capture_batch_samplers(
         self,
@@ -804,18 +824,17 @@ class _ParametricLightningModule(_LightningModule):
     def configure_gradient_clipping(
         self, optimizer, gradient_clip_val=None, gradient_clip_algorithm=None
     ):
-        if self._loss_config.training_recipe == "a2":
-            return super().configure_gradient_clipping(
-                optimizer, gradient_clip_val, gradient_clip_algorithm
-            )
         # A non-finite gradient poisons Adam's moment estimates. Marking every gradient None
         # excludes the parameters from this step entirely: weights, weight decay, moments,
         # and per-parameter step counters all stay unchanged.
-        non_finite = any(
-            p.grad is not None and not _torch.isfinite(p.grad).all()
+        # Reduce on-device first: a Python `any` synchronizes CUDA once per
+        # parameter, which is expensive for the many small hypernetwork tensors.
+        finite = [
+            _torch.isfinite(p.grad).all()
             for p in self.parameters()
-        )
-        if non_finite:
+            if p.grad is not None
+        ]
+        if finite and not _torch.stack(finite).all():
             for parameter in self.parameters():
                 parameter.grad = None
         super().configure_gradient_clipping(
@@ -826,7 +845,25 @@ class _ParametricLightningModule(_LightningModule):
         # Explicit selection is persisted in optimizer_config/checkpoints. Keep
         # AdamW as the legacy fallback for pre-selection parametric configurations;
         # ParaNAM explicitly selects Adam for new training jobs.
-        optimizer = self._make_optimizer("AdamW", weight_decay=0.0)
+        parameters = None
+        if self._hypernet_lr_scale != 1.0:
+            # A readout coefficient affects many conditioned audio weights. The
+            # static A2 LR is not an equivalent step in this parameter space.
+            hyper = [
+                p
+                for branch in self.net._branches.values()
+                for p in branch._hypernet.parameters()
+            ]
+            hyper_ids = {id(p) for p in hyper}
+            base = [p for p in self.parameters() if id(p) not in hyper_ids]
+            lr = self._optimizer_config.get("lr", 0.001)
+            parameters = [
+                {"params": base},
+                {"params": hyper, "lr": lr * self._hypernet_lr_scale},
+            ]
+        optimizer = self._make_optimizer(
+            "AdamW", parameters=parameters, weight_decay=0.0
+        )
         if self._scheduler_config is None:
             return optimizer
         base_scheduler = getattr(

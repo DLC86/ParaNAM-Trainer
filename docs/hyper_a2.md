@@ -30,19 +30,24 @@ stock A2 configurations is covered by a test.
 Each branch computes `W(p) = W_base + delta_W(p)` through the existing
 hypernetwork. As in packed A2, Lite and Full have independent weights;
 Lite is not obtained by cutting three channels from a trained Full model.
-This implementation evaluates the two branches sequentially during each
-training step rather than using the masked packed-convolution optimization.
-Both branch losses are averaged before backpropagation.
+Capture-homogeneous training batches use differentiable packed execution;
+general inference can also evaluate the branches separately. The generated
+desktop/capture training configs sum both branch losses before backpropagation.
 
 Both branches are also evaluated during validation. Logs include separate
 `ESR/unseen_audio_unseen_params/lite` and
 `ESR/unseen_audio_unseen_params/full` metrics, in addition to the
-combined metrics. Best-checkpoint selection uses the combined validation
-metric, so a checkpoint always preserves both branches from the same step.
+combined metrics. The desktop trainer uses Full as its primary checkpoint
+reference and keeps independent best Full and Lite weights for export.
 
-The default selector keeps the dilated convolution weights shared across
-knob settings, matching the original HyperWaveNet recipe. Biases and other
-selected projections receive generated deltas. Base weights remain trainable.
+Generated HyperA2 configs condition all weight tensors in full-delta mode.
+Base weights remain trainable. For stability, new training configs use a separate
+hypernetwork optimizer group at 0.1 times the selected base LR, with gradient
+clipping at 1.0 and protection against nonfinite gradients. At base LR 0.004,
+the hypernetwork LR is 0.0004. See the
+[0.4.2 regression diagnosis](a2-training-comparison.md#hypernetwork-stability-fix).
+The older hand-written example below retains low-rank deltas with shared dilated
+convolution kernels; configs without `hypernet_lr_scale` retain their original LR.
 `hypernet.mode` (`low_rank` or `full`) and `hypernet.selector` are independent
 of the audio size selection. Changing `size` never changes those options.
 

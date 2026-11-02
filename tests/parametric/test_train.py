@@ -495,9 +495,13 @@ def test_parametric_lightning_validation_logs_unseen_audio_unseen_params_bucket(
     assert f"MSE/{_VALIDATION_BUCKET}" in captured
 
 
-def test_parametric_lightning_nonfinite_gradient_preserves_adamw_state(monkeypatch):
+@_pytest.mark.parametrize("recipe", ["legacy", "a2"])
+def test_parametric_lightning_nonfinite_gradient_preserves_adamw_state(
+    monkeypatch, recipe
+):
     module = _ParametricLightningModule(
         _torch.nn.Linear(1, 1, bias=False),
+        loss_config=_ParametricLossConfig(training_recipe=recipe),
         optimizer_config={
             "lr": 0.01,
             "weight_decay": 0.1,
