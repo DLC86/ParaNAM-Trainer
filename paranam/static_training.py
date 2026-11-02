@@ -73,11 +73,29 @@ def train(data_config, model_config, learning, output, callback):
             DataLoader(dataset, **learning[key])
             for dataset, key in zip(datasets, ("train_dataloader", "val_dataloader"))
         ]
-        best = pl.callbacks.ModelCheckpoint(monitor="val_loss", save_top_k=1)
+        if len(loaders[0]) == 0:
+            raise ValueError("Training capture is too short for the selected NY and batch size. Reduce NY or Batch Size.")
+        from nam.train.lightning_module import PackedBestCheckpoint
+        from pathlib import Path
+        from .workspace import read_json
+
+        best_by_size = PackedBestCheckpoint(dirpath=output / "size-checkpoints")
+        saved_sizes = read_json(output / "size-checkpoints" / "packed_best.json", {})
+        best_by_size.best = {
+            entry["submodel_index"]: entry
+            for entry in saved_sizes.get("submodels", [])
+            if Path(entry["checkpoint_path"]).is_file()
+        }
+        best = pl.callbacks.ModelCheckpoint(
+            monitor="ESR_packed_1",
+            save_top_k=1,
+            filename="{epoch:04d}_{step}_ESR_full={ESR_packed_1:.3e}",
+        )
         trainer = pl.Trainer(
             callbacks=[
-                best,
                 callback,
+                *([best_by_size] if learning.get("separate_size_checkpoints") else []),
+                best,
                 epoch_checkpoint(callback, output.parent),
                 pl.callbacks.TQDMProgressBar(refresh_rate=10),
             ],
@@ -90,6 +108,12 @@ def train(data_config, model_config, learning, output, callback):
                 best.best_model_path, **module_class.parse_config(model_config)
             )
         model.eval()
+        if learning.get("separate_size_checkpoints"):
+            from nam.train.core import _apply_packed_best_checkpoints
+
+            _apply_packed_best_checkpoints(
+                model, model_config, best_by_size.checkpoint_paths
+            )
         model.net.sample_rate = datasets[0].sample_rate
         model.net.export(output)
     finally:
@@ -100,7 +124,11 @@ def train(data_config, model_config, learning, output, callback):
 def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
     import pytorch_lightning as pl
     import torch
-    from .training import build_progress_callback, read_json
+    from .training import (
+        build_progress_callback,
+        read_json,
+        annotate_validation_metadata,
+    )
 
     completed = shared.get("completed_members", [])
     exports = shared.get("exports", [])
@@ -157,6 +185,11 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
                 child["model"]["metadata"].update(
                     capture.get("metadata", {}), name=capture["name"]
                 )
+        annotate_validation_metadata(
+            model,
+            callback.best_metrics,
+            spec["model"]["optimizer"].get("class", "Adam"),
+        )
         safe_name = (
             re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", capture["name"]).rstrip(" .")
             or "Capture"

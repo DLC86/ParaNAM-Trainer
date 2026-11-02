@@ -845,10 +845,13 @@ class ConcatDatasetValidationError(ValueError):
 
 
 class ConcatDataset(AbstractDataset, _InitializableFromConfig):
-    def __init__(self, datasets: _Sequence[Dataset], flatten=True):
+    def __init__(
+        self, datasets: _Sequence[Dataset], flatten=True, allow_variable_ny=False
+    ):
         if flatten:
             datasets = self._flatten_datasets(datasets)
-        self._validate_datasets(datasets)
+        self._validate_datasets(datasets, allow_variable_ny=allow_variable_ny)
+        self._allow_variable_ny = allow_variable_ny
         self._datasets = datasets
         self._lookup = self._make_lookup()
 
@@ -872,9 +875,9 @@ class ConcatDataset(AbstractDataset, _InitializableFromConfig):
         return self.datasets[0].nx
 
     @property
-    def ny(self) -> int:
-        # Validated at initialization
-        return self.datasets[0].ny
+    def ny(self) -> _Optional[int]:
+        # Variable-length validation clips must be batched capture by capture.
+        return None if self._allow_variable_ny else self.datasets[0].ny
 
     @property
     def sample_rate(self) -> _Optional[float]:
@@ -885,9 +888,10 @@ class ConcatDataset(AbstractDataset, _InitializableFromConfig):
     def parse_config(cls, config):
         init = _dataset_init_registry[config.get("type", "dataset")]
         return {
+            "allow_variable_ny": config.get("allow_variable_ny", False),
             "datasets": tuple(
                 init(c) for c in _tqdm(config["dataset_configs"], desc="Loading data")
-            )
+            ),
         }
 
     def _flatten_datasets(self, datasets):
@@ -930,10 +934,17 @@ class ConcatDataset(AbstractDataset, _InitializableFromConfig):
         return lookup
 
     @classmethod
-    def _validate_datasets(cls, datasets: _Sequence[Dataset]):
+    def _validate_datasets(cls, datasets: _Sequence[Dataset], allow_variable_ny=False):
         # Ensure that a couple attrs are consistent across the sub-datasets.
         Reference = _namedtuple("Reference", ("index", "val"))
-        references = {name: None for name in ("nx", "ny", "sample_rate")}
+        references = {
+            name: None
+            for name in (
+                ("nx", "sample_rate")
+                if allow_variable_ny
+                else ("nx", "ny", "sample_rate")
+            )
+        }
         for i, d in enumerate(datasets):
             for name in references.keys():
                 this_val = getattr(d, name)
@@ -984,6 +995,10 @@ def init_dataset(config, split: Split) -> AbstractDataset:
         return ConcatDataset.init_from_config(
             {
                 "type": name,
+                "allow_variable_ny": bool(
+                    config.get("allow_variable_validation_lengths")
+                    and split == Split.VALIDATION
+                ),
                 "dataset_configs": [{**common, **c} for c in base_config],
             }
         )

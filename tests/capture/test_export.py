@@ -3,10 +3,14 @@ from pathlib import Path as _Path
 
 import pytest as _pytest
 
-from nam.capture.export import build_concat_learning_config as _build_concat_learning_config
+from nam.capture.export import (
+    build_concat_learning_config as _build_concat_learning_config,
+)
 from nam.capture.export import build_concat_model_config as _build_concat_model_config
 from nam.capture.export import build_data_config as _build_data_config
-from nam.capture.export import build_hyper_learning_config as _build_hyper_learning_config
+from nam.capture.export import (
+    build_hyper_learning_config as _build_hyper_learning_config,
+)
 from nam.capture.export import build_hyper_model_config as _build_hyper_model_config
 from nam.capture.export import concat_wavenet_channels as _concat_wavenet_channels
 from nam.capture.export import update_data_json as _update_data_json
@@ -27,7 +31,9 @@ from nam.capture.project import DATA_FILENAME as _DATA_FILENAME
 from nam.capture.project import (
     HYPER_LEARNING_CONFIG_FILENAME as _HYPER_LEARNING_CONFIG_FILENAME,
 )
-from nam.capture.project import HYPER_MODEL_CONFIG_FILENAME as _HYPER_MODEL_CONFIG_FILENAME
+from nam.capture.project import (
+    HYPER_MODEL_CONFIG_FILENAME as _HYPER_MODEL_CONFIG_FILENAME,
+)
 from nam.capture.project import QAModel as _QAModel
 from nam.capture.project import mark_captured as _mark_captured
 from nam.capture.project import new_project as _new_project
@@ -47,7 +53,10 @@ def _project(**kwargs):
 
 
 def test_hyper_a2_configs_keep_project_controls_and_both_sizes(tmp_path):
-    from nam.capture.export import write_hyper_a2_training_configs
+    from nam.capture.export import (
+        write_hyper_a2_training_configs,
+        build_hyper_a2_learning_config,
+    )
     from nam.models.parametric import HyperA2
 
     project = _project()
@@ -60,7 +69,7 @@ def test_hyper_a2_configs_keep_project_controls_and_both_sizes(tmp_path):
     assert model.sizes == ("lite", "full")
     assert model.receptive_field == 6347
     learning = _json.loads(paths[1].read_text())
-    assert learning == _build_hyper_learning_config(project)
+    assert learning == build_hyper_a2_learning_config(project)
 
 
 def test_level_calibration_is_optional_and_exported_for_every_architecture(tmp_path):

@@ -33,7 +33,9 @@ def test_training_retains_capture_safety_margin_once(workspace, capture_type, lo
     workspace.generate_plan()
     ready(workspace)
     preamble = BlipPreamble(48000)
-    measured = measure_delay(np.pad(preamble.render(), (480, 480)), preamble.as_played())
+    measured = measure_delay(
+        np.pad(preamble.render(), (480, 480)), preamble.as_played()
+    )
     assert measured.safety_factor == 1
     assert measured.delay == 479  # Official calibrator: measured onset minus one.
     label, shift = CaptureSession._alignment(measured, loopback, ALIGNMENT_LEAD_SAMPLES)
@@ -73,7 +75,7 @@ def tiny_job(workspace, monkeypatch):
     spec["model"]["net"]["config"]["hypernet"].update(
         mode="low_rank", rank=2, hidden_sizes=[4]
     )
-    spec["model"]["loss"] = {"val_loss": "esr"}
+    spec["model"]["loss"] = {"val_loss": "esr", "training_recipe": "a2"}
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     atomic_write_json(job / "spec.json", spec)
     monkeypatch.setattr(
@@ -100,9 +102,11 @@ def test_both_training_methods_only_build_nested_hyper_a2(workspace, mode, membe
 
 
 @pytest.mark.parametrize("epochs", [1, 2])
+@pytest.mark.parametrize("optimizer", ["Adam", "AdamW"])
 def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
-    workspace, monkeypatch, epochs, capsys
+    workspace, monkeypatch, epochs, capsys, optimizer
 ):
+    workspace.preferences["advanced_parametric"] = {"optimizer": optimizer}
     workspace.preferences["epochs"] = epochs
     workspace.save()
     job = tiny_job(workspace, monkeypatch)
@@ -116,6 +120,7 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
         job / "resume-0.ckpt", map_location="cpu", weights_only=False
     )
     assert checkpoint["optimizer_states"] and checkpoint["lr_schedulers"]
+    assert checkpoint["optimizer_class"] == optimizer
     assert checkpoint["global_step"] == 0
     assert training.job_can_resume(workspace, job)
     assert training.make_job(workspace, resume=True) == job
@@ -128,7 +133,19 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     assert [s["name"] for s in final["config"]["submodels"]] == ["lite", "full"]
     assert final["metadata"]["input_level_dbu"] == 18
     assert final["metadata"]["output_level_dbu"] == 12
+    summary = final["metadata"]["training"]
+    assert summary["validation_reference"] == "full"
+    assert summary["validation_esr"] == summary["validation_esr_full"]
+    assert summary["validation_esr_lite"] is not None
+    assert summary["validation_esr"] == pytest.approx(progress["best_esr"])
     captured = capsys.readouterr()
+    assert "Validation ESR | Lite=" in captured.out
+    assert "Full (checkpoint)=" in captured.out and "Mean=" in captured.out
+    assert "Epoch 1/" in captured.out
+    assert progress["esr_lite"] is not None and progress["esr_full"] is not None
+    assert progress["esr_mean"] == pytest.approx(
+        (progress["esr_lite"] + progress["esr_full"]) / 2
+    )
     assert (
         "Epoch" in captured.out + captured.err and "100%" in captured.out + captured.err
     )
@@ -145,6 +162,57 @@ def test_stop_does_not_publish_an_incomplete_model(workspace, monkeypatch):
     assert training.job_progress(job)["status"] == "stopped"
     assert not (workspace.directory / "models").exists()
     assert all(e.status == "captured" for e in workspace.project.entries)
+
+
+def test_resume_legacy_adamw_checkpoint_starts_full_ranking(workspace, monkeypatch):
+    from nam.train.parametric import _ParametricLightningModule
+
+    workspace.preferences["advanced_parametric"] = {
+        "optimizer": "AdamW",
+        "fit_mrstft": False,
+        "ny": 32,
+    }
+    job = tiny_job(workspace, monkeypatch)
+    spec = read_json(job / "spec.json")
+    spec["learning"].pop("checkpoint_metric")  # Legacy checkpoint monitor.
+    spec["learning"].pop("separate_size_checkpoints", None)
+    spec["model"]["loss"].pop("training_recipe", None)
+    atomic_write_json(job / "spec.json", spec)
+    original = _ParametricLightningModule.training_step
+
+    def pause_during_second_epoch(module, *args, **kwargs):
+        if module.current_epoch == 1:
+            training.command(job, "pause")
+        return original(module, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            _ParametricLightningModule, "training_step", pause_during_second_epoch
+        )
+        training.run_job(job)
+    assert training.job_progress(job)["status"] == "paused"
+    checkpoint_path = job / "resume-0.ckpt"
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint.pop("optimizer_class")
+    for state in checkpoint["callbacks"].values():
+        if "best_esr" in state:
+            state.pop("validation_reference", None)
+            state.pop("best_validation", None)
+            state.pop("last_validation", None)
+    torch.save(checkpoint, checkpoint_path)
+    spec["model"]["optimizer"].pop("class")
+    spec["preferences"]["advanced_training"].pop("optimizer")
+    spec["fingerprint"] = workspace.fingerprint(include_optimizer=False)
+    atomic_write_json(job / "spec.json", spec)
+    assert training.job_can_resume(workspace, job)
+    assert training.make_job(workspace, resume=True) == job
+    training.run_job(job)
+    progress = training.job_progress(job)
+    assert progress["status"] == "completed"
+    metadata = read_json(Path(progress["export"]))["metadata"]["training"]
+    assert metadata["optimizer"] == "AdamW"
+    assert metadata["epoch"] == 2
+    assert metadata["validation_reference"] == "full"
 
 
 @pytest.mark.parametrize("extension", [".nam", ".pnam"])

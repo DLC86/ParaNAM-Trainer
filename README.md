@@ -6,7 +6,7 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.4.1 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.1-preview)**
+**[Download the 0.4.2 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.2-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts
@@ -76,15 +76,16 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    follow the same rule. A deterministic nearest-neighbour route plus bounded
    2-opt improves the route without changing capture IDs or training data order.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
-   epoch, best validation ESR, elapsed time and an estimate based on completed epoch
+   epoch, best Full validation ESR, elapsed time and an estimate based on completed epoch
    durations. Static batch size defaults to 16, matching the official NAM trainer;
-   parametric defaults to 32. Batch Size, Learning Rate, LR Decay, NY, Fit MRSTFT,
-   MRSTFT Weight and Weight Decay are inside **Advanced training settings**, collapsed
-   initially. Each capture type retains its own values. Static defaults follow A2
-   (LR 0.004), parametric defaults follow HyperWaveNet (LR 0.002); both use decay
-   0.994, NY 8192, MRSTFT enabled with weight 0.0005, and weight decay 3.17e-7.
-   NY controls training windows; validation retains its independent window. Changing
-   the recipe requires a new training run; batch size and device remain adjustable
+   both static and parametric modes default to batch 16. Optimizer (Adam by default,
+   or AdamW), Batch Size, Learning Rate, LR Decay, NY, Fit MRSTFT, MRSTFT Weight and
+   Weight Decay are inside **Advanced training settings**, initially collapsed.
+   Both modes follow the A2 recipe: LR 0.004, decay 0.994, NY 8192, MRSTFT enabled
+   with weight 0.0005, and weight decay 3.17e-7. Existing saved custom values are
+   retained. Validation uses each full recording with batch 1. RMS normalization
+   is disabled, preserving capture output levels across control settings.
+   Changing the recipe requires a new run; batch size and device can be changed
    when resuming.
    Epoch progress bars are also retained in the training details log. Parametric export is `models/round-N/ParaNAM_HyperA2.pnam`, containing both
    Full and Lite with Full as the playback default. Static batches export one standard
@@ -226,3 +227,15 @@ macOS builds use `--flavor Metal`. AVX2 nam-cpu-trainer integration is deferred.
 The original trainer documentation is preserved in
 [README_UPSTREAM.md](README_UPSTREAM.md). See [LICENSE](LICENSE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for credits and bundled components.
+
+## Full/Lite validation and training audit
+
+Every epoch logs Lite ESR, Full ESR and their mean. The best checkpoint and UI
+use **Full ESR**. Export metadata `training.validation_esr` refers to Full;
+`validation_esr_full` and `validation_esr_lite` record both values at the exported
+branches, alongside their respective epochs and optimizer. Static nested children also carry
+their own ESR. Changing optimizer requires a new training run.
+
+HyperA2 evaluates both audio branches together in a differentiable packed layout.
+The [training audit](docs/a2-training-comparison.md) documents the official A2
+comparison, remaining differences and the measured scope of the optimization.

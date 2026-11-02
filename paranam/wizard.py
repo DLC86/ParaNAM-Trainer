@@ -146,7 +146,7 @@ class WizardWindow(QMainWindow):
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.4.1", "eyebrow"))
+        rail.addWidget(label("TRAINER  /  0.4.2", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -540,9 +540,9 @@ class WizardWindow(QMainWindow):
         self.epochs.setValue(200)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 128)
-        self.batch_size.setValue(32)
+        self.batch_size.setValue(16)
         self.batch_size.setToolTip(
-            "32 matches the reference HyperWaveNet trainer and improves GPU throughput. Reduce it if GPU memory is insufficient; it can also be changed before resuming."
+            "16 matches the official A2 recipe. Reduce it if GPU memory is insufficient; it can also be changed before resuming."
         )
         self.accelerator = QComboBox()
         self.accelerator.addItem(
@@ -567,7 +567,7 @@ class WizardWindow(QMainWindow):
         advanced_form.addRow("Batch Size", self.batch_size)
         self.advanced_fields = {}
         for key, caption, initial, low, high, decimals in (
-            ("learning_rate", "Learning Rate", 0.002, 1e-9, 10, 9),
+            ("learning_rate", "Learning Rate", 0.004, 1e-9, 10, 9),
             ("lr_decay", "LR Decay", 0.994, 0, 1, 6),
             ("ny", "NY (samples)", 8192, 1, 1048576, 0),
             ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
@@ -588,6 +588,15 @@ class WizardWindow(QMainWindow):
         advanced_form.insertRow(4, fit)
         fit.toggled.connect(self.advanced_fields["mrstft_weight"].setEnabled)
         fit.toggled.connect(self.save_preferences)
+        optimizer = QComboBox()
+        optimizer.addItem("Adam", "Adam")
+        optimizer.addItem("AdamW", "AdamW")
+        optimizer.setToolTip(
+            "New training defaults to Adam. Resume requires the same optimizer as the saved checkpoint."
+        )
+        self.advanced_fields["optimizer"] = optimizer
+        advanced_form.insertRow(0, "Optimizer", optimizer)
+        optimizer.currentIndexChanged.connect(self.save_preferences)
         self.advanced_fields["lr_decay"].setToolTip(
             "Exponential learning-rate multiplier after each epoch."
         )
@@ -618,7 +627,7 @@ class WizardWindow(QMainWindow):
         for index, (name, text) in enumerate(
             (
                 ("epoch", "CURRENT EPOCH"),
-                ("esr", "BEST VALIDATION ESR"),
+                ("esr", "BEST FULL ESR"),
                 ("elapsed", "ELAPSED"),
                 ("eta", "ESTIMATED REMAINING"),
             )
@@ -662,7 +671,9 @@ class WizardWindow(QMainWindow):
         options = self.workspace.training_options(kind)
         for key, field in self.advanced_fields.items():
             field.blockSignals(True)
-            if isinstance(field, QCheckBox):
+            if isinstance(field, QComboBox):
+                field.setCurrentIndex(max(0, field.findData(options[key])))
+            elif isinstance(field, QCheckBox):
                 field.setChecked(options[key])
             else:
                 field.setValue(options[key])
@@ -1295,7 +1306,13 @@ class WizardWindow(QMainWindow):
         batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
         prefs[batch_key] = self.batch_size.value()
         prefs["advanced_" + previous_type] = {
-            key: field.isChecked() if isinstance(field, QCheckBox) else field.value()
+            key: (
+                field.currentData()
+                if isinstance(field, QComboBox)
+                else (
+                    field.isChecked() if isinstance(field, QCheckBox) else field.value()
+                )
+            )
             for key, field in self.advanced_fields.items()
         }
         if previous_type != next_type:
@@ -1319,7 +1336,7 @@ class WizardWindow(QMainWindow):
         self.batch_size.setToolTip(
             "16 matches the official NAM trainer default for static models. Reduce it if GPU memory is insufficient."
             if static
-            else "32 matches the reference HyperWaveNet trainer. Reduce it if GPU memory is insufficient."
+            else "16 matches the official A2 recipe. Reduce it if GPU memory is insufficient."
         )
         self.model_badge.setText(
             "A2 static batch" if static else "HyperA2\nFull + Lite, together."

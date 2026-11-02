@@ -29,7 +29,7 @@ DEFAULTS = {
     "capture_type": "parametric",
     "mode": "normal",
     "epochs": 200,
-    "batch_size": 32,
+    "batch_size": 16,
     "static_batch_size": 16,
     "device": "auto",
     "rounds": 2,
@@ -426,7 +426,8 @@ class Workspace:
     def training_options(self, kind=None):
         kind = kind or self.preferences["capture_type"]
         defaults = dict(
-            learning_rate=0.004 if kind == "static" else 0.002,
+            optimizer="Adam",
+            learning_rate=0.004,
             lr_decay=0.994,
             ny=self.project.train_window.ny or 8192,
             fit_mrstft=True,
@@ -435,7 +436,9 @@ class Workspace:
         )
         return {**defaults, **self.preferences.get("advanced_" + kind, {})}
 
-    def fingerprint(self, *, batch_size=None, include_advanced=True):
+    def fingerprint(
+        self, *, batch_size=None, include_advanced=True, include_optimizer=True
+    ):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import build_data_config
 
@@ -491,6 +494,8 @@ class Workspace:
         data["settings"]["batch_size"] = self.training_batch_size()
         if include_advanced:
             data["settings"]["advanced_training"] = self.training_options()
+            if not include_optimizer:
+                data["settings"]["advanced_training"].pop("optimizer")
         if batch_size is not None:
             data["settings"]["batch_size"] = batch_size
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

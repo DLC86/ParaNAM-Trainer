@@ -188,6 +188,8 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
     optimization recipe.
     """
 
+    DEFAULT_OPTIMIZER_CLASS = "Adam"
+
     def __init__(
         self,
         net: _BaseNet,
@@ -278,8 +280,16 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
     def net(self) -> _nn.Module:
         return self._net
 
+    def _make_optimizer(self, default_class="Adam", **defaults):
+        config = {**defaults, **self._optimizer_config}
+        name = config.pop("class", default_class)
+        optimizers = {"Adam": _torch.optim.Adam, "AdamW": _torch.optim.AdamW}
+        if name not in optimizers:
+            raise ValueError(f"Unsupported optimizer {name!r}; choose Adam or AdamW")
+        return optimizers[name](self.parameters(), **config)
+
     def configure_optimizers(self):
-        optimizer = _torch.optim.Adam(self.parameters(), **self._optimizer_config)
+        optimizer = self._make_optimizer()
         if self._scheduler_config is None:
             return optimizer
         else:
@@ -296,10 +306,19 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
         return self.net(*args, **kwargs)  # TODO deprecate--use self.net() instead.
 
     def on_load_checkpoint(self, checkpoint: _Dict[str, _Any]) -> None:
+        selected = self._optimizer_config.get("class", self.DEFAULT_OPTIMIZER_CLASS)
+        saved = checkpoint.get("optimizer_class")
+        if saved is not None and saved != selected:
+            raise ValueError(
+                f"Checkpoint uses {saved}; selected optimizer is {selected}. Start a new training run to change optimizer."
+            )
         # Resolves https://github.com/sdatkinson/neural-amp-modeler/issues/351
         self.net.sample_rate = checkpoint["sample_rate"]
 
     def on_save_checkpoint(self, checkpoint: _Dict[str, _Any]) -> None:
+        checkpoint["optimizer_class"] = self._optimizer_config.get(
+            "class", self.DEFAULT_OPTIMIZER_CLASS
+        )
         # Resolves https://github.com/sdatkinson/neural-amp-modeler/issues/351
         checkpoint["sample_rate"] = self.net.sample_rate
 

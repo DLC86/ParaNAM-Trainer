@@ -90,8 +90,16 @@ def job_can_resume(workspace, job):
         # actual recipe matches the options currently shown in the application.
         options = workspace.training_options()
         model = spec.get("model", {})
+        saved_options = spec.get("preferences", {}).get("advanced_training")
+        legacy_optimizer = (
+            "Adam"
+            if model.get("net", {}).get("name") in ("WaveNet", "PackedWaveNet")
+            else "AdamW"
+        )
         same_recipe = (
-            spec.get("preferences", {}).get("advanced_training") is None
+            "optimizer" not in (saved_options or {})
+            and "class" not in model.get("optimizer", {})
+            and options["optimizer"] == legacy_optimizer
             and model.get("optimizer", {}).get("lr") == options["learning_rate"]
             and model.get("optimizer", {}).get("weight_decay")
             == options["weight_decay"]
@@ -100,13 +108,15 @@ def job_can_resume(workspace, job):
             and model.get("loss", {}).get("mrstft_weight")
             == (options["mrstft_weight"] if options["fit_mrstft"] else None)
             and all(
-                item.get("ny") == options["ny"]
+                item.get("ny", spec.get("data", {}).get("common", {}).get("ny"))
+                == options["ny"]
                 for item in spec.get("data", {}).get("train", [])
             )
         )
         if not same_recipe or spec.get("fingerprint") != workspace.fingerprint(
             batch_size=spec.get("preferences", {}).get("batch_size"),
-            include_advanced=False,
+            include_advanced=saved_options is not None,
+            include_optimizer=False,
         ):
             return False
     member = progress.get("member", 0)
@@ -122,7 +132,7 @@ def make_job(workspace, resume=False):
     from nam.capture.export import (
         build_data_config,
         build_hyper_a2_model_config,
-        build_hyper_learning_config,
+        build_hyper_a2_learning_config,
     )
 
     if not workspace.training_ready():
@@ -137,6 +147,11 @@ def make_job(workspace, resume=False):
                     "The saved checkpoint does not match this project's current captures/settings."
                 )
             spec = read_json(job / "spec.json")
+            spec["model"]["optimizer"]["class"] = workspace.training_options()[
+                "optimizer"
+            ]
+            spec["preferences"]["advanced_training"] = workspace.training_options()
+            spec["learning"]["checkpoint_metric"] = "ESR_full"
             member = job_progress(job).get("member", 0)
             target = job / f"resume-{member}.ckpt"
             if not target.exists():
@@ -172,6 +187,8 @@ def make_job(workspace, resume=False):
         job = root / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
         job.mkdir()
         options = workspace.training_options()
+        if options["optimizer"] not in ("Adam", "AdamW"):
+            raise ValueError("Choose Adam or AdamW as the training optimizer")
         prefs = {
             **workspace.preferences,
             "batch_size": workspace.training_batch_size(),
@@ -191,7 +208,9 @@ def make_job(workspace, resume=False):
         else:
             model = build_hyper_a2_model_config(workspace.project)
         model["optimizer"].update(
-            lr=options["learning_rate"], weight_decay=options["weight_decay"]
+            **{"class": options["optimizer"]},
+            lr=options["learning_rate"],
+            weight_decay=options["weight_decay"],
         )
         model["lr_scheduler"]["kwargs"]["gamma"] = options["lr_decay"]
         model["loss"]["mrstft_weight"] = (
@@ -199,7 +218,12 @@ def make_job(workspace, resume=False):
         )
         for entry in data["train"]:
             entry["ny"] = options["ny"]
-        learning = build_hyper_learning_config(workspace.project)
+        for entry in data["validation"]:
+            entry["ny"] = None
+        data["allow_variable_validation_lengths"] = True
+        learning = build_hyper_a2_learning_config(workspace.project)
+        learning["checkpoint_metric"] = "ESR_full"
+        learning["separate_size_checkpoints"] = True
         learning["export_checkpoints"] = False
         learning["torch_compile"] = {
             "enabled": False
@@ -209,8 +233,10 @@ def make_job(workspace, resume=False):
                 batch_size=prefs["batch_size"],
                 num_workers=0,
                 pin_memory=False,
-                drop_last=False,
+                drop_last=(split == "train_dataloader"),
             )
+        learning["val_dataloader"]["batch_size"] = 1
+        learning["trainer"].pop("gradient_clip_val", None)
         learning["trainer"].update(
             max_epochs=prefs["epochs"],
             accelerator=prefs["device"],
@@ -258,6 +284,46 @@ def make_job(workspace, resume=False):
         return job
 
 
+def annotate_validation_metadata(model, metrics, optimizer):
+    if not metrics or metrics.get("full") is None:
+        return
+    summary = dict(
+        validation_esr=metrics["full"],
+        validation_reference="full",
+        validation_esr_full=metrics["full"],
+        validation_esr_lite=metrics["lite"],
+        validation_esr_mean=metrics["mean"],
+        epoch=metrics["epoch"],
+        optimizer=optimizer,
+    )
+    summary["epoch_full"] = metrics.get("epoch_full", metrics["epoch"])
+    summary["epoch_lite"] = metrics.get("epoch_lite", metrics["epoch"])
+    metadata = model.setdefault("metadata", {})
+    key = (
+        "training"
+        if isinstance(metadata.get("training", {}), dict)
+        else "paranam_training"
+    )
+    metadata.setdefault(key, {}).update(summary)
+    if model.get("architecture") == "SlimmableContainer":
+        for index, child in enumerate(model["config"]["submodels"]):
+            size = "lite" if index == 0 else "full"
+            child_metadata = child["model"].setdefault("metadata", {})
+            child_key = (
+                "training"
+                if isinstance(child_metadata.get("training", {}), dict)
+                else "paranam_training"
+            )
+            child_metadata.setdefault(child_key, {}).update(
+                **{
+                    **summary,
+                    "validation_esr": metrics[size],
+                    "validation_reference": size,
+                    "epoch": summary["epoch_" + size],
+                }
+            )
+
+
 def build_progress_callback(job, spec, member, shared):
     from pytorch_lightning.callbacks import Callback
 
@@ -272,7 +338,10 @@ def build_progress_callback(job, spec, member, shared):
             self.started = time.monotonic()
             self.base = float(shared.get("elapsed", 0))
             self.epoch_times = list(shared.get("epoch_times", []))
-            self.best = shared.get("best_esr")
+            self.best = None
+            self.best_metrics = None
+            self.last_metrics = None
+            self.best_lite_metrics = None
             self.epoch_started = None
             self.resume_epoch = shared.get("epoch", 0)
 
@@ -294,6 +363,7 @@ def build_progress_callback(job, spec, member, shared):
             action = self.action()
             if action == "pause":
                 info = read_json(job / f"resume-{member}.json", {})
+                info["best_esr"] = self.best
                 self.write(
                     status="paused",
                     batch_fraction=0,
@@ -312,6 +382,10 @@ def build_progress_callback(job, spec, member, shared):
 
             rng = np.random.get_state()
             return {
+                "validation_reference": "full",
+                "best_validation": self.best_metrics,
+                "last_validation": self.last_metrics,
+                "best_lite_validation": self.best_lite_metrics,
                 "best_esr": self.best,
                 "epoch_times": self.epoch_times,
                 "torch_rng": torch.get_rng_state(),
@@ -322,13 +396,35 @@ def build_progress_callback(job, spec, member, shared):
                 ),
             }
 
+        def on_save_checkpoint(self, trainer, module, checkpoint):
+            checkpoint["validation_reference"] = "full"
+            checkpoint["validation_esr"] = (self.last_metrics or {}).get("full")
+            checkpoint["validation_esr_full"] = (self.last_metrics or {}).get("full")
+            checkpoint["validation_esr_lite"] = (self.last_metrics or {}).get("lite")
+            checkpoint["best_validation_esr_full"] = self.best
+
         def load_state_dict(self, data):
             import random
             import numpy as np
             import torch
 
-            self.best = data.get("best_esr")
+            current_reference = data.get("validation_reference") == "full"
+            self.best = data.get("best_esr") if current_reference else None
+            self.best_metrics = (
+                data.get("best_validation") if current_reference else None
+            )
+            self.last_metrics = (
+                data.get("last_validation") if current_reference else None
+            )
             self.epoch_times = data.get("epoch_times", [])
+            self.best_lite_metrics = (
+                data.get("best_lite_validation") if current_reference else None
+            )
+            if not current_reference and data.get("best_esr") is not None:
+                print(
+                    "Resuming a legacy checkpoint: Full-based best ESR history starts from the next validation epoch.",
+                    flush=True,
+                )
             if "torch_rng" in data:
                 torch.set_rng_state(data["torch_rng"].cpu())
                 random.setstate(data["python_rng"])
@@ -348,6 +444,7 @@ def build_progress_callback(job, spec, member, shared):
                 member=member,
                 elapsed=self.base + time.monotonic() - self.started,
                 best_esr=self.best,
+                validation_reference="full",
                 epoch_times=self.epoch_times,
             )
             shared.update(updates)
@@ -370,6 +467,9 @@ def build_progress_callback(job, spec, member, shared):
             self.write(
                 device=str(module.device),
                 device_name=device_name,
+                optimizer=spec["model"]["optimizer"].get(
+                    "class", "Adam" if spec.get("static_captures") else "AdamW"
+                ),
                 batch_size=spec["preferences"]["batch_size"],
                 train_batches=batches,
                 message="Training " + label,
@@ -420,8 +520,58 @@ def build_progress_callback(job, spec, member, shared):
             self.check_action()
             metric = trainer.callback_metrics.get("ESR")
             esr = float(metric.detach().cpu()) if metric is not None else None
-            if esr is not None and math.isfinite(esr):
-                self.best = esr if self.best is None else min(self.best, esr)
+
+            def size_esr(size):
+                index = 0 if size == "lite" else 1
+                key = (
+                    f"ESR_packed_{index}"
+                    if spec.get("static_captures")
+                    else f"ESR/unseen_audio_unseen_params/{size}"
+                )
+                value = trainer.callback_metrics.get(key)
+                return float(value.detach().cpu()) if value is not None else None
+
+            lite, full = size_esr("lite"), size_esr("full")
+            epoch = trainer.current_epoch + 1
+            total_epochs = spec["preferences"]["epochs"]
+
+            def display(value):
+                return f"{value:.8g}" if value is not None else "unavailable"
+
+            print(
+                f"\nEpoch {epoch}/{total_epochs} | {label} | Validation ESR | "
+                f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}",
+                flush=True,
+            )
+            self.last_metrics = dict(epoch=epoch, full=full, lite=lite, mean=esr)
+            if (
+                full is not None
+                and math.isfinite(full)
+                and (self.best is None or full < self.best)
+            ):
+                self.best = full
+                self.best_metrics = dict(self.last_metrics)
+            if (
+                lite is not None
+                and math.isfinite(lite)
+                and (
+                    self.best_lite_metrics is None
+                    or lite < self.best_lite_metrics["lite"]
+                )
+            ):
+                self.best_lite_metrics = dict(epoch=epoch, lite=lite)
+            if (
+                spec.get("learning", {}).get("separate_size_checkpoints")
+                and self.best_metrics is not None
+                and self.best_lite_metrics is not None
+            ):
+                self.best_metrics.update(
+                    lite=self.best_lite_metrics["lite"],
+                    epoch_full=self.best_metrics["epoch"],
+                    epoch_lite=self.best_lite_metrics["epoch"],
+                    mean=(self.best_metrics["full"] + self.best_lite_metrics["lite"])
+                    / 2,
+                )
             duration = max(
                 time.monotonic() - (self.epoch_started or time.monotonic()), 0.001
             )
@@ -435,6 +585,9 @@ def build_progress_callback(job, spec, member, shared):
                 epoch=trainer.current_epoch + 1,
                 eta=eta,
                 batch_fraction=1,
+                esr_lite=lite,
+                esr_full=full,
+                esr_mean=esr,
             )
 
         def on_fit_end(self, trainer, module):
@@ -617,6 +770,16 @@ def run_job(job):
                         pl.callbacks.TQDMProgressBar(refresh_rate=10),
                     ],
                 )
+                for filename in ("model_parametric.pnam", "model.nam"):
+                    exported = output / filename
+                    if exported.exists():
+                        model_dict = read_json(exported)
+                        annotate_validation_metadata(
+                            model_dict,
+                            progress.best_metrics,
+                            spec["model"]["optimizer"].get("class", "AdamW"),
+                        )
+                        atomic_write_json(exported, model_dict)
                 completed.append(member)
                 shared.update(
                     completed_members=list(completed), member=member + 1, epoch=0
@@ -633,7 +796,9 @@ def run_job(job):
                 best = [
                     state.get("best_esr")
                     for state in checkpoint.get("callbacks", {}).values()
-                    if isinstance(state, dict) and state.get("best_esr") is not None
+                    if isinstance(state, dict)
+                    and state.get("best_esr") is not None
+                    and state.get("validation_reference") == "full"
                 ]
                 quality.append(
                     (min(float(v) for v in best) if best else float("inf"), member)
@@ -649,6 +814,14 @@ def run_job(job):
             destination = export / "ParaNAM_HyperA2.pnam"
             shutil.copy2(source, destination)
             shared.update(export=str(destination))
+            exported_validation = (
+                read_json(destination).get("metadata", {}).get("training", {})
+            )
+            if (
+                isinstance(exported_validation, dict)
+                and exported_validation.get("validation_reference") == "full"
+            ):
+                shared["best_esr"] = exported_validation.get("validation_esr_full")
             additions = []
             if (
                 spec["preferences"]["mode"] == "active_learning"

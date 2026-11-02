@@ -601,6 +601,7 @@ class _SilenceAnchorRampConfig(_SilenceAnchorConfig):
 
 @_dataclass
 class _ParametricLossConfig(_LossConfig):
+    training_recipe: str = "legacy"
     mel_weight: _Optional[float] = None
     silence_anchor: _Optional[_SilenceAnchorConfig] = None
     silence_anchor_ramp: _Optional[_SilenceAnchorRampConfig] = None
@@ -608,6 +609,9 @@ class _ParametricLossConfig(_LossConfig):
     @classmethod
     def parse_config(cls, config):
         parsed = super().parse_config(config)
+        parsed["training_recipe"] = config.get("training_recipe", "legacy")
+        if parsed["training_recipe"] not in ("legacy", "a2"):
+            raise ValueError("training_recipe must be legacy or a2")
         parsed["mel_weight"] = config.get("mel_weight")
         parsed["silence_anchor"] = _SilenceAnchorConfig.from_config(
             config.get("silence_anchor")
@@ -619,6 +623,8 @@ class _ParametricLossConfig(_LossConfig):
 
 
 class _ParametricLightningModule(_LightningModule):
+    DEFAULT_OPTIMIZER_CLASS = "AdamW"
+
     def __init__(
         self,
         net,
@@ -798,6 +804,10 @@ class _ParametricLightningModule(_LightningModule):
     def configure_gradient_clipping(
         self, optimizer, gradient_clip_val=None, gradient_clip_algorithm=None
     ):
+        if self._loss_config.training_recipe == "a2":
+            return super().configure_gradient_clipping(
+                optimizer, gradient_clip_val, gradient_clip_algorithm
+            )
         # A non-finite gradient poisons Adam's moment estimates. Marking every gradient None
         # excludes the parameters from this step entirely: weights, weight decay, moments,
         # and per-parameter step counters all stay unchanged.
@@ -813,14 +823,10 @@ class _ParametricLightningModule(_LightningModule):
         )
 
     def configure_optimizers(self):
-        # Mirrors the base wiring but (a) uses AdamW for decoupled weight decay -- the
-        # optimizer_config's "weight_decay" curbs the proxy's train/val overfitting, and
-        # weight_decay 0.0 (the default) is identical to plain Adam -- and (b) adds optional
-        # linear LR warmup via scheduler_config["warmup_epochs"], which keeps the earliest
-        # updates small so full-BPTT LSTM training settles onto the descent before full-size
-        # steps, avoiding the early gradient blow-ups that otherwise drive a run to NaN.
-        optimizer_config = {"weight_decay": 0.0, **self._optimizer_config}
-        optimizer = _torch.optim.AdamW(self.parameters(), **optimizer_config)
+        # Explicit selection is persisted in optimizer_config/checkpoints. Keep
+        # AdamW as the legacy fallback for pre-selection parametric configurations;
+        # ParaNAM explicitly selects Adam for new training jobs.
+        optimizer = self._make_optimizer("AdamW", weight_decay=0.0)
         if self._scheduler_config is None:
             return optimizer
         base_scheduler = getattr(
@@ -853,9 +859,11 @@ class _ParametricLightningModule(_LightningModule):
 
     def _size_steps(self, batch):
         if isinstance(self.net, _HyperA2):
-            for size in self.net.sizes:
+            predictions = self.net.forward_sizes(*batch[:-1], pad_start=False)
+            for index, size in enumerate(self.net.sizes):
                 with self.net.using_size(size):
-                    result = self._shared_step(batch)
+                    preds, targets = predictions[:, index, :], batch[-1]
+                    result = preds, targets, self._get_loss_dict(preds, targets)
                 yield size, result
         else:
             yield None, self._shared_step(batch)
@@ -879,7 +887,12 @@ class _ParametricLightningModule(_LightningModule):
                 self._train_size_metrics.setdefault(size, _EpochMetrics()).update(
                     preds, targets, means, capture_index
                 )
-        return _torch.stack(losses).mean()
+        stacked = _torch.stack(losses)
+        return (
+            stacked.sum()
+            if self._loss_config.training_recipe == "a2"
+            else stacked.mean()
+        )
 
     def on_train_epoch_end(self):
         self._log_bucket(self._train_metrics.compute(), _TRAIN_BUCKET)
@@ -916,6 +929,8 @@ class _ParametricLightningModule(_LightningModule):
         # Bare keys back the checkpoint monitor (val_loss), the checkpoint filename
         # (ESR, MSE), and any threshold-ESR early stopping.
         monitored = dict(metrics)
+        for size, size_metrics in self._val_size_metrics.items():
+            monitored[f"ESR_{size}"] = size_metrics.compute()["ESR"]
         monitored["val_loss"] = metrics[val_loss_key]
         self.log_dict(monitored)
 
@@ -1025,9 +1040,13 @@ def _create_parametric_checkpoint_callbacks(
         }
 
     checkpoint_best = checkpoint_class(
-        filename="{epoch:04d}_{step}_{ESR:.3e}_{MSE:.3e}",
+        filename=(
+            "{epoch:04d}_{step}_{ESR_full:.3e}"
+            if learning_config.get("checkpoint_metric") == "ESR_full"
+            else "{epoch:04d}_{step}_{ESR:.3e}_{MSE:.3e}"
+        ),
         save_top_k=3,
-        monitor="val_loss",
+        monitor=learning_config.get("checkpoint_metric", "val_loss"),
         **metadata_kwargs,
         **kwargs,
     )
@@ -1037,6 +1056,16 @@ def _create_parametric_checkpoint_callbacks(
         **metadata_kwargs,
     )
     callbacks = [checkpoint_best]
+    if learning_config.get("separate_size_checkpoints"):
+        callbacks.append(
+            checkpoint_class(
+                filename="lite_{epoch:04d}_{step}_{ESR_lite:.3e}",
+                save_top_k=1,
+                monitor="ESR_lite",
+                **metadata_kwargs,
+                **kwargs,
+            )
+        )
     if not validate_inside_epoch:
         callbacks.append(checkpoint_epoch)
         return callbacks
@@ -1172,7 +1201,10 @@ def main(
     dataset_train = _init_dataset(data_config, _Split.TRAIN)
     dataset_validation = _init_dataset(data_config, _Split.VALIDATION)
     inner_train = _ConcatDataset(_iter_inner_datasets(dataset_train))
-    inner_validation = _ConcatDataset(_iter_inner_datasets(dataset_validation))
+    inner_validation = _ConcatDataset(
+        _iter_inner_datasets(dataset_validation),
+        allow_variable_ny=data_config.get("allow_variable_validation_lengths", False),
+    )
     _apply_joint_dataset_hooks(
         dataset_train=inner_train,
         dataset_validation=inner_validation,
@@ -1185,6 +1217,10 @@ def main(
     train_dataloader = _make_parametric_dataloader(
         dataset_train, learning_config["train_dataloader"]
     )
+    if len(train_dataloader) == 0:
+        raise ValueError(
+            "Training captures are too short for the selected NY and batch size. Reduce NY or Batch Size."
+        )
     val_dataloader = _make_parametric_dataloader(
         dataset_validation, learning_config["val_dataloader"]
     )
@@ -1238,6 +1274,25 @@ def main(
                 **_ParametricLightningModule.parse_config(model_config),
             )
         net = _get_parametric_net(model)
+        if isinstance(net, _HyperA2) and learning_config.get(
+            "separate_size_checkpoints"
+        ):
+            lite_checkpoint = next(
+                (
+                    callback.best_model_path
+                    for callback in trainer.checkpoint_callbacks
+                    if callback.monitor == "ESR_lite"
+                ),
+                "",
+            )
+            if lite_checkpoint:
+                lite_model = _ParametricLightningModule.load_from_checkpoint(
+                    lite_checkpoint,
+                    **_ParametricLightningModule.parse_config(model_config),
+                )
+                net.branch("lite").load_state_dict(
+                    lite_model.net.branch("lite").state_dict()
+                )
         model.cpu()
         model.eval()
         net.sample_rate = getattr(dataset_train, "sample_rate", None)

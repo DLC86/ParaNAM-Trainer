@@ -89,9 +89,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     workspace.save()
     job = make_job(workspace)
     spec = read_json(job / "spec.json")
-    spec["model"]["net"]["config"]["hypernet"].update(
-        mode="low_rank", rank=2, hidden_sizes=[4]
-    )
+    assert spec["model"]["net"]["config"]["hypernet"]["mode"] == "full"
+    assert spec["model"]["net"]["config"]["hypernet"]["selector"] == {}
+    spec["model"]["net"]["config"]["hypernet"]["hidden_sizes"] = [4]
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     spec["data"]["common"]["require_input_pre_silence"] = None
     atomic_write_json(job / "spec.json", spec)
@@ -135,6 +135,12 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     assert [s["name"] for s in model["config"]["submodels"]] == ["lite", "full"]
     assert model["metadata"]["input_level_dbu"] == 18.0
     assert model["metadata"]["output_level_dbu"] == 12.0
+    validation = model["metadata"]["training"]
+    assert validation["validation_reference"] == "full"
+    assert validation["validation_esr"] == validation["validation_esr_full"]
+    assert validation["validation_esr_lite"] is not None
+    assert validation["optimizer"] == "Adam"
+    assert validation["validation_esr"] == progress["best_esr"]
     if gpu_runtime and device == "auto":
         assert str(progress["device"]).startswith("cuda"), progress
     print("Frozen worker completed real HyperA2 Full/Lite training and metadata export")
@@ -220,6 +226,11 @@ def validate_static(executable, build_directory):
         ] == [3, 8]
         assert model["metadata"]["custom"] == {"retained": True}
         assert model["metadata"]["modeled_by"] == "Installer check"
+        validation = model["metadata"]["training"]
+        assert validation["validation_reference"] == "full"
+        assert validation["validation_esr"] == validation["validation_esr_full"]
+        assert validation["validation_esr_lite"] is not None
+        assert validation["optimizer"] == "Adam"
     print(
         "Frozen app trained, paused and resumed two independent static A2 models",
         flush=True,

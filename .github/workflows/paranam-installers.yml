@@ -74,7 +74,7 @@ jobs:
       - name: Install application and build dependencies
         run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
       - name: Test wizard and real pause/resume training
-        run: python -m pytest tests/paranam tests/capture -q -o addopts= --basetemp .test-temp
+        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Verify optional NVIDIA engine inside the frozen CPU app

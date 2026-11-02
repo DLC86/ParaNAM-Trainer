@@ -32,7 +32,7 @@ def test_capture_modes_keep_independent_batch_defaults(window, tmp_path):
 
     ws = Workspace.create(tmp_path / "Defaults", "Defaults")
     window._attach(ws)
-    assert window.batch_size.value() == 32
+    assert window.batch_size.value() == 16
     window.batch_size.setValue(4)
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert window.batch_size.value() == 16

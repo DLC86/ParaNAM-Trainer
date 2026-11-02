@@ -312,6 +312,9 @@ def build_hyper_a2_model_config(project: CaptureProject) -> dict[str, _Any]:
     config = model["net"]["config"]
     del config["layers"]
     config["size"] = "full"
+    config["hypernet"].update(mode="full", selector={})
+    model["optimizer"]["lr"] = 0.004
+    model["loss"]["training_recipe"] = "a2"
     model["net"]["name"] = "HyperA2"
     return model
 
@@ -434,6 +437,17 @@ def build_hyper_learning_config(project: CaptureProject) -> dict[str, _Any]:
     return _build_learning_config(gradient_clip_val=1.0)
 
 
+def build_hyper_a2_learning_config(project: CaptureProject) -> dict[str, _Any]:
+    learning = _build_learning_config(gradient_clip_val=None)
+    learning["trainer"].pop("gradient_clip_val", None)
+    learning["train_dataloader"]["batch_size"] = 16
+    learning["val_dataloader"]["batch_size"] = 1
+    learning["torch_compile"] = {"enabled": False}
+    learning["checkpoint_metric"] = "ESR_full"
+    learning["separate_size_checkpoints"] = True
+    return learning
+
+
 # Mirrors nam_full_configs/active_learning/learning.json, less its _notes. trainer.accelerator
 # is a placeholder: nam.train.active_learning.train_ensemble rewrites it at runtime
 # (cuda > mps > cpu).
@@ -527,5 +541,5 @@ def write_hyper_a2_training_configs(
     model_path = project_dir / HYPER_A2_MODEL_CONFIG_FILENAME
     learning_path = project_dir / HYPER_A2_LEARNING_CONFIG_FILENAME
     _atomic_write_json(model_path, build_hyper_a2_model_config(project))
-    _atomic_write_json(learning_path, build_hyper_learning_config(project))
+    _atomic_write_json(learning_path, build_hyper_a2_learning_config(project))
     return [model_path, learning_path]

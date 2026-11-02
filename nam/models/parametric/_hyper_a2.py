@@ -131,6 +131,23 @@ class HyperA2(_ParametricNet):
         for branch in self._branches.values():
             branch.set_uniform_batch_params(uniform)
 
+    def forward_sizes(self, x, params, pad_start=False):
+        """Evaluate both sizes together for capture-homogeneous training batches."""
+        if self.requires_uniform_batch_params:
+            from ._packed_hyper_a2 import PackedHyperA2Execution
+
+            cache = getattr(self, "_packed_execution_cache", None)
+            if cache is None:
+                # A tuple keeps the execution shell outside registered modules.
+                cache = (PackedHyperA2Execution(self),)
+                self._packed_execution_cache = cache
+            return cache[0](self, x, params, pad_start)
+        # General inference can mix settings; preserve the established contract.
+        return _torch.stack(
+            [self.branch(size)(x, params, pad_start=pad_start) for size in self.sizes],
+            dim=1,
+        )
+
     def set_compiled(self, enabled, **kwargs):
         for branch in self._branches.values():
             branch.set_compiled(enabled, **kwargs)

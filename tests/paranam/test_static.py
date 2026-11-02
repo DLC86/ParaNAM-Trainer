@@ -11,7 +11,9 @@ from paranam.workspace import Workspace, read_json
 
 
 def static_workspace(workspace):
-    workspace.preferences.update(capture_type="static", static_size="lite", epochs=2)
+    workspace.preferences.update(
+        capture_type="static", static_size="lite", epochs=2, static_batch_size=1
+    )
     workspace.generate_plan()
     workspace.add_static_capture("Lead")
     return workspace
@@ -74,8 +76,12 @@ def test_metadata_editor_preserves_unknown_fields(qapp):
 
 
 @pytest.mark.parametrize("size", ["full", "lite"])
-def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, size):
+@pytest.mark.parametrize("optimizer", ["Adam", "AdamW"])
+def test_real_static_batch_pause_resume_and_metadata(
+    workspace, monkeypatch, size, optimizer
+):
     ws = static_workspace(workspace)
+    ws.preferences["advanced_static"] = {"optimizer": optimizer}
     ws.preferences["static_size"] = size
     ws.project.user_metadata = {
         "modeled_by": "Tester",
@@ -158,6 +164,14 @@ def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, siz
         assert model["metadata"]["modeled_by"] == "Tester"
         assert model["metadata"]["input_level_dbu"] == 18
         assert model["metadata"]["output_level_dbu"] == 12
+        summary = model["metadata"]["training"]
+        assert summary["validation_reference"] == "full"
+        assert summary["validation_esr"] == summary["validation_esr_full"]
+        assert summary["validation_esr_lite"] is not None
+        assert (
+            children[0]["model"]["metadata"]["training"]["validation_esr"]
+            == summary["validation_esr_lite"]
+        )
     assert (
         read_json(Path(progress["exports"][0]))["metadata"]["gear_model"] == "Test amp"
     )

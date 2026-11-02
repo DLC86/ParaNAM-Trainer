@@ -108,6 +108,10 @@ def main():
                     "cuda": torch.cuda.is_available(),
                     "mps": torch.backends.mps.is_available(),
                     "architecture": "HyperA2",
+                    "default_optimizer": window.advanced_fields[
+                        "optimizer"
+                    ].currentData(),
+                    "validation_reference": "full",
                     "pages": 4,
                 }
             ),
