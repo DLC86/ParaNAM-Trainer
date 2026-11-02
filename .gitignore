@@ -149,6 +149,8 @@ AGENTS.md
 .test-tools/
 installers/
 packaging/icon.ico
+packaging/icon.icns
+packaging/icon.png
 !nam/_version.py
 
 !paranam/assets/*.wav

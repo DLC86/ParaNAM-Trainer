@@ -119,12 +119,15 @@ def main():
         )
         return 0
     from PySide6.QtCore import Qt, QStandardPaths
-    from PySide6.QtGui import QPixmap, QColor
+    from PySide6.QtGui import QPixmap, QColor, QIcon
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox
 
     app = QApplication(sys.argv)
     app.setOrganizationName("DLC86")
     app.setApplicationName("ParaNAM Trainer")
+    from .signals import asset_path
+
+    app.setWindowIcon(QIcon(str(asset_path("TTSLogo.png"))))
     pixmap = QPixmap(520, 230)
     pixmap.fill(QColor("#1b1b1b"))
     splash = QSplashScreen(pixmap)

@@ -22,29 +22,16 @@ def main():
     parser.add_argument("--flavor", default="CPU", choices=("CPU", "Metal"))
     parser.add_argument("--skip-freeze", action="store_true")
     args = parser.parse_args()
-    from PIL import Image, ImageDraw
+    from PIL import Image
 
-    image = Image.new("RGBA", (256, 256), "#1b1b1b")
-    draw = ImageDraw.Draw(image)
-    draw.line(
-        [
-            (34, 132),
-            (64, 132),
-            (82, 78),
-            (112, 181),
-            (140, 65),
-            (165, 164),
-            (183, 132),
-            (222, 132),
-        ],
-        fill="#bf0000",
-        width=15,
-        joint="curve",
-    )
+    image = Image.open(ROOT / "paranam" / "assets" / "TTSLogo.png").convert("RGBA")
     image.save(
         ROOT / "packaging" / "icon.ico",
         sizes=[(16, 16), (32, 32), (48, 48), (256, 256)],
     )
+    if sys.platform == "darwin":
+        image.save(ROOT / "packaging" / "icon.icns")
+    image.resize((256, 256), Image.Resampling.LANCZOS).save(ROOT / "packaging" / "icon.png")
     installers = ROOT / "installers"
     installers.mkdir(exist_ok=True)
     if not args.skip_freeze:
@@ -163,9 +150,9 @@ def main():
             "Categories=AudioVideo;Audio;\nTerminal=false\n",
             encoding="utf-8",
         )
-        icons = package / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps"
+        icons = package / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
         icons.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / "packaging" / "icon.svg", icons / "paranam-trainer.svg")
+        shutil.copy2(ROOT / "packaging" / "icon.png", icons / "paranam-trainer.png")
         control = package / "DEBIAN"
         control.mkdir()
         (control / "control").write_text(
