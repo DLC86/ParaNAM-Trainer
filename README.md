@@ -6,7 +6,10 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.4.2 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.2-preview)**
+The 0.4.3 interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
+Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
+
+**[Download the 0.4.3 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.3-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts

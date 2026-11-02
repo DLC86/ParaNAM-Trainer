@@ -25,3 +25,8 @@ operating system/user's normal graphics driver installation, not this applicatio
 
 The Inter typeface is bundled under the SIL Open Font License 1.1; its full license
 is in paranam/assets/Inter-OFL.txt.
+
+The Michroma title typeface is bundled under the SIL Open Font
+License 1.1; its full license is in paranam/assets/Michroma-OFL.txt.
+
+The TTS logo is included from NAM On Steroids and belongs to The Tone Scientist.

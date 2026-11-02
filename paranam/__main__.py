@@ -126,12 +126,12 @@ def main():
     app.setOrganizationName("DLC86")
     app.setApplicationName("ParaNAM Trainer")
     pixmap = QPixmap(520, 230)
-    pixmap.fill(QColor("#191b23"))
+    pixmap.fill(QColor("#1b1b1b"))
     splash = QSplashScreen(pixmap)
     splash.showMessage(
         "ParaNAM Trainer\nLoading the capture and training engines…",
         Qt.AlignmentFlag.AlignCenter,
-        QColor("#ff9a61"),
+        QColor("#bf0000"),
     )
     splash.show()
     app.processEvents()

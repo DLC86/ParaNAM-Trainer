@@ -36,54 +36,58 @@ def load_font():
 
         if QFontDatabase.addApplicationFont(str(asset_path("Inter.ttf"))) < 0:
             raise RuntimeError("The bundled user-interface font could not be loaded")
+        if QFontDatabase.addApplicationFont(str(asset_path("Michroma-Regular.ttf"))) < 0:
+            raise RuntimeError("The bundled title font could not be loaded")
         QApplication.instance().setFont(QFont("Inter", 10))
         _font_loaded = True
 
 
-ORANGE = "#ff8b4b"
-TEXT = "#f0f0f4"
-MUTED = "#9296a6"
+ACCENT = "#bf0000"
+TEXT = "#f0f0f0"
+MUTED = "#969696"
 
 THEME = """
-QWidget { background: #111217; color: #f0f0f4; font-family: 'Inter'; font-size: 13px; }
-QMainWindow { background: #111217; }
-QFrame#sidebar { background: #191b23; border-right: 1px solid #2a2d39; }
-QFrame#card { background: #1b1d26; border: 1px solid #30333f; border-radius: 14px; }
+QWidget { background: #121212; color: #f0f0f0; font-family: 'Inter'; font-size: 13px; }
+QMainWindow { background: #121212; }
+QFrame#sidebar { background: #1b1b1b; border-right: 1px solid #2d2d2d; }
+QFrame#card { background: #1d1d1d; border: 1px solid #333333; border-radius: 14px; }
 QFrame#card QLabel { background: transparent; }
 QLabel, QCheckBox { background: transparent; }
-QLabel#eyebrow { color: #ff8b4b; font-size: 11px; font-weight: 700; }
+QLabel#eyebrow { color: #bf0000; font-size: 11px; font-weight: 700; }
 QLabel#title { font-size: 31px; font-weight: 700; }
 QLabel#section { font-size: 18px; font-weight: 650; }
-QLabel#muted { color: #9296a6; }
+QLabel#muted { color: #969696; }
 QLabel#metric { font-size: 30px; font-weight: 650; }
-QLabel#brand { font-size: 22px; font-weight: 750; color: #ff8b4b; }
-QPushButton { background: #292c38; border: 1px solid #3c4050; border-radius: 8px; padding: 10px 16px; font-weight: 600; }
-QPushButton:hover { background: #353a48; border-color: #74798c; }
-QToolButton { background: #292c38; border: 1px solid #3c4050; border-radius: 8px; padding: 8px 12px; font-weight: 600; }
-QToolButton:hover { background: #353a48; border-color: #74798c; }
+QLabel#brand { font-family: 'Michroma'; font-size: 18px; font-weight: 400; color: #bf0000; }
+QPushButton { background: #2c2c2c; border: 1px solid #414141; border-radius: 8px; padding: 10px 16px; font-weight: 600; }
+QPushButton:hover { background: #3a3a3a; border-color: #797979; }
+QToolButton { background: #2c2c2c; border: 1px solid #414141; border-radius: 8px; padding: 8px 12px; font-weight: 600; }
+QToolButton:hover { background: #3a3a3a; border-color: #797979; }
+QToolButton#brandLink { background: transparent; border: 1px solid transparent; padding: 0; border-radius: 4px; }
+QToolButton#brandLink:hover, QToolButton#brandLink:focus { border-color: #bf0000; }
 QWidget#advancedTraining { background: transparent; }
-QPushButton:disabled { color: #626677; background: #20222b; border-color: #292c38; }
-QPushButton#primary { background: #ff8b4b; color: #19140f; border: 1px solid #ff8b4b; }
-QPushButton#primary:hover { background: #ffa06d; }
-QPushButton#primary:disabled { background: #634635; color: #aaa09a; border-color: #634635; }
-QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 10px; color: #9296a6; }
-QPushButton#step:checked { color: #ffad7d; background: #322922; border: 1px solid #694936; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #12141b; border: 1px solid #3c4050; border-radius: 7px; padding: 8px; min-height: 20px; }
-QLineEdit:focus, QComboBox:focus { border: 1px solid #ff8b4b; }
-QComboBox QAbstractItemView { background: #232632; selection-background-color: #68452f; }
-QTableWidget, QListWidget, QPlainTextEdit { background: #15171e; border: 1px solid #303441; border-radius: 8px; alternate-background-color: #1c1f29; }
-QListWidget::item { padding: 14px; border-bottom: 1px solid #292d39; }
-QListWidget::item:selected, QTableWidget::item:selected { background: #513a2b; color: #fff1e8; }
-QHeaderView::section { background: #222530; color: #b4b8c7; border: 0; border-bottom: 1px solid #3c4050; padding: 9px; }
-QProgressBar { background: #252936; border: 0; border-radius: 5px; min-height: 10px; text-align: center; }
-QProgressBar::chunk { background: #ff8b4b; border-radius: 5px; }
+QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2c; }
+QPushButton#primary { background: #bf0000; color: #ffffff; border: 1px solid #bf0000; }
+QPushButton#primary:hover { background: #d51919; }
+QPushButton#primary:disabled { background: #343434; color: #999999; border-color: #343434; }
+QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 10px; color: #969696; }
+QPushButton#step:checked { color: #f0f0f0; background: #2b2b2b; border: 1px solid #bf0000; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #141414; border: 1px solid #414141; border-radius: 7px; padding: 8px; min-height: 20px; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid #bf0000; }
+QComboBox QAbstractItemView { background: #262626; selection-background-color: #4d4d4d; }
+QTableWidget, QListWidget, QPlainTextEdit { background: #171717; border: 1px solid #343434; border-radius: 8px; alternate-background-color: #1f1f1f; }
+QListWidget::item { padding: 14px; border-bottom: 1px solid #2d2d2d; }
+QListWidget::item:selected, QTableWidget::item:selected { background: #3f3f3f; color: #ffffff; }
+QHeaderView::section { background: #252525; color: #b8b8b8; border: 0; border-bottom: 1px solid #414141; padding: 9px; }
+QProgressBar { background: #292929; border: 0; border-radius: 5px; min-height: 10px; text-align: center; }
+QProgressBar::chunk { background: #bf0000; border-radius: 5px; }
 QScrollArea { border: 0; }
-QScrollBar:vertical { background: #191c24; width: 10px; }
-QScrollBar::handle:vertical { background: #444958; min-height: 25px; border-radius: 5px; }
+QScrollBar:vertical { background: #1c1c1c; width: 10px; }
+QScrollBar::handle:vertical { background: #494949; min-height: 25px; border-radius: 5px; }
 QCheckBox { spacing: 8px; padding: 3px; }
-QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #626879; border-radius: 4px; background: #1c1f29; }
-QCheckBox::indicator:checked { background: #ff8b4b; border-color: #ff8b4b; }
-QToolTip { background: #292d39; color: #f0f0f4; border: 1px solid #626879; padding: 6px; }
+QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #686868; border-radius: 4px; background: #1f1f1f; }
+QCheckBox::indicator:checked { background: #bf0000; border-color: #bf0000; }
+QToolTip { background: #2d2d2d; color: #f0f0f0; border: 1px solid #686868; padding: 6px; }
 """
 
 
@@ -109,15 +113,15 @@ class RoutingDiagram(QWidget):
         ]
         for x, text in boxes:
             rect = QRectF(x, 38, 140, 72)
-            painter.setBrush(QColor("#232733"))
-            painter.setPen(QPen(QColor("#454b5b"), 1))
+            painter.setBrush(QColor("#272727"))
+            painter.setPen(QPen(QColor("#4b4b4b"), 1))
             painter.drawRoundedRect(rect, 10, 10)
             painter.setPen(QColor(TEXT))
             painter.drawText(
                 rect.adjusted(6, 5, -6, -5), Qt.AlignmentFlag.AlignCenter, text
             )
             if x < 615:
-                painter.setPen(QPen(QColor(ORANGE), 2))
+                painter.setPen(QPen(QColor(ACCENT), 2))
                 painter.drawLine(QPointF(x + 140, 74), QPointF(x + 150, 74))
                 painter.drawLine(QPointF(x + 147, 70), QPointF(x + 151, 74))
                 painter.drawLine(QPointF(x + 147, 78), QPointF(x + 151, 74))
@@ -176,8 +180,8 @@ class ControlScene(QWidget):
         for index, control in enumerate(self.controls):
             x, y = (index % columns) * width, (index // columns) * 185
             bounds = QRectF(x + 7, y + 6, width - 14, 170)
-            painter.setBrush(QColor("#20232d"))
-            painter.setPen(QPen(QColor("#353b49"), 1))
+            painter.setBrush(QColor("#232323"))
+            painter.setPen(QPen(QColor("#3b3b3b"), 1))
             painter.drawRoundedRect(bounds, 12, 12)
             painter.setPen(QColor(TEXT))
             painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
@@ -197,7 +201,7 @@ class ControlScene(QWidget):
             if isinstance(control, SwitchSpec):
                 painter.setFont(QFont("Inter", 10))
                 label = str(value)
-                painter.setPen(QColor(ORANGE))
+                painter.setPen(QColor(ACCENT))
                 painter.drawText(
                     QRectF(x + 12, y + 48, width - 24, 42),
                     Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
@@ -212,7 +216,7 @@ class ControlScene(QWidget):
                 for i in range(count):
                     px = x + 24 + (width - 48) * i / max(1, count - 1)
                     painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QColor(ORANGE if i == selected else "#484e5f"))
+                    painter.setBrush(QColor(ACCENT if i == selected else "#4e4e4e"))
                     painter.drawEllipse(
                         QPointF(px, y + 111),
                         5 if i == selected else 3,
@@ -239,20 +243,20 @@ class ControlScene(QWidget):
                     path.moveTo(point) if i == 0 else path.lineTo(point)
                 painter.setPen(
                     QPen(
-                        QColor("#464c5b"),
+                        QColor("#4c4c4c"),
                         5,
                         Qt.PenStyle.SolidLine,
                         Qt.PenCapStyle.RoundCap,
                     )
                 )
                 painter.drawPath(path)
-                painter.setBrush(QColor("#292e3a"))
-                painter.setPen(QPen(QColor("#5c6576"), 1))
+                painter.setBrush(QColor("#2e2e2e"))
+                painter.setPen(QPen(QColor("#656565"), 1))
                 painter.drawEllipse(center, 30, 30)
                 angle = math.radians(210 + fraction * 300)
                 painter.setPen(
                     QPen(
-                        QColor(ORANGE),
+                        QColor(ACCENT),
                         3,
                         Qt.PenStyle.SolidLine,
                         Qt.PenCapStyle.RoundCap,
@@ -262,7 +266,7 @@ class ControlScene(QWidget):
                     center + QPointF(10 * math.sin(angle), -10 * math.cos(angle)),
                     center + QPointF(24 * math.sin(angle), -24 * math.cos(angle)),
                 )
-                painter.setPen(QColor(ORANGE))
+                painter.setPen(QColor(ACCENT))
                 painter.drawText(
                     QRectF(x + 10, y + 136, width - 20, 24),
                     Qt.AlignmentFlag.AlignCenter,

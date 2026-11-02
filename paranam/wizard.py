@@ -17,8 +17,9 @@ from PySide6.QtCore import (
     QTimer,
     QStandardPaths,
     QUrl,
+    QSize,
 )
-from PySide6.QtGui import QDesktopServices, QColor, QTextCursor
+from PySide6.QtGui import QDesktopServices, QColor, QTextCursor, QIcon
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -68,6 +69,7 @@ from .widgets import (
 from . import training
 from .audio_devices import capabilities
 from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
+from .signals import asset_path
 
 
 def label(text, style=None):
@@ -142,11 +144,26 @@ class WizardWindow(QMainWindow):
         root.setSpacing(0)
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(218)
+        sidebar.setFixedWidth(256)
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
-        rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.4.2", "eyebrow"))
+        brand = QHBoxLayout()
+        brand.setSpacing(10)
+        self.shop_button = QToolButton()
+        self.shop_button.setObjectName("brandLink")
+        self.shop_button.setIcon(QIcon(str(asset_path("TTSLogo.png"))))
+        self.shop_button.setIconSize(QSize(44, 44))
+        self.shop_button.setFixedSize(46, 46)
+        self.shop_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shop_button.setToolTip("Visit The Tone Scientist shop")
+        self.shop_button.setAccessibleName("The Tone Scientist shop")
+        self.shop_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://shop.thetonescientist.com"))
+        )
+        brand.addWidget(self.shop_button)
+        brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
+        rail.addLayout(brand)
+        rail.addWidget(label("VERSION  /  0.4.3", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
