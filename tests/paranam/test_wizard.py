@@ -2,6 +2,31 @@ from nam.capture.params import KnobSpec, SwitchSpec
 from paranam.widgets import ControlDialog
 
 
+def test_latency_combines_integer_and_fractional_samples():
+    from types import SimpleNamespace
+    from nam.capture.project import CaptureEntryModel, QAModel
+    from nam.capture.session import CaptureSession
+    from paranam.wizard import WizardWindow
+
+    entry = CaptureEntryModel(index=0, split="train", params={}, y_path="test.wav")
+    assert WizardWindow._capture_metrics(entry)[0] == "—"
+    entry.delay = 4221
+    assert WizardWindow._capture_metrics(entry)[0] == "4221 samples"
+    entry.qa = QAModel(subsample_shift=-0.201)
+    assert WizardWindow._capture_metrics(entry)[0] == "4221.201 samples"
+    entry.qa.subsample_shift = 0.201
+    assert WizardWindow._capture_metrics(entry)[0] == "4220.799 samples"
+    entry.delay = None
+    entry.qa.loopback_delay = 4221
+    assert WizardWindow._capture_metrics(entry)[0] == "4221 samples"
+    # Exercise the capture engine's actual sign convention, not a UI-only sum.
+    entry.delay, shift = CaptureSession._alignment(
+        SimpleNamespace(peak_delay=4247.201, delay=4221), True, 26.0
+    )
+    entry.qa.subsample_shift = shift
+    assert WizardWindow._capture_metrics(entry)[0] == "4221.201 samples"
+
+
 def test_capture_modes_keep_independent_batch_defaults(window, tmp_path):
     from paranam.workspace import Workspace
 

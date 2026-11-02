@@ -22,6 +22,33 @@ def ready(workspace):
     workspace.save()
 
 
+@pytest.mark.parametrize("capture_type", ["static", "parametric"])
+@pytest.mark.parametrize("loopback", [False, True])
+def test_training_retains_capture_safety_margin_once(workspace, capture_type, loopback):
+    from nam.capture.latency import BlipPreamble, measure_delay
+    from nam.capture.session import CaptureSession, ALIGNMENT_LEAD_SAMPLES
+    from nam.capture.project import QAModel
+
+    workspace.preferences["capture_type"] = capture_type
+    workspace.generate_plan()
+    ready(workspace)
+    preamble = BlipPreamble(48000)
+    measured = measure_delay(np.pad(preamble.render(), (480, 480)), preamble.as_played())
+    assert measured.safety_factor == 1
+    assert measured.delay == 479  # Official calibrator: measured onset minus one.
+    label, shift = CaptureSession._alignment(measured, loopback, ALIGNMENT_LEAD_SAMPLES)
+    assert 480 - (label - shift) >= 1
+    for entry in workspace.project.entries:
+        entry.delay = label
+        entry.qa = QAModel(subsample_shift=shift or None)
+    workspace.save()
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    for split in ("train", "validation"):
+        assert all(item["delay"] == label for item in spec["data"][split])
+    # Rebuilding the training job does not subtract another sample or alter WAVs.
+    assert all(entry.delay == label for entry in workspace.project.entries)
+
+
 def tiny_job(workspace, monkeypatch):
     ready(workspace)
     workspace.project.input_level_dbu, workspace.project.output_level_dbu = 18, 12

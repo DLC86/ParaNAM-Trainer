@@ -7,6 +7,10 @@ on:
         type: choice
         default: all
         options: [all, windows, linux, macos-arm64, macos-intel]
+      release_id:
+        description: Optional private draft preview ID for direct upload (avoids artifact quota)
+        type: string
+        default: ''
   push:
     tags: ['paranam-v*']
 permissions:
@@ -32,6 +36,8 @@ jobs:
           PY
   build:
     needs: targets
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -82,8 +88,15 @@ jobs:
           else
             python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
           fi
+      - name: Upload tested installer directly to the private draft
+        if: inputs.release_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python packaging/publish_native.py upload
       - name: Preserve bundle diagnostics
-        if: always()
+        if: always() && inputs.release_id == ''
         uses: actions/upload-artifact@v4
         with:
           name: Diagnostics-${{ matrix.id }}
@@ -94,10 +107,28 @@ jobs:
             build/bundle-training-*/training/*/progress.json
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
+        if: inputs.release_id == ''
         with:
           name: ParaNAM-${{ matrix.id }}
           path: installers/*
           compression-level: 0
           if-no-files-found: error
           retention-days: 14
+  publish-direct:
+    if: inputs.release_id != '' && inputs.target == 'all'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Publish only after every native build and frozen test passes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python packaging/publish_native.py finalize
 

@@ -140,6 +140,12 @@ in one model. Return calibration remains valid while the input gain is unchanged
 ## Capture timing
 
 Each recording is aligned independently using the clean loopback when enabled.
+The **Latency** column shows one fractional sample value, recovering the delay as
+the stored integer label minus the correction already applied to the recording.
+NAM's one-sample safety factor is already included by the latency calibrator.
+Loopback alignment retains a conservative onset margin (initially four samples
+before the response peak, widened for the interface when needed). Static and
+parametric training use these prepared labels without subtracting the margin again.
 Amp-return versus loopback differences and changes in latency between recordings
 do not generate discrepancy errors. Timing marks before and after the entire input
 verify clock stability. A change of **0.1 sample or more**, including fractional

@@ -1387,9 +1387,17 @@ class WizardWindow(QMainWindow):
             if entry.delay is not None
             else (qa.loopback_delay if qa else None)
         )
-        latency = "—" if delay is None else f"{delay} samples"
-        if qa and (qa.subsample_shift is not None or qa.loopback_delay is not None):
-            latency += f" · subsample {(qa.subsample_shift or 0):+.3f}"
+        latency = "—"
+        if delay is not None:
+            # The stored shift was applied to the audio, so undo it to recover
+            # the fractional label: shift = rounded_delay - fractional_delay.
+            # A legacy loopback-only fallback is already a measured delay.
+            fraction = qa.subsample_shift if qa and entry.delay is not None else None
+            latency = (
+                f"{delay - fraction:.3f} samples"
+                if fraction is not None
+                else f"{delay} samples"
+            )
         peak = f"{qa.peak:.1f}" if qa and qa.peak is not None else "—"
         return latency, peak, " / ".join(warnings) or "—"
 
