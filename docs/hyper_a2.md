@@ -85,7 +85,7 @@ ordinary A2 audio network.
 
 The trainer and its checkpoint callback write:
 
-* `model_parametric.nam`: architecture `HyperA2`, with both HyperWaveNet
+* `model_parametric.pnam`: architecture `HyperA2`, with both HyperWaveNet
   states and editable knob definitions. A runtime must implement HyperA2
   loading to play this file with live controls.
 * `model.nam`: a stock `SlimmableContainer` containing two ordinary
