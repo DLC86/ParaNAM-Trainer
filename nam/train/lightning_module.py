@@ -196,6 +196,7 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
         optimizer_config: _Optional[dict] = None,
         scheduler_config: _Optional[dict] = None,
         loss_config: _Optional[LossConfig] = None,
+        check_nonfinite_gradients: bool = False,
     ):
         """
         :param scheduler_config: contains
@@ -212,6 +213,9 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
         self._optimizer_config = {} if optimizer_config is None else optimizer_config
         self._scheduler_config = scheduler_config
         self._loss_config = LossConfig() if loss_config is None else loss_config
+        if not isinstance(check_nonfinite_gradients, bool):
+            raise ValueError("check_nonfinite_gradients must be a boolean")
+        self._check_nonfinite_gradients = check_nonfinite_gradients
         self._mrstft = None  # Multi-resolution short-time Fourier transform loss
         # Where to compute the MRSTFT.
         # Keeping it on-device is preferable, but if that fails, then remember to drop
@@ -269,7 +273,26 @@ class LightningModule(_pl.LightningModule, _InitializableFromConfig):
             "optimizer_config": config["optimizer"],
             "scheduler_config": config["lr_scheduler"],
             "loss_config": loss_config,
+            "check_nonfinite_gradients": config.get("check_nonfinite_gradients", False),
         }
+
+    def configure_gradient_clipping(
+        self, optimizer, gradient_clip_val=None, gradient_clip_algorithm=None
+    ):
+        if self._check_nonfinite_gradients:
+            # One host synchronization for all tensors, rather than one per parameter.
+            finite = [
+                _torch.isfinite(p.grad).all()
+                for p in self.parameters()
+                if p.grad is not None
+            ]
+            if finite and not _torch.stack(finite).all():
+                # Skip the entire update, including weight decay and optimizer moments.
+                for parameter in self.parameters():
+                    parameter.grad = None
+        super().configure_gradient_clipping(
+            optimizer, gradient_clip_val, gradient_clip_algorithm
+        )
 
     @classmethod
     def register_net_initializer(cls, name, constructor, overwrite: bool = False):

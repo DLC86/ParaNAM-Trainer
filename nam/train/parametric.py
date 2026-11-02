@@ -633,17 +633,19 @@ class _ParametricLightningModule(_LightningModule):
         scheduler_config=None,
         loss_config=None,
         hypernet_lr_scale=1.0,
+        check_nonfinite_gradients=True,
     ):
         super().__init__(
             net,
             optimizer_config=optimizer_config,
             scheduler_config=scheduler_config,
+            check_nonfinite_gradients=check_nonfinite_gradients,
             loss_config=(
                 _ParametricLossConfig() if loss_config is None else loss_config
             ),
         )
-        if not _isfinite(hypernet_lr_scale) or not 0 < hypernet_lr_scale <= 1:
-            raise ValueError("hypernet_lr_scale must be finite and in (0, 1]")
+        if not _isfinite(hypernet_lr_scale) or hypernet_lr_scale <= 0:
+            raise ValueError("hypernet_lr_scale must be finite and positive")
         if hypernet_lr_scale != 1.0 and not isinstance(net, _HyperA2):
             raise ValueError("hypernet_lr_scale requires HyperA2")
         self._hypernet_lr_scale = float(hypernet_lr_scale)
@@ -666,6 +668,9 @@ class _ParametricLightningModule(_LightningModule):
             config.get("loss", {})
         )
         parsed["hypernet_lr_scale"] = config.get("hypernet_lr_scale", 1.0)
+        parsed["check_nonfinite_gradients"] = config.get(
+            "check_nonfinite_gradients", True
+        )
         return parsed
 
     def on_save_checkpoint(self, checkpoint):
@@ -819,26 +824,6 @@ class _ParametricLightningModule(_LightningModule):
                 _torch.log10(transform(targets) + 1e-5),
             )
             for transform in self._mel_mrstft
-        )
-
-    def configure_gradient_clipping(
-        self, optimizer, gradient_clip_val=None, gradient_clip_algorithm=None
-    ):
-        # A non-finite gradient poisons Adam's moment estimates. Marking every gradient None
-        # excludes the parameters from this step entirely: weights, weight decay, moments,
-        # and per-parameter step counters all stay unchanged.
-        # Reduce on-device first: a Python `any` synchronizes CUDA once per
-        # parameter, which is expensive for the many small hypernetwork tensors.
-        finite = [
-            _torch.isfinite(p.grad).all()
-            for p in self.parameters()
-            if p.grad is not None
-        ]
-        if finite and not _torch.stack(finite).all():
-            for parameter in self.parameters():
-                parameter.grad = None
-        super().configure_gradient_clipping(
-            optimizer, gradient_clip_val, gradient_clip_algorithm
         )
 
     def configure_optimizers(self):

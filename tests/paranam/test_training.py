@@ -98,7 +98,7 @@ def test_both_training_methods_only_build_nested_hyper_a2(workspace, mode, membe
     assert spec["model"]["net"]["name"] == "HyperA2"
     assert spec["model"]["net"]["config"]["size"] == "full"
     assert spec["learning"]["torch_compile"]["enabled"] is False
-    assert spec["learning"]["trainer"]["enable_progress_bar"] is True
+    assert spec["learning"]["trainer"]["enable_progress_bar"] is False
 
 
 @pytest.mark.parametrize("epochs", [1, 2])

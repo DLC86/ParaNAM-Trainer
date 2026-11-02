@@ -433,11 +433,22 @@ class Workspace:
             fit_mrstft=True,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
+            gradient_clipping=(kind == "parametric"),
+            gradient_clip_val=1.0,
+            check_nonfinite_gradients=(kind == "parametric"),
+            hypernetwork_recipe="HyperA2",
         )
-        return {**defaults, **self.preferences.get("advanced_" + kind, {})}
+        options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
+        options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
+        return options
 
     def fingerprint(
-        self, *, batch_size=None, include_advanced=True, include_optimizer=True
+        self,
+        *,
+        batch_size=None,
+        include_advanced=True,
+        include_optimizer=True,
+        include_gradient_safety=True,
     ):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import build_data_config
@@ -496,6 +507,15 @@ class Workspace:
             data["settings"]["advanced_training"] = self.training_options()
             if not include_optimizer:
                 data["settings"]["advanced_training"].pop("optimizer")
+            if not include_gradient_safety:
+                for key in (
+                    "gradient_clipping",
+                    "gradient_clip_val",
+                    "check_nonfinite_gradients",
+                    "hypernetwork_learning_rate",
+                    "hypernetwork_recipe",
+                ):
+                    data["settings"]["advanced_training"].pop(key, None)
         if batch_size is not None:
             data["settings"]["batch_size"] = batch_size
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

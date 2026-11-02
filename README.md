@@ -6,11 +6,17 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-The 0.4.3 interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
+The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.4.3 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.3-preview)**
+**[Download the 0.4.4 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.4-preview)**
 (sign in with an account that can access this private repository).
+
+Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
+an intermediate **Export best NAM** button during training, independent base and
+hypernetwork learning rates, optional gradient clipping/NaN/Inf checks, and
+HyperA2 / HyperWaveNet (Phillip Self) recipe presets. See
+[training controls and presets](docs/training-controls.md).
 
 Download the package for your computer from this repository's installer artifacts
 or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,

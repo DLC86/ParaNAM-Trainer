@@ -163,7 +163,7 @@ class WizardWindow(QMainWindow):
         brand.addWidget(self.shop_button)
         brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
         rail.addLayout(brand)
-        rail.addWidget(label("VERSION  /  0.4.3", "eyebrow"))
+        rail.addWidget(label("VERSION  /  0.4.4", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -585,6 +585,14 @@ class WizardWindow(QMainWindow):
         self.advanced_fields = {}
         for key, caption, initial, low, high, decimals in (
             ("learning_rate", "Learning Rate", 0.004, 1e-9, 10, 9),
+            (
+                "hypernetwork_learning_rate",
+                "Hypernetwork Learning Rate",
+                0.0004,
+                1e-9,
+                10,
+                9,
+            ),
             ("lr_decay", "LR Decay", 0.994, 0, 1, 6),
             ("ny", "NY (samples)", 8192, 1, 1048576, 0),
             ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
@@ -602,7 +610,7 @@ class WizardWindow(QMainWindow):
         fit = QCheckBox("Fit MRSTFT")
         fit.setChecked(True)
         self.advanced_fields["fit_mrstft"] = fit
-        advanced_form.insertRow(4, fit)
+        advanced_form.insertRow(5, fit)
         fit.toggled.connect(self.advanced_fields["mrstft_weight"].setEnabled)
         fit.toggled.connect(self.save_preferences)
         optimizer = QComboBox()
@@ -614,6 +622,43 @@ class WizardWindow(QMainWindow):
         self.advanced_fields["optimizer"] = optimizer
         advanced_form.insertRow(0, "Optimizer", optimizer)
         optimizer.currentIndexChanged.connect(self.save_preferences)
+        preset = QComboBox()
+        preset.addItem("HyperA2", "HyperA2")
+        preset.addItem("HyperWaveNet (Phillip Self)", "HyperWaveNet")
+        preset.setToolTip(
+            "Selecting a preset resets its advanced values and batch size. You can customize them afterwards. Both presets train Full and Lite."
+        )
+        self.advanced_fields["hypernetwork_recipe"] = preset
+        advanced_form.insertRow(0, "Preset", preset)
+        preset.activated.connect(self.apply_training_preset)
+        self.preset_description = label("", "muted")
+        advanced_form.addRow(self.preset_description)
+        self.advanced_fields["hypernetwork_learning_rate"].setToolTip(
+            "Independent learning rate for the knob-to-weight network. Both learning rates decay together. Parametric training only."
+        )
+        self.advanced_fields["learning_rate"].setToolTip(
+            "Learning rate for the base audio-network weights."
+        )
+        clipping = QCheckBox("Gradient clipping")
+        self.advanced_fields["gradient_clipping"] = clipping
+        advanced_form.addRow(clipping)
+        limit = QDoubleSpinBox()
+        limit.setDecimals(6)
+        limit.setRange(0.000001, 1000000)
+        limit.setValue(1.0)
+        limit.setToolTip("Maximum gradient norm. Applied before each optimizer update.")
+        self.advanced_fields["gradient_clip_val"] = limit
+        advanced_form.addRow("Maximum gradient norm", limit)
+        clipping.toggled.connect(limit.setEnabled)
+        clipping.toggled.connect(self.save_preferences)
+        limit.valueChanged.connect(self.save_preferences)
+        nonfinite = QCheckBox("Check NaN/Inf gradients")
+        nonfinite.setToolTip(
+            "Skip an optimizer update if any gradient is NaN or infinite. Disabling this removes the scan overhead."
+        )
+        self.advanced_fields["check_nonfinite_gradients"] = nonfinite
+        advanced_form.addRow(nonfinite)
+        nonfinite.toggled.connect(self.save_preferences)
         self.advanced_fields["lr_decay"].setToolTip(
             "Exponential learning-rate multiplier after each epoch."
         )
@@ -666,11 +711,16 @@ class WizardWindow(QMainWindow):
         row.addWidget(self.train_button)
         row.addWidget(self.pause_button)
         row.addWidget(self.stop_button)
+        self.export_best_button = button("Export best NAM", self.export_best_nam)
+        row.addWidget(self.export_best_button)
         row.addStretch()
         row.addWidget(self.models_button)
         layout.addLayout(row)
+        self.export_status = label("", "muted")
+        layout.addWidget(self.export_status)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
+        self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.details.setMaximumHeight(180)
         self.details.setVisible(False)
         layout.addWidget(
@@ -680,6 +730,10 @@ class WizardWindow(QMainWindow):
             )
         )
         layout.addWidget(self.details)
+        from .esr_chart import ESRChart
+
+        self.esr_chart = ESRChart()
+        layout.addWidget(self.esr_chart)
         self.epochs.valueChanged.connect(self.save_preferences)
         self.batch_size.valueChanged.connect(self.save_preferences)
         self.accelerator.currentIndexChanged.connect(self.save_preferences)
@@ -696,6 +750,40 @@ class WizardWindow(QMainWindow):
                 field.setValue(options[key])
             field.blockSignals(False)
         self.advanced_fields["mrstft_weight"].setEnabled(options["fit_mrstft"])
+        self.advanced_fields["gradient_clip_val"].setEnabled(
+            options["gradient_clipping"]
+        )
+        parametric = (
+            kind or self.workspace.preferences["capture_type"]
+        ) == "parametric"
+        self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
+        self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
+        self.preset_description.setText(
+            (
+                "HyperA2: all audio weights are conditioned on the controls."
+                if options["hypernetwork_recipe"] == "HyperA2"
+                else "Phillip Self's low-rank HyperWaveNet recipe, adapted to Full + Lite."
+            )
+            if parametric
+            else "Static A2 training; hypernetwork settings are not used."
+        )
+
+    def apply_training_preset(self, *_):
+        if (
+            not self.workspace
+            or self.workspace.preferences["capture_type"] != "parametric"
+        ):
+            return
+        from .recipes import training_preset, preset_batch_size
+
+        name = self.advanced_fields["hypernetwork_recipe"].currentData()
+        self.workspace.preferences["advanced_parametric"] = training_preset(name)
+        self.workspace.preferences["batch_size"] = preset_batch_size(name)
+        self.batch_size.blockSignals(True)
+        self.batch_size.setValue(preset_batch_size(name))
+        self.batch_size.blockSignals(False)
+        self.load_advanced_options("parametric")
+        self.save_preferences()
 
     def busy(self):
         return (
@@ -1820,6 +1908,28 @@ class WizardWindow(QMainWindow):
             )
             self.pause_button.setEnabled(False)
 
+    def export_best_nam(self):
+        if not self.job or not self.process:
+            return
+        default = (
+            self.workspace.directory / "models" / f"{self.job.name}-intermediate.nam"
+        )
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export best NAM", str(default), "NAM model (*.nam)"
+        )
+        if not filename:
+            return
+        if not filename.lower().endswith(".nam"):
+            filename += ".nam"
+        atomic_write_json(
+            self.job / "export-request.json",
+            {"id": str(time.time_ns()), "path": filename},
+        )
+        self.export_status.setText(
+            "Export requested; waiting for the next training batch boundary."
+        )
+        self.export_best_button.setEnabled(False)
+
     def _process_error(self, _error):
         if self.process is None:
             return
@@ -1861,8 +1971,10 @@ class WizardWindow(QMainWindow):
         self.job = training.current_job(self.workspace.directory)
         progress = training.job_progress(self.job)
         if not progress:
+            self.esr_chart.set_history([])
             self.update_enabled()
             return
+        self.esr_chart.set_history(progress.get("esr_history", []))
         status = progress.get("status", "starting")
         message = progress.get("message", status.replace("_", " ").title())
         if status == "failed" and progress.get("resume_available"):
@@ -1899,12 +2011,14 @@ class WizardWindow(QMainWindow):
         )
         logfile = self.job / "worker.log"
         if logfile.exists():
-            with logfile.open("rb") as stream:
-                stream.seek(max(0, logfile.stat().st_size - 18000))
-                content = stream.read().decode("utf-8", errors="replace")
-                content = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", content).replace(
-                    "\r", "\n"
-                )
+            from .training_log import TrainingLog
+
+            if (
+                getattr(self, "_log_reader", None) is None
+                or self._log_reader.path != logfile
+            ):
+                self._log_reader = TrainingLog(logfile)
+            content = self._log_reader.read()
             if content != self._log_content:
                 scrollbar = self.details.verticalScrollBar()
                 position = scrollbar.value()
@@ -1915,6 +2029,14 @@ class WizardWindow(QMainWindow):
                 else:
                     scrollbar.setValue(position)
                 self._log_content = content
+        result = read_json(self.job / "export-result.json", {})
+        request = read_json(self.job / "export-request.json", {})
+        if result and result.get("id") == request.get("id"):
+            self.export_status.setText(
+                f"Exported: {result['path']}"
+                if result.get("ok")
+                else f"Export failed: {result.get('error', 'Unknown error')}"
+            )
         self.update_enabled()
 
     def open_models(self):
@@ -1959,6 +2081,14 @@ class WizardWindow(QMainWindow):
         self.train_button.setEnabled(ready and not active)
         self.pause_button.setEnabled(self.process is not None)
         self.stop_button.setEnabled(self.process is not None)
+        request = read_json(self.job / "export-request.json", {}) if self.job else {}
+        result = read_json(self.job / "export-result.json", {}) if self.job else {}
+        self.export_best_button.setEnabled(
+            self.process is not None
+            and self.job is not None
+            and training.job_progress(self.job).get("best_esr") is not None
+            and (not request or request.get("id") == result.get("id"))
+        )
         self.models_button.setEnabled(
             present and (self.workspace.directory / "models").exists()
         )

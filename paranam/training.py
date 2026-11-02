@@ -83,9 +83,52 @@ def job_can_resume(workspace, job):
         return False
     spec = read_json(Path(job) / "spec.json", {})
     progress = job_progress(job)
-    if spec.get("fingerprint") != workspace.fingerprint(
-        batch_size=spec.get("preferences", {}).get("batch_size")
-    ):
+    saved_options = spec.get("preferences", {}).get("advanced_training")
+    safety_keys = (
+        "gradient_clipping",
+        "gradient_clip_val",
+        "check_nonfinite_gradients",
+    )
+    legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
+    options = workspace.training_options()
+    old_clip = spec.get("learning", {}).get("trainer", {}).get("gradient_clip_val")
+    old_check = spec.get("model", {}).get(
+        "check_nonfinite_gradients",
+        spec.get("model", {}).get("net", {}).get("name") == "HyperA2",
+    )
+    same_safety = (
+        options["gradient_clipping"] == bool(old_clip)
+        and (not old_clip or options["gradient_clip_val"] == old_clip)
+        and options["check_nonfinite_gradients"] == old_check
+    )
+    if not spec.get("static_captures"):
+        old_hyper_lr = spec.get("model", {}).get("optimizer", {}).get(
+            "lr", 0.004
+        ) * spec.get("model", {}).get("hypernet_lr_scale", 1.0)
+        old_mode = (
+            spec.get("model", {})
+            .get("net", {})
+            .get("config", {})
+            .get("hypernet", {})
+            .get("mode", "low_rank")
+        )
+        same_safety = (
+            same_safety
+            and math.isclose(options["hypernetwork_learning_rate"], old_hyper_lr)
+            and options["hypernetwork_recipe"]
+            == ("HyperA2" if old_mode == "full" else "HyperWaveNet")
+        )
+    fingerprints = [
+        workspace.fingerprint(batch_size=spec.get("preferences", {}).get("batch_size"))
+    ]
+    if legacy_safety and same_safety:
+        fingerprints.append(
+            workspace.fingerprint(
+                batch_size=spec.get("preferences", {}).get("batch_size"),
+                include_gradient_safety=False,
+            )
+        )
+    if spec.get("fingerprint") not in fingerprints:
         # Older jobs did not fingerprint these controls. Resume only if their
         # actual recipe matches the options currently shown in the application.
         options = workspace.training_options()
@@ -99,6 +142,7 @@ def job_can_resume(workspace, job):
         same_recipe = (
             "optimizer" not in (saved_options or {})
             and "class" not in model.get("optimizer", {})
+            and (not legacy_safety or same_safety)
             and options["optimizer"] == legacy_optimizer
             and model.get("optimizer", {}).get("lr") == options["learning_rate"]
             and model.get("optimizer", {}).get("weight_decay")
@@ -117,6 +161,7 @@ def job_can_resume(workspace, job):
             batch_size=spec.get("preferences", {}).get("batch_size"),
             include_advanced=saved_options is not None,
             include_optimizer=False,
+            include_gradient_safety=not legacy_safety,
         ):
             return False
     member = progress.get("member", 0)
@@ -189,6 +234,13 @@ def make_job(workspace, resume=False):
         options = workspace.training_options()
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
+        if not math.isfinite(options["learning_rate"]) or options["learning_rate"] <= 0:
+            raise ValueError("Learning rate must be finite and positive")
+        if options["gradient_clipping"] and (
+            not math.isfinite(options["gradient_clip_val"])
+            or options["gradient_clip_val"] <= 0
+        ):
+            raise ValueError("Maximum gradient norm must be finite and positive")
         prefs = {
             **workspace.preferences,
             "batch_size": workspace.training_batch_size(),
@@ -207,12 +259,34 @@ def make_job(workspace, resume=False):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
+            if options["hypernetwork_recipe"] == "HyperWaveNet":
+                model["net"]["config"]["hypernet"].update(
+                    mode="low_rank",
+                    rank=2,
+                    selector={"exclude_suffixes": ["_conv.weight"]},
+                )
+                model["loss"]["training_recipe"] = "legacy"
+            elif options["hypernetwork_recipe"] != "HyperA2":
+                raise ValueError(
+                    "Choose HyperA2 or HyperWaveNet as the training preset"
+                )
+            if (
+                not math.isfinite(options["hypernetwork_learning_rate"])
+                or options["hypernetwork_learning_rate"] <= 0
+            ):
+                raise ValueError(
+                    "Hypernetwork learning rate must be finite and positive"
+                )
+            model["hypernet_lr_scale"] = (
+                options["hypernetwork_learning_rate"] / options["learning_rate"]
+            )
         model["optimizer"].update(
             **{"class": options["optimizer"]},
             lr=options["learning_rate"],
             weight_decay=options["weight_decay"],
         )
         model["lr_scheduler"]["kwargs"]["gamma"] = options["lr_decay"]
+        model["check_nonfinite_gradients"] = options["check_nonfinite_gradients"]
         model["loss"]["mrstft_weight"] = (
             options["mrstft_weight"] if options["fit_mrstft"] else None
         )
@@ -236,13 +310,16 @@ def make_job(workspace, resume=False):
                 drop_last=(split == "train_dataloader"),
             )
         learning["val_dataloader"]["batch_size"] = 1
-        if is_static:
+        if options["gradient_clipping"]:
+            learning["trainer"]["gradient_clip_val"] = options["gradient_clip_val"]
+            learning["trainer"]["gradient_clip_algorithm"] = "norm"
+        else:
             learning["trainer"].pop("gradient_clip_val", None)
         learning["trainer"].update(
             max_epochs=prefs["epochs"],
             accelerator=prefs["device"],
             devices=1,
-            enable_progress_bar=True,
+            enable_progress_bar=False,
             enable_model_summary=False,
             logger=False,
             num_sanity_val_steps=0,
@@ -325,6 +402,96 @@ def annotate_validation_metadata(model, metrics, optimizer):
             )
 
 
+def export_best_nam(trainer, spec, member, target):
+    """Build one independent Full/Lite snapshot at a safe training boundary."""
+    import torch
+    import tempfile
+    from nam.train.parametric import _ParametricLightningModule
+    from nam.train.lightning_module import PackedLightningModule, PackedBestCheckpoint
+
+    static = bool(spec.get("static_captures"))
+    checkpoint_class = PackedLightningModule if static else _ParametricLightningModule
+    if static:
+        packed = next(
+            c for c in trainer.callbacks if isinstance(c, PackedBestCheckpoint)
+        )
+        entries = packed.best
+        paths = {
+            size: entries[i]["checkpoint_path"]
+            for size, i in (("lite", 0), ("full", 1))
+        }
+        scores = {
+            size: entries[i]["best_metric"] for size, i in (("lite", 0), ("full", 1))
+        }
+    else:
+        callbacks = {c.monitor: c for c in trainer.checkpoint_callbacks}
+        paths = {
+            size: callbacks[f"ESR_{size}"].best_model_path for size in ("full", "lite")
+        }
+        scores = {
+            size: float(callbacks[f"ESR_{size}"].best_model_score)
+            for size in ("full", "lite")
+        }
+    if not all(paths.values()) or not all(
+        math.isfinite(value) for value in scores.values()
+    ):
+        raise ValueError("A validated Full and Lite checkpoint is not available yet")
+    # Constructors and baking consume CPU RNG; exporting must not change the run.
+    with torch.random.fork_rng(devices=[]), torch.no_grad():
+        checkpoints = {
+            size: torch.load(path, map_location="cpu", weights_only=False)
+            for size, path in paths.items()
+        }
+        models = {}
+        for size in ("full", "lite"):
+            model = checkpoint_class.init_from_config(spec["model"])
+            model.on_load_checkpoint(checkpoints[size])
+            model.load_state_dict(checkpoints[size]["state_dict"])
+            models[size] = model.cpu().eval()
+        net = models["full"].net
+        if static:
+            net.import_submodel(0, models["lite"].net.extract_submodel(0))
+            net.apply_mask()
+            export_net = net
+        else:
+            net.branch("lite").load_state_dict(
+                models["lite"].net.branch("lite").state_dict()
+            )
+            export_net = net.bake(net.nominal_params)
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=".paranam-export-", dir=target.parent
+        ) as directory:
+            export_net.export(Path(directory), basename="snapshot")
+            exported = read_json(Path(directory) / "snapshot.nam")
+        metadata = dict(spec["model"].get("metadata", {}))
+        if static:
+            capture = spec["static_captures"][member]
+            metadata.update(capture.get("metadata", {}), name=capture["name"])
+        exported.setdefault("metadata", {}).update(metadata)
+        for child in exported.get("config", {}).get("submodels", []):
+            child["model"].setdefault("metadata", {}).update(metadata)
+        epochs = {
+            size: int(checkpoints[size]["epoch"]) + 1 for size in ("full", "lite")
+        }
+        annotate_validation_metadata(
+            exported,
+            dict(
+                full=scores["full"],
+                lite=scores["lite"],
+                mean=sum(scores.values()) / 2,
+                epoch=epochs["full"],
+                epoch_full=epochs["full"],
+                epoch_lite=epochs["lite"],
+            ),
+            spec["model"]["optimizer"].get("class", "Adam" if static else "AdamW"),
+        )
+        exported["metadata"].setdefault("training", {})["intermediate"] = True
+        atomic_write_json(Path(target), exported)
+    return str(target)
+
+
 def build_progress_callback(job, spec, member, shared):
     from pytorch_lightning.callbacks import Callback
 
@@ -339,12 +506,66 @@ def build_progress_callback(job, spec, member, shared):
             self.started = time.monotonic()
             self.base = float(shared.get("elapsed", 0))
             self.epoch_times = list(shared.get("epoch_times", []))
+            self.esr_history = (
+                list(shared.get("esr_history", []))
+                if shared.get("esr_history_member", member) == member
+                else []
+            )
             self.best = None
             self.best_metrics = None
             self.last_metrics = None
             self.best_lite_metrics = None
             self.epoch_started = None
             self.resume_epoch = shared.get("epoch", 0)
+            self.trainer = None
+            self.last_log_update = 0
+            self.export_request_stamp = None
+
+        def print_progress(self, trainer, fraction, phase):
+            from .training_log import epoch_line
+
+            print(
+                "\r"
+                + epoch_line(
+                    trainer.current_epoch + 1,
+                    spec["preferences"]["epochs"],
+                    label,
+                    fraction,
+                    phase,
+                ),
+                end="",
+                flush=True,
+            )
+
+        def check_export_request(self):
+            request_path = job / "export-request.json"
+            try:
+                info = request_path.stat()
+            except FileNotFoundError:
+                return
+            stamp = (info.st_mtime_ns, info.st_size)
+            if stamp == self.export_request_stamp:
+                return
+            request = read_json(request_path, {})
+            result = read_json(job / "export-result.json", {})
+            if (
+                not request
+                or request.get("id") == result.get("id")
+                or self.trainer is None
+            ):
+                if request and request.get("id") == result.get("id"):
+                    self.export_request_stamp = stamp
+                return
+            # Both checkpoint callbacks finish before the next batch boundary.
+            if self.best is None:
+                return
+            try:
+                path = export_best_nam(self.trainer, spec, member, request["path"])
+                result = dict(id=request["id"], ok=True, path=path)
+            except Exception as error:
+                result = dict(id=request["id"], ok=False, error=str(error))
+            atomic_write_json(job / "export-result.json", result)
+            self.export_request_stamp = stamp
 
         def save_boundary(self, trainer, completed):
             temporary = job / f"resume-{member}.pending.ckpt"
@@ -363,6 +584,7 @@ def build_progress_callback(job, spec, member, shared):
         def check_action(self):
             action = self.action()
             if action == "pause":
+                print(flush=True)
                 info = read_json(job / f"resume-{member}.json", {})
                 info["best_esr"] = self.best
                 self.write(
@@ -373,8 +595,10 @@ def build_progress_callback(job, spec, member, shared):
                 )
                 raise TrainingPaused()
             if action == "stop":
+                print(flush=True)
                 self.write(status="stopped", message="Training cancelled")
                 raise TrainingStopped()
+            self.check_export_request()
 
         def state_dict(self):
             import random
@@ -389,6 +613,7 @@ def build_progress_callback(job, spec, member, shared):
                 "best_lite_validation": self.best_lite_metrics,
                 "best_esr": self.best,
                 "epoch_times": self.epoch_times,
+                "esr_history": self.esr_history,
                 "torch_rng": torch.get_rng_state(),
                 "python_rng": random.getstate(),
                 "numpy_rng": (rng[0], rng[1].tolist(), rng[2], rng[3], rng[4]),
@@ -418,6 +643,7 @@ def build_progress_callback(job, spec, member, shared):
                 data.get("last_validation") if current_reference else None
             )
             self.epoch_times = data.get("epoch_times", [])
+            self.esr_history = data.get("esr_history", self.esr_history)
             self.best_lite_metrics = (
                 data.get("best_lite_validation") if current_reference else None
             )
@@ -447,6 +673,8 @@ def build_progress_callback(job, spec, member, shared):
                 best_esr=self.best,
                 validation_reference="full",
                 epoch_times=self.epoch_times,
+                esr_history=self.esr_history,
+                esr_history_member=member,
             )
             shared.update(updates)
             shared["updated_at"] = time.time()
@@ -457,6 +685,8 @@ def build_progress_callback(job, spec, member, shared):
 
         def on_train_start(self, trainer, module):
             import torch
+
+            self.trainer = trainer
 
             device_name = (
                 torch.cuda.get_device_name(module.device)
@@ -499,6 +729,7 @@ def build_progress_callback(job, spec, member, shared):
         def on_train_epoch_start(self, trainer, module):
             self.epoch_started = time.monotonic()
             self.write(epoch=trainer.current_epoch + 1, batch_fraction=0)
+            self.print_progress(trainer, 0, "Training")
 
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
             self.check_action()
@@ -514,6 +745,13 @@ def build_progress_callback(job, spec, member, shared):
                     batch_fraction=fraction,
                     message="Training " + label,
                 )
+                if time.monotonic() - self.last_log_update >= 1:
+                    self.print_progress(trainer, fraction, "Training")
+                    self.last_log_update = time.monotonic()
+
+        def on_validation_start(self, trainer, module):
+            if not trainer.sanity_checking:
+                self.print_progress(trainer, 1, "Validating")
 
         def on_validation_end(self, trainer, module):
             if trainer.sanity_checking:
@@ -539,12 +777,20 @@ def build_progress_callback(job, spec, member, shared):
             def display(value):
                 return f"{value:.8g}" if value is not None else "unavailable"
 
+            from .training_log import epoch_line
+
             print(
-                f"\nEpoch {epoch}/{total_epochs} | {label} | Validation ESR | "
+                "\r"
+                + epoch_line(epoch, total_epochs, label, 1, "Validation ESR")
+                + " | "
                 f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}",
                 flush=True,
             )
             self.last_metrics = dict(epoch=epoch, full=full, lite=lite, mean=esr)
+            self.esr_history = [
+                entry for entry in self.esr_history if entry["epoch"] < epoch
+            ]
+            self.esr_history.append(dict(self.last_metrics))
             if (
                 full is not None
                 and math.isfinite(full)
@@ -741,7 +987,7 @@ def run_job(job):
                 output = job / f"member-{member}"
                 output.mkdir(exist_ok=True)
                 learning = json.loads(json.dumps(spec["learning"]))
-                learning["trainer"]["enable_progress_bar"] = True
+                learning["trainer"]["enable_progress_bar"] = False
                 if (
                     spec["preferences"]["device"] == "auto"
                     and os.environ.get("PARANAM_FORCE_CPU") == "1"
@@ -768,7 +1014,6 @@ def run_job(job):
                     extra_callbacks=[
                         progress,
                         epoch_checkpoint(progress, job),
-                        pl.callbacks.TQDMProgressBar(refresh_rate=10),
                     ],
                 )
                 for filename in ("model_parametric.pnam", "model.nam"):

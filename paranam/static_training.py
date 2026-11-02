@@ -74,7 +74,9 @@ def train(data_config, model_config, learning, output, callback):
             for dataset, key in zip(datasets, ("train_dataloader", "val_dataloader"))
         ]
         if len(loaders[0]) == 0:
-            raise ValueError("Training capture is too short for the selected NY and batch size. Reduce NY or Batch Size.")
+            raise ValueError(
+                "Training capture is too short for the selected NY and batch size. Reduce NY or Batch Size."
+            )
         from nam.train.lightning_module import PackedBestCheckpoint
         from pathlib import Path
         from .workspace import read_json
@@ -97,7 +99,6 @@ def train(data_config, model_config, learning, output, callback):
                 *([best_by_size] if learning.get("separate_size_checkpoints") else []),
                 best,
                 epoch_checkpoint(callback, output.parent),
-                pl.callbacks.TQDMProgressBar(refresh_rate=10),
             ],
             default_root_dir=output,
             **learning["trainer"],
@@ -154,7 +155,7 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         output = job / f"member-{member}"
         output.mkdir(exist_ok=True)
         learning = copy.deepcopy(spec["learning"])
-        learning["trainer"]["enable_progress_bar"] = True
+        learning["trainer"]["enable_progress_bar"] = False
         checkpoint = job / f"resume-{member}.ckpt"
         if checkpoint.exists():
             learning.setdefault("trainer_fit_kwargs", {})["ckpt_path"] = str(checkpoint)
