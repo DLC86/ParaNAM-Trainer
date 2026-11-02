@@ -211,6 +211,13 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
     else:
         job = tiny_job(workspace, monkeypatch)
     spec = read_json(job / "spec.json")
+    spec["model"].setdefault("metadata", {})[
+        "training"
+    ] = "Keep my custom training metadata"
+    if kind == "static":
+        spec["static_captures"][0].setdefault("metadata", {})[
+            "training"
+        ] = "Keep my custom training metadata"
     models, paths, expected = {}, {}, {}
     for index, size in enumerate(("full", "lite")):
         cls = PackedLightningModule if kind == "static" else _ParametricLightningModule
@@ -256,7 +263,9 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
             exported["config"]["submodels"][index]["model"]["weights"]
             == expected[size]["config"]["submodels"][index]["model"]["weights"]
         )
-    metadata = exported["metadata"]["training"]
+    assert exported["metadata"]["training"] == "Keep my custom training metadata"
+    metadata = exported["metadata"]["paranam_training"]
+    assert metadata["intermediate"] is True
     assert metadata["epoch_full"] == 1 and metadata["epoch_lite"] == 3
 
 

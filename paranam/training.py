@@ -487,7 +487,12 @@ def export_best_nam(trainer, spec, member, target):
             ),
             spec["model"]["optimizer"].get("class", "Adam" if static else "AdamW"),
         )
-        exported["metadata"].setdefault("training", {})["intermediate"] = True
+        training_key = (
+            "training"
+            if isinstance(exported["metadata"].get("training", {}), dict)
+            else "paranam_training"
+        )
+        exported["metadata"].setdefault(training_key, {})["intermediate"] = True
         atomic_write_json(Path(target), exported)
     return str(target)
 
