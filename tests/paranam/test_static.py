@@ -95,7 +95,7 @@ def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, siz
     ws.save()
     job = training.make_job(ws)
     spec = read_json(job / "spec.json")
-    assert spec["model"]["net"]["name"] == "WaveNet"
+    assert spec["model"]["net"]["name"] == "PackedWaveNet"
     spec["data"]["common"].update(
         x_path="test-input.wav", ny=32, require_input_pre_silence=None
     )
@@ -114,7 +114,7 @@ def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, siz
     if size == "lite":
         training.command(job, "pause")
     else:
-        from nam.train.lightning_module import LightningModule
+        from nam.train.lightning_module import PackedLightningModule as LightningModule
 
         original = LightningModule.training_step
         requested = []
@@ -138,8 +138,21 @@ def test_real_static_batch_pause_resume_and_metadata(workspace, monkeypatch, siz
     assert len(progress["exports"]) == 2
     for path, name in zip(progress["exports"], ("Capture 1", "Lead")):
         model = read_json(Path(path))
-        assert model["architecture"] == "WaveNet"
-        assert model["config"]["layers"][0]["channels"] == (8 if size == "full" else 3)
+        assert Path(path).suffix == ".nam"
+        assert model["architecture"] == "SlimmableContainer"
+        children = model["config"]["submodels"]
+        assert [child["max_value"] for child in children] == [0.5, 1.0]
+        assert [
+            child["model"]["config"]["layers"][0]["channels"] for child in children
+        ] == [3, 8]
+        assert [len(child["model"]["weights"]) for child in children] == [1871, 12146]
+        assert all(child["model"]["metadata"]["name"] == name for child in children)
+        assert all(
+            child["model"]["metadata"]["input_level_dbu"] == 18 for child in children
+        )
+        assert all(
+            child["model"]["metadata"]["output_level_dbu"] == 12 for child in children
+        )
         assert model["metadata"]["name"] == name
         assert model["metadata"]["custom"] == {"keep": True}
         assert model["metadata"]["modeled_by"] == "Tester"

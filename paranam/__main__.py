@@ -46,15 +46,12 @@ def main():
                 )
             return 1
     if args and args[0] == "--configure-installation":
-        from . import gpu_runtime
+        from .installer_gpu import configure
 
-        if "--with-nvidia" not in args:
-            gpu_runtime.remember_choice()
-            return 0
-        from .gpu_setup import show_setup
-
-        show_setup(selected=True)
-        return 0
+        cancel = (
+            args[args.index("--cancel-file") + 1] if "--cancel-file" in args else None
+        )
+        return configure("--with-nvidia" in args, cancel)
     if args and args[0] == "--train-worker":
         import contextlib
         import traceback

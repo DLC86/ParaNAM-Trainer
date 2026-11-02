@@ -59,7 +59,6 @@ from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .widgets import (
     THEME,
-    RoutingDiagram,
     ControlScene,
     ControlDialog,
     MetadataEditor,
@@ -146,7 +145,7 @@ class WizardWindow(QMainWindow):
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.3", "eyebrow"))
+        rail.addWidget(label("TRAINER  /  0.4.0", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -176,13 +175,16 @@ class WizardWindow(QMainWindow):
         content.addWidget(self.project_label)
         self.pages = QStackedWidget()
         self.page_contents = []
-        for builder in (self._welcome, self._controls, self._capture, self._training):
+        for index, builder in enumerate(
+            (self._welcome, self._controls, self._capture, self._training)
+        ):
             page = QWidget()
             layout = QVBoxLayout(page)
             layout.setContentsMargins(0, 0, 10, 0)
             layout.setSpacing(20)
             builder(layout)
-            layout.addStretch()
+            if index != 2:
+                layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(page)
@@ -257,12 +259,11 @@ class WizardWindow(QMainWindow):
         self.buffer.addItem("Driver managed", 0)
         form.addRow("Buffer size", self.buffer)
         box.addLayout(form)
-        self.diagram = RoutingDiagram()
-        box.addWidget(self.diagram)
         row = QHBoxLayout()
         self.route_button = button("Test connection", self.test_route)
         self.route_status = label(
-            "Connect the rig as shown, then check the return signal.", "muted"
+            "Connect the selected send and return channels, then test the return signal.",
+            "muted",
         )
         row.addWidget(self.route_button)
         row.addWidget(self.route_status, 1)
@@ -302,7 +303,7 @@ class WizardWindow(QMainWindow):
         box.addWidget(button("Calibrate send and return…", self.calibrate_levels))
         box.addWidget(
             label(
-                "These values are embedded in the exported .nam model for plugin level calibration.",
+                "These values are embedded in the exported model (.pnam parametric / .nam static) for plugin level calibration.",
                 "muted",
             )
         )
@@ -332,13 +333,8 @@ class WizardWindow(QMainWindow):
         self.capture_kind.addItem("Parametric — HyperA2 Full + Lite", "parametric")
         self.capture_kind.addItem("Static batch — A2", "static")
         kind_box.addWidget(self.capture_kind)
-        self.static_size = QComboBox()
-        self.static_size.addItem("A2 Full (default)", "full")
-        self.static_size.addItem("A2 Lite", "lite")
-        kind_box.addWidget(self.static_size)
         layout.addWidget(kind_card)
         self.capture_kind.currentIndexChanged.connect(self.save_preferences)
-        self.static_size.currentIndexChanged.connect(self.save_preferences)
         self.control_card, box = card("Rig controls")
         self.control_table = QTableWidget(0, 4)
         self.control_table.setHorizontalHeaderLabels(
@@ -525,7 +521,7 @@ class WizardWindow(QMainWindow):
         self.capture_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.capture_table.setMinimumHeight(270)
         self.capture_table.itemSelectionChanged.connect(self.select_capture)
-        layout.addWidget(self.capture_table)
+        layout.addWidget(self.capture_table, 1)
         self.rig_ready.toggled.connect(self.update_enabled)
 
     def _training(self, layout):
@@ -564,8 +560,9 @@ class WizardWindow(QMainWindow):
         )
         layout.addWidget(self.training_settings)
         if sys.platform != "darwin":
-            self.gpu_setup_button = button("NVIDIA GPU support…", self.configure_gpu)
+            self.gpu_setup_button = button("Add NVIDIA GPU support", self.configure_gpu)
             box.addWidget(self.gpu_setup_button)
+            self.refresh_gpu_button()
         grid = QGridLayout()
         self.metrics = {}
         for index, (name, text) in enumerate(
@@ -631,6 +628,8 @@ class WizardWindow(QMainWindow):
                 self.notify_error(error)
                 return
         self.pages.setCurrentIndex(index)
+        if index == 3:
+            self.refresh_gpu_button()
         for i, step in enumerate(self.steps):
             step.setChecked(i == index)
         self.back_button.setEnabled(index > 0)
@@ -723,9 +722,6 @@ class WizardWindow(QMainWindow):
             self.capture_kind.setCurrentIndex(
                 max(0, self.capture_kind.findData(prefs["capture_type"]))
             )
-            self.static_size.setCurrentIndex(
-                max(0, self.static_size.findData(prefs["static_size"]))
-            )
             self.metadata_editor.set_metadata(workspace.project.user_metadata)
             for field, key in (
                 (self.n_train, "n_train"),
@@ -734,9 +730,9 @@ class WizardWindow(QMainWindow):
                 (self.rounds, "rounds"),
                 (self.additions, "additions"),
                 (self.epochs, "epochs"),
-                (self.batch_size, "batch_size"),
             ):
                 field.setValue(prefs[key])
+            self.batch_size.setValue(workspace.training_batch_size())
             self.corners.setChecked(prefs["corners"])
             self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
             self.signal_mode.setCurrentIndex(
@@ -880,7 +876,13 @@ class WizardWindow(QMainWindow):
             self.buffer.setToolTip(result.note)
             self.buffer.blockSignals(False)
             if min(info.max_input_channels, info.max_output_channels) < 2:
-                self.loop_enabled.setChecked(False)
+                self.loop_enabled.setToolTip(
+                    "Clean loopback needs a second input and output. Choose a driver with both channels or disable loopback."
+                )
+            else:
+                self.loop_enabled.setToolTip(
+                    "Use a separate clean timing reference on the selected channels."
+                )
 
     def audio_settings(self):
         info = self.device.currentData()
@@ -902,14 +904,6 @@ class WizardWindow(QMainWindow):
         )
 
     def _diagram(self):
-        self.diagram.channels = (
-            self.output_channel.currentData() or 1,
-            self.input_channel.currentData() or 1,
-            self.loop_output.currentData() or 2,
-            self.loop_input.currentData() or 2,
-        )
-        self.diagram.loopback = self.loop_enabled.isChecked()
-        self.diagram.update()
         self.loop_input.setEnabled(self.loop_enabled.isChecked())
         self.loop_output.setEnabled(self.loop_enabled.isChecked())
 
@@ -1232,12 +1226,19 @@ class WizardWindow(QMainWindow):
             (self.rounds, "rounds"),
             (self.additions, "additions"),
             (self.epochs, "epochs"),
-            (self.batch_size, "batch_size"),
         ):
             prefs[key] = field.value()
+        previous_type = prefs["capture_type"]
+        next_type = self.capture_kind.currentData()
+        batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
+        prefs[batch_key] = self.batch_size.value()
+        if previous_type != next_type:
+            next_key = "static_batch_size" if next_type == "static" else "batch_size"
+            self.batch_size.blockSignals(True)
+            self.batch_size.setValue(prefs[next_key])
+            self.batch_size.blockSignals(False)
         prefs.update(
             capture_type=self.capture_kind.currentData(),
-            static_size=self.static_size.currentData(),
             mode=(
                 "normal"
                 if self.capture_kind.currentData() == "static"
@@ -1248,15 +1249,19 @@ class WizardWindow(QMainWindow):
             input_mode=self.signal_mode.currentData(),
         )
         static = prefs["capture_type"] == "static"
+        self.batch_size.setToolTip(
+            "16 matches the official NAM trainer default for static models. Reduce it if GPU memory is insufficient."
+            if static
+            else "32 matches the reference HyperWaveNet trainer. Reduce it if GPU memory is insufficient."
+        )
         self.model_badge.setText(
             "A2 static batch" if static else "HyperA2\nFull + Lite, together."
         )
         self.control_card.setVisible(not static)
-        self.static_size.setVisible(static)
         self.model_format.setText(
-            f"A2 {prefs['static_size'].title()} · one standard .nam per named capture"
+            "A2 Full + Lite nested · one standard .nam per named capture"
             if static
-            else "HyperA2 · Full + Lite nested in one .nam file"
+            else "HyperA2 · Full + Lite nested in one .pnam file"
         )
         self.mode.setEnabled(not static)
         for widget in (self.n_train, self.n_validation, self.seed, self.corners):
@@ -1304,7 +1309,7 @@ class WizardWindow(QMainWindow):
 
     def _model_format_label(self):
         self.model_format = label(
-            "HyperA2 · Full + Lite nested in one .nam file", "eyebrow"
+            "HyperA2 · Full + Lite nested in one .pnam file", "eyebrow"
         )
         return self.model_format
 
@@ -1689,7 +1694,14 @@ class WizardWindow(QMainWindow):
             return
         from .gpu_setup import show_setup
 
-        show_setup(parent=self)
+        show_setup(selected=True, parent=self)
+        self.refresh_gpu_button()
+
+    def refresh_gpu_button(self):
+        if hasattr(self, "gpu_setup_button"):
+            from .gpu_runtime import ready
+
+            self.gpu_setup_button.setVisible(not ready())
 
     def pause_training(self):
         if self.job and self.process:

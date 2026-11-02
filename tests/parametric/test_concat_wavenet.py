@@ -33,15 +33,29 @@ def _concat_wavenet_config() -> dict:
         ],
         "head_scale": 0.5,
         "params": [
-            {"name": "gain", "min": 0.0, "max": 10.0, "default": 5.0, "type": "continuous"},
-            {"name": "mode", "min": 0, "max": 2, "default": 1, "type": "switch",
-             "enum_names": ["clean", "crunch", "lead"]},
+            {
+                "name": "gain",
+                "min": 0.0,
+                "max": 10.0,
+                "default": 5.0,
+                "type": "continuous",
+            },
+            {
+                "name": "mode",
+                "min": 0,
+                "max": 2,
+                "default": 1,
+                "type": "switch",
+                "enum_names": ["clean", "crunch", "lead"],
+            },
         ],
     }
 
 
 def _param_specs() -> tuple[_ParamSpec, ...]:
-    return tuple(_ParamSpec.from_dict(spec) for spec in _concat_wavenet_config()["params"])
+    return tuple(
+        _ParamSpec.from_dict(spec) for spec in _concat_wavenet_config()["params"]
+    )
 
 
 def _tiny_wavenet_internal_config() -> dict:
@@ -123,7 +137,10 @@ def test_wrong_condition_size_is_rejected():
 
 def test_condition_dsp_config_is_rejected():
     config = _concat_wavenet_config()
-    config["condition_dsp"] = {"name": "WaveNet", "config": _tiny_wavenet_internal_config()}
+    config["condition_dsp"] = {
+        "name": "WaveNet",
+        "config": _tiny_wavenet_internal_config(),
+    }
     with _pytest.raises(NotImplementedError, match="condition_dsp"):
         _init(config)
 
@@ -138,7 +155,9 @@ def test_condition_dsp_inner_wavenet_is_rejected():
 
 
 def test_slimmable_inner_wavenet_is_rejected():
-    inner = _InnerWaveNet.init_from_config(_inner_wavenet_internal_config(slimmable=True))
+    inner = _InnerWaveNet.init_from_config(
+        _inner_wavenet_internal_config(slimmable=True)
+    )
     assert inner.is_slimmable()
     with _pytest.raises(NotImplementedError, match="slimmable"):
         _ConcatWaveNet(wavenet=inner, param_specs=_param_specs(), sample_rate=48_000.0)
@@ -261,9 +280,9 @@ def test_export_parametric_scale_compensation(tmp_path):
     _export_parametric(model, tmp_path, basename="unscaled")
     _export_parametric(model, tmp_path, basename="scaled", output_scale=output_scale)
 
-    with open(tmp_path / "unscaled.nam") as fp:
+    with open(tmp_path / "unscaled.pnam") as fp:
         unscaled = _json.load(fp)
-    with open(tmp_path / "scaled.nam") as fp:
+    with open(tmp_path / "scaled.pnam") as fp:
         scaled = _json.load(fp)
 
     assert scaled["architecture"] == "ConcatWaveNet"

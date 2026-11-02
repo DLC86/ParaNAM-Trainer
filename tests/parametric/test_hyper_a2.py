@@ -105,8 +105,15 @@ def test_parametric_export_restore_and_scaling(tmp_path):
     with torch.no_grad():
         for size in model.sizes:
             model.branch(size)._hypernet._final.weight.normal_(0, 0.01)
-    export_parametric(model, tmp_path, output_scale=2.0)
-    exported = json.loads((tmp_path / "model.nam").read_text())
+    metadata = {
+        "input_level_dbu": 18.125,
+        "output_level_dbu": 12.625,
+        "custom": {"labels": ["Clean", "Lead"], "nested": {"preserve": True}},
+    }
+    export_parametric(model, tmp_path, output_scale=2.0, other_metadata=metadata)
+    exported = json.loads((tmp_path / "model.pnam").read_text())
+    assert not (tmp_path / "model.nam").exists()
+    assert all(exported["metadata"][key] == value for key, value in metadata.items())
     assert exported["architecture"] == "HyperA2"
     restored = HyperA2.init_from_config({**exported["config"], "sample_rate": 48000})
     assert restored.import_weights(exported["weights"]) == len(exported["weights"])
@@ -153,6 +160,7 @@ def test_bake_both_sizes_matches_conditioned_model_and_stock_export(tmp_path, mo
     baked.export(tmp_path)
     exported = json.loads((tmp_path / "model.nam").read_text())
     assert exported["architecture"] == "SlimmableContainer"
+    assert not (tmp_path / "model.pnam").exists()
     assert exported["weights"] == []
     for entry in exported["config"]["submodels"]:
         child = entry["model"]
@@ -206,7 +214,7 @@ def test_training_main_writes_dual_size_checkpoints_and_final_exports(tmp_path, 
         no_show=True,
         make_plots=False,
     )
-    final = json.loads((outdir / "model_parametric.nam").read_text())
+    final = json.loads((outdir / "model_parametric.pnam").read_text())
     assert final["architecture"] == "HyperA2"
     assert final["metadata"]["input_level_dbu"] == 18.0
     assert final["metadata"]["output_level_dbu"] == 12.5
@@ -223,9 +231,9 @@ def test_training_main_writes_dual_size_checkpoints_and_final_exports(tmp_path, 
     assert checkpoints
     for checkpoint in checkpoints:
         assert checkpoint.with_suffix(".nam").exists()
-        assert checkpoint.with_name(checkpoint.stem + "_parametric.nam").exists()
+        assert checkpoint.with_name(checkpoint.stem + "_parametric.pnam").exists()
         checkpoint_nam = json.loads(
-            checkpoint.with_name(checkpoint.stem + "_parametric.nam").read_text()
+            checkpoint.with_name(checkpoint.stem + "_parametric.pnam").read_text()
         )
         assert checkpoint_nam["metadata"]["input_level_dbu"] == 18.0
         assert checkpoint_nam["metadata"]["output_level_dbu"] == 12.5

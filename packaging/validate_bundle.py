@@ -29,6 +29,25 @@ def clean_environment():
     return environment
 
 
+def validate_installer_configuration(executable, build_directory):
+    """The windowless Windows executable must stream progress to the installer."""
+    environment = clean_environment()
+    environment["PARANAM_RUNTIME_ROOT"] = str(
+        Path(build_directory).resolve() / ("installer-config-" + uuid.uuid4().hex[:8])
+    )
+    result = subprocess.run(
+        [str(executable), "--configure-installation"],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "PNGPU|1000|" in result.stdout, (result.stdout, result.stderr)
+    print("Frozen installer helper streamed completion without opening a setup dialog")
+
+
 def validate_training(executable, build_directory, gpu_runtime=False, device="cpu"):
     import numpy as np
     import torch
@@ -151,7 +170,7 @@ def validate_static(executable, build_directory):
     )
     ws = Workspace.create(directory, "Static installer check")
     ws.preferences.update(
-        capture_type="static", static_size="full", epochs=2, batch_size=1, device="cpu"
+        capture_type="static", epochs=2, static_batch_size=1, device="cpu"
     )
     ws.generate_plan()
     ws.add_static_capture("Lead")
@@ -194,7 +213,11 @@ def validate_static(executable, build_directory):
     assert len(progress["exports"]) == 2
     for path in progress["exports"]:
         model = read_json(Path(path))
-        assert model["architecture"] == "WaveNet"
+        assert model["architecture"] == "SlimmableContainer"
+        assert [
+            child["model"]["config"]["layers"][0]["channels"]
+            for child in model["config"]["submodels"]
+        ] == [3, 8]
         assert model["metadata"]["custom"] == {"retained": True}
         assert model["metadata"]["modeled_by"] == "Installer check"
     print(

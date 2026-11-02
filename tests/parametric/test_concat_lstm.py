@@ -125,9 +125,9 @@ def test_export_parametric_scale_compensation(tmp_path):
     _export_parametric(model, tmp_path, basename="unscaled")
     _export_parametric(model, tmp_path, basename="scaled", output_scale=output_scale)
 
-    with open(tmp_path / "unscaled.nam") as fp:
+    with open(tmp_path / "unscaled.pnam") as fp:
         unscaled = _json.load(fp)
-    with open(tmp_path / "scaled.nam") as fp:
+    with open(tmp_path / "scaled.pnam") as fp:
         scaled = _json.load(fp)
 
     assert scaled["architecture"] == "ConcatLSTM"

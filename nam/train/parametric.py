@@ -121,9 +121,7 @@ class _MelSpectrogram(_torch.nn.Module):
         filterbank = _librosa.filters.mel(
             sr=sample_rate, n_fft=self._n_fft, n_mels=n_mels, htk=True, norm=None
         )
-        self.register_buffer(
-            "_mel_fb", _torch.tensor(filterbank, dtype=_torch.float32)
-        )
+        self.register_buffer("_mel_fb", _torch.tensor(filterbank, dtype=_torch.float32))
 
     def forward(self, waveform: _torch.Tensor) -> _torch.Tensor:
         original = waveform.shape
@@ -486,7 +484,9 @@ class _SilenceAnchorConfig:
                 f"{self.rail_probability}"
             )
 
-    def sample_params(self, net: _ParametricNet, window: _AnchorWindow) -> _torch.Tensor:
+    def sample_params(
+        self, net: _ParametricNet, window: _AnchorWindow
+    ) -> _torch.Tensor:
         """The control settings to run one anchor batch at, as ``(batch_size, P)``."""
         return _sample_raw_params(
             net.param_specs,
@@ -571,7 +571,9 @@ class _SilenceAnchorRampConfig(_SilenceAnchorConfig):
                 f"{self.hold_probability}"
             )
 
-    def sample_params(self, net: _ParametricNet, window: _AnchorWindow) -> _torch.Tensor:
+    def sample_params(
+        self, net: _ParametricNet, window: _AnchorWindow
+    ) -> _torch.Tensor:
         """One control gesture per row, as ``(batch_size, window length, P)``."""
         return _sample_param_trajectories(
             net.param_specs,
@@ -667,9 +669,7 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler = val_sampler
 
     @staticmethod
-    def _capture_index(
-        sampler: _Optional[_Sampler], batch_idx: int
-    ) -> _Optional[int]:
+    def _capture_index(sampler: _Optional[_Sampler], batch_idx: int) -> _Optional[int]:
         if isinstance(sampler, _CaptureBatchSampler):
             return sampler.capture_for_batch(batch_idx)
         return None
@@ -933,7 +933,7 @@ class _ParametricLightningModule(_LightningModule):
 
 class _ParametricModelCheckpoint(_ModelCheckpoint):
     """
-    Extends ModelCheckpoint to export a `_parametric.nam` (and, for HyperWaveNet nets, a
+    Extends ModelCheckpoint to export a `_parametric.pnam` (and, for HyperWaveNet nets, a
     baked stock-WaveNet `.nam`) alongside each `.ckpt` it writes. Mirrors what
     ``nam.train.core._ModelCheckpoint`` does for the non-parametric trainer, so a hard
     crash mid-training still leaves usable `.nam` exports instead of only `.ckpt` files
@@ -985,8 +985,12 @@ class _ParametricModelCheckpoint(_ModelCheckpoint):
         super()._remove_checkpoint(trainer, filepath)
         stem = _Path(self._nam_stem(filepath))
         outdir, basename = stem.parent, stem.name
-        for nam_basename in (basename, f"{basename}_parametric"):
-            nam_path = outdir / f"{nam_basename}{_Exportable.FILE_EXTENSION}"
+        for nam_basename, extension in (
+            (basename, _Exportable.FILE_EXTENSION),
+            (f"{basename}_parametric", _ParametricNet.FILE_EXTENSION),
+            (f"{basename}_parametric", _Exportable.FILE_EXTENSION),  # Legacy exports
+        ):
+            nam_path = outdir / f"{nam_basename}{extension}"
             if nam_path.exists():
                 nam_path.unlink()
 
@@ -1081,9 +1085,7 @@ def _plot_parametric(
             if original is None:
                 return None
             original = _Path(original)
-            return original.with_name(
-                f"{original.stem}_{i}{original.suffix}"
-            )
+            return original.with_name(f"{original.stem}_{i}{original.suffix}")
 
         for i, ds_i in enumerate(ds.datasets):
             _plot_parametric(

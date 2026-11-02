@@ -26,6 +26,9 @@ _UNCOMPILABLE_DEVICES = frozenset({"mps"})
 
 
 class ParametricNet(_BaseNet, _ImportsWeights):
+    # Distinguish controllable models from baked/static stock NAM files.
+    FILE_EXTENSION = ".pnam"
+
     def __init__(
         self,
         param_specs: _Sequence[_ParamSpec],
@@ -33,7 +36,9 @@ class ParametricNet(_BaseNet, _ImportsWeights):
     ):
         super().__init__(sample_rate=sample_rate)
         if len(param_specs) == 0:
-            raise ValueError("param_specs must contain at least one parameter definition")
+            raise ValueError(
+                "param_specs must contain at least one parameter definition"
+            )
         param_names = tuple(spec.name for spec in param_specs)
         if len(set(param_names)) != len(param_names):
             raise ValueError("param_specs must define unique parameter names")
@@ -45,11 +50,15 @@ class ParametricNet(_BaseNet, _ImportsWeights):
         # stable; expose read access via the `nominal_params` property below.
         self.register_buffer(
             "_param_mins",
-            _torch.tensor([spec.min for spec in self._param_specs], dtype=_torch.float32),
+            _torch.tensor(
+                [spec.min for spec in self._param_specs], dtype=_torch.float32
+            ),
         )
         self.register_buffer(
             "_param_maxs",
-            _torch.tensor([spec.max for spec in self._param_specs], dtype=_torch.float32),
+            _torch.tensor(
+                [spec.max for spec in self._param_specs], dtype=_torch.float32
+            ),
         )
         self.register_buffer(
             "_nominal_params",
@@ -213,9 +222,7 @@ class ParametricNet(_BaseNet, _ImportsWeights):
     def _encode_params(self, raw: _torch.Tensor) -> _torch.Tensor:
         param_mins = _cast(_torch.Tensor, self._param_mins)
         param_maxs = _cast(_torch.Tensor, self._param_maxs)
-        raw = _torch.as_tensor(
-            raw, dtype=param_mins.dtype, device=param_mins.device
-        )
+        raw = _torch.as_tensor(raw, dtype=param_mins.dtype, device=param_mins.device)
         if raw.ndim not in (1, 2, 3):
             raise ValueError(
                 "Expected raw params to have shape (P,), (B, P) or (B, T, P); got "
@@ -247,7 +254,9 @@ class ParametricNet(_BaseNet, _ImportsWeights):
                         f"[0, {spec.num_inputs - 1}]"
                     )
                 encoded.append(
-                    _F.one_hot(indices, num_classes=spec.num_inputs).to(dtype=param_mins.dtype)
+                    _F.one_hot(indices, num_classes=spec.num_inputs).to(
+                        dtype=param_mins.dtype
+                    )
                 )
                 continue
 
@@ -256,8 +265,7 @@ class ParametricNet(_BaseNet, _ImportsWeights):
             param_max = param_maxs[i]
             frac = (value - param_min) / (param_max - param_min)
             encoded.append(
-                spec.normalized_min
-                + frac * (spec.normalized_max - spec.normalized_min)
+                spec.normalized_min + frac * (spec.normalized_max - spec.normalized_min)
             )
 
         return _torch.cat(encoded, dim=-1)

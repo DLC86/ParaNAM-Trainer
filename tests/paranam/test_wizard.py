@@ -2,6 +2,87 @@ from nam.capture.params import KnobSpec, SwitchSpec
 from paranam.widgets import ControlDialog
 
 
+def test_capture_modes_keep_independent_batch_defaults(window, tmp_path):
+    from paranam.workspace import Workspace
+
+    ws = Workspace.create(tmp_path / "Defaults", "Defaults")
+    window._attach(ws)
+    assert window.batch_size.value() == 32
+    window.batch_size.setValue(4)
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert window.batch_size.value() == 16
+    assert ws.training_batch_size() == 16
+    window.batch_size.setValue(8)
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
+    assert window.batch_size.value() == 4
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert window.batch_size.value() == 8
+    assert not hasattr(window, "static_size")
+
+
+def test_gpu_button_reflects_installed_component(window, monkeypatch):
+    from paranam import gpu_runtime
+
+    if not hasattr(window, "gpu_setup_button"):
+        return  # macOS uses Metal, without the optional NVIDIA component.
+    monkeypatch.setattr(gpu_runtime, "ready", lambda: False)
+    window.refresh_gpu_button()
+    assert window.gpu_setup_button.text() == "Add NVIDIA GPU support"
+    assert not window.gpu_setup_button.isHidden()
+    monkeypatch.setattr(gpu_runtime, "ready", lambda: True)
+    window.refresh_gpu_button()
+    assert window.gpu_setup_button.isHidden()
+
+
+def test_capture_list_expands_with_window(window, workspace, qapp):
+    from paranam.widgets import RoutingDiagram
+
+    window._attach(workspace)
+    window.navigate(2)
+    window.resize(1100, 850)
+    window.show()
+    qapp.processEvents()
+    assert not window.findChildren(RoutingDiagram)
+    original = window.capture_table.height()
+    window.resize(1100, 1050)
+    qapp.processEvents()
+    assert window.capture_table.height() >= original + 150
+
+
+def test_loopback_stays_enabled_when_mono_device_is_discovered(window, monkeypatch):
+    from types import SimpleNamespace
+    from paranam import wizard
+
+    def device(channels):
+        return SimpleNamespace(
+            host_api="Test",
+            name=f"Device {channels}",
+            max_input_channels=channels,
+            max_output_channels=channels,
+        )
+
+    monkeypatch.setattr(
+        wizard,
+        "capabilities",
+        lambda info: SimpleNamespace(
+            inputs=[f"Input {i}" for i in range(info.max_input_channels)],
+            outputs=[f"Output {i}" for i in range(info.max_output_channels)],
+            buffers=[512, 2048],
+            default_buffer=2048,
+            note="Test",
+        ),
+    )
+    assert window.loop_enabled.isChecked()
+    window._populate_audio_controls(device(1))
+    assert window.loop_enabled.isChecked()
+    window._populate_audio_controls(device(2))
+    assert window.loop_enabled.isChecked()
+    assert window.buffer.currentData() == 2048
+    window.loop_enabled.setChecked(False)
+    window._populate_audio_controls(device(2))
+    assert not window.loop_enabled.isChecked()
+
+
 def test_four_pages_and_back_navigation_keep_drafts(window, workspace):
     window._attach(workspace)
     assert window.pages.count() == 4

@@ -68,7 +68,12 @@ def test_mel_spectrogram_shapes_and_finite_without_torchaudio():
     from nam.train.parametric import _MelSpectrogram
 
     mel = _MelSpectrogram(
-        sample_rate=48000, n_fft=256, win_length=256, hop_length=64, n_mels=40, power=1.0
+        sample_rate=48000,
+        n_fft=256,
+        win_length=256,
+        hop_length=64,
+        n_mels=40,
+        power=1.0,
     )
     batched = mel(_torch.randn(3, 4096))
     assert batched.shape[0] == 3 and batched.shape[1] == 40
@@ -283,7 +288,7 @@ def test_parametric_training_main_exports_baked_and_parametric_models(tmp_path):
     )
 
     baked = _load_json(run_dir / "model.nam")
-    parametric = _load_json(run_dir / "model_parametric.nam")
+    parametric = _load_json(run_dir / "model_parametric.pnam")
 
     assert baked["architecture"] == "WaveNet"
     assert parametric["architecture"] == "HyperWaveNet"
@@ -327,7 +332,7 @@ def test_parametric_training_exports_before_plot_failure(
         # Models must already exist even while a plot is being displayed.
         assert _load_json(run_dir / "model.nam")["architecture"] == "WaveNet"
         assert (
-            _load_json(run_dir / "model_parametric.nam")["architecture"]
+            _load_json(run_dir / "model_parametric.pnam")["architecture"]
             == "HyperWaveNet"
         )
         plot_calls += 1
@@ -362,7 +367,7 @@ def test_parametric_training_without_normalization_skips_compensation(tmp_path):
     )
 
     baked = _load_json(run_dir / "model.nam")
-    parametric = _load_json(run_dir / "model_parametric.nam")
+    parametric = _load_json(run_dir / "model_parametric.pnam")
 
     # No joint normalization => no output scaling => export applies no compensation, so the
     # constant head_scale survives untouched in both export paths.
@@ -381,9 +386,7 @@ def test_parametric_callbacks_include_validation_stopping():
     )
 
     validation_stopping = [
-        callback
-        for callback in callbacks
-        if isinstance(callback, _ValidationStopping)
+        callback for callback in callbacks if isinstance(callback, _ValidationStopping)
     ]
     assert len(validation_stopping) == 1
     assert validation_stopping[0].monitor == "ESR"
@@ -405,7 +408,11 @@ def test_parametric_plot_label_uses_output_filename():
 
 def test_parametric_plot_label_falls_back_to_params():
     dataset = _Dataset(
-        x=_torch.zeros(3), y=_torch.zeros(3), nx=1, ny=None, require_input_pre_silence=None
+        x=_torch.zeros(3),
+        y=_torch.zeros(3),
+        nx=1,
+        ny=None,
+        require_input_pre_silence=None,
     )
     ds = _ParametricDataset(dataset, _torch.tensor([3.0, -3.0]))
 
@@ -434,7 +441,7 @@ def test_parametric_lightning_training_logs_seen_audio_seen_params_bucket(monkey
     # The bucket reduces ESR as a global energy ratio (summed squared error over
     # summed squared target), which is robust to silent windows.
     preds = module(x, pad_start=False)
-    expected_esr = float(_torch.sum((preds - targets) ** 2) / _torch.sum(targets ** 2))
+    expected_esr = float(_torch.sum((preds - targets) ** 2) / _torch.sum(targets**2))
     assert captured[esr_key] == _pytest.approx(expected_esr)
     # MSE is tracked per bucket alongside ESR.
     assert f"MSE/{_TRAIN_BUCKET}" in captured
@@ -459,7 +466,9 @@ def test_parametric_lightning_training_esr_survives_a_silent_batch(monkeypatch):
     assert _math.isfinite(captured[f"ESR/{_TRAIN_BUCKET}"])
 
 
-def test_parametric_lightning_validation_logs_unseen_audio_unseen_params_bucket(monkeypatch):
+def test_parametric_lightning_validation_logs_unseen_audio_unseen_params_bucket(
+    monkeypatch,
+):
     module = _ParametricLightningModule(_MockBaseNet(1.0))
     captured: dict[str, _Any] = {}
 
@@ -477,7 +486,7 @@ def test_parametric_lightning_validation_logs_unseen_audio_unseen_params_bucket(
 
     bucket_key = f"ESR/{_VALIDATION_BUCKET}"
     preds = module(x, pad_start=False)
-    expected_esr = float(_torch.sum((preds - targets) ** 2) / _torch.sum(targets ** 2))
+    expected_esr = float(_torch.sum((preds - targets) ** 2) / _torch.sum(targets**2))
     assert captured[bucket_key] == _pytest.approx(expected_esr)
     # Bare keys back the checkpoint monitor and filename.
     assert captured["ESR"] == _pytest.approx(expected_esr)
@@ -555,9 +564,7 @@ def test_capture_batch_sampler_keeps_batches_within_one_capture():
     batches = list(sampler)
     # Every batch's indices must come from a single capture range.
     for batch in batches:
-        owners = {
-            next(i for i, r in enumerate(ranges) if idx in r) for idx in batch
-        }
+        owners = {next(i for i, r in enumerate(ranges) if idx in r) for idx in batch}
         assert len(owners) == 1, f"batch {batch} mixed captures {owners}"
 
     # ceil(5/2)+ceil(3/2)+ceil(4/2) = 3+2+2 = 7 batches, covering every index once.
@@ -566,9 +573,7 @@ def test_capture_batch_sampler_keeps_batches_within_one_capture():
 
 
 def test_capture_batch_sampler_drop_last_drops_partial_per_capture():
-    sampler = _CaptureBatchSampler(
-        [5, 3], batch_size=2, shuffle=False, drop_last=True
-    )
+    sampler = _CaptureBatchSampler([5, 3], batch_size=2, shuffle=False, drop_last=True)
     batches = list(sampler)
     # floor(5/2)+floor(3/2) = 2+1 = 3 full batches; the partial tail of each capture is gone.
     assert len(batches) == len(sampler) == 3
@@ -576,9 +581,7 @@ def test_capture_batch_sampler_drop_last_drops_partial_per_capture():
 
 
 def test_capture_batch_sampler_shuffle_is_reproducible_and_varies_by_epoch():
-    sampler = _CaptureBatchSampler(
-        [4, 4], batch_size=2, shuffle=True, drop_last=False
-    )
+    sampler = _CaptureBatchSampler([4, 4], batch_size=2, shuffle=True, drop_last=False)
     _torch.manual_seed(0)
     epoch0 = list(sampler)
     epoch1 = list(sampler)
@@ -590,9 +593,7 @@ def test_capture_batch_sampler_shuffle_is_reproducible_and_varies_by_epoch():
 
 def test_make_parametric_dataloader_can_opt_out_of_capture_grouping():
     dataset = list(range(6))
-    grouped = _make_parametric_dataloader(
-        dataset, {"batch_size": 2, "shuffle": False}
-    )
+    grouped = _make_parametric_dataloader(dataset, {"batch_size": 2, "shuffle": False})
     assert isinstance(grouped.batch_sampler, _CaptureBatchSampler)
 
     ungrouped = _make_parametric_dataloader(
@@ -634,9 +635,7 @@ def test_epoch_metrics_multi_batch_capture_sums_energies_before_dividing():
     """
     metrics = _EpochMetrics()
     # Capture 0, batch 0: err=100/elem, tgt=100/elem over 6 elements -> batch ratio 1.0.
-    metrics.update(
-        _torch.zeros(2, 3), _torch.full((2, 3), 10.0), {}, capture_index=0
-    )
+    metrics.update(_torch.zeros(2, 3), _torch.full((2, 3), 10.0), {}, capture_index=0)
     # Capture 0, batch 1 (same capture, second batch): batch ratio 75/300 = 0.25.
     metrics.update(
         _torch.full((1, 3), 5.0), _torch.full((1, 3), 10.0), {}, capture_index=0
@@ -652,9 +651,7 @@ def test_epoch_metrics_two_level_reduction_equal_weights_unequal_capture_lengths
     """Captures are averaged one-per-capture, not weighted by how many rows they have."""
     metrics = _EpochMetrics()
     # Capture 0: 10 rows, perfect fit (ESR 0).
-    metrics.update(
-        _torch.zeros(10, 3), _torch.zeros(10, 3), {}, capture_index=0
-    )
+    metrics.update(_torch.zeros(10, 3), _torch.zeros(10, 3), {}, capture_index=0)
     # avoid the 0/0 -> inf branch: give capture 0 a tiny bit of real (matched) energy too.
     metrics.update(
         _torch.full((10, 3), 2.0), _torch.full((10, 3), 2.0), {}, capture_index=0
@@ -678,9 +675,7 @@ def test_epoch_metrics_near_silent_capture_counts_equally_not_swamped():
     """
     metrics = _EpochMetrics()
     # Loud capture: consistent, good fit (ESR 1.0 on energies of order 900).
-    metrics.update(
-        _torch.zeros(2, 3), _torch.full((2, 3), 10.0), {}, capture_index=0
-    )
+    metrics.update(_torch.zeros(2, 3), _torch.full((2, 3), 10.0), {}, capture_index=0)
     metrics.update(
         _torch.full((1, 3), 5.0), _torch.full((1, 3), 10.0), {}, capture_index=0
     )

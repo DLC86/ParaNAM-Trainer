@@ -14,7 +14,9 @@ from nam.models.parametric import HyperWaveNet as _HyperWaveNet
 from nam.models.parametric import bake as _bake
 from nam.models.parametric import bake_to_files as _bake_to_files
 from nam.models.parametric import export_parametric as _export_parametric
-from nam.models.parametric import output_scale_from_datasets as _output_scale_from_datasets
+from nam.models.parametric import (
+    output_scale_from_datasets as _output_scale_from_datasets,
+)
 from nam.models.parametric._dataset import ParametricDataset as _ParametricDataset
 from nam.models.wavenet import WaveNet as _WaveNet
 
@@ -102,7 +104,9 @@ def _template_export_offsets(model: _HyperWaveNet) -> dict[str, int]:
         add_conv(f"{prefix}._head_rechannel", layer_array._head_rechannel)
 
     if model._template._head is not None:
-        for layer_i, layer in enumerate(_cast(_Sequence, model._template._head._layers)):
+        for layer_i, layer in enumerate(
+            _cast(_Sequence, model._template._head._layers)
+        ):
             add_conv(f"_head._layers.layer_{layer_i}.1", _cast(_Sequence, layer)[1])
 
     assert offset + 1 == len(model._template.export_weights())
@@ -193,9 +197,7 @@ def test_bake_scale_compensation_scales_stock_head_export(tmp_path):
     output_scale = 0.25
 
     _bake(model, params).export(tmp_path, basename="unscaled")
-    _bake(model, params, output_scale=output_scale).export(
-        tmp_path, basename="scaled"
-    )
+    _bake(model, params, output_scale=output_scale).export(tmp_path, basename="scaled")
 
     unscaled = _load_nam(tmp_path / "unscaled.nam")
     scaled = _load_nam(tmp_path / "scaled.nam")
@@ -262,7 +264,7 @@ def test_export_parametric_round_trips_through_factory(tmp_path):
     with _torch.no_grad():
         _cast(_torch.Tensor, model._hypernet._low_rank_anchor).add_(0.125)
     _export_parametric(model, tmp_path)
-    model_dict = _load_nam(tmp_path / "model.nam")
+    model_dict = _load_nam(tmp_path / "model.pnam")
     base_len = len(model._template.export_weights())
 
     round_tripped = _cast(
@@ -282,7 +284,13 @@ def test_export_parametric_round_trips_through_factory(tmp_path):
     assert model_dict["config"]["params"] == [
         spec.to_dict() for spec in model.param_specs
     ]
-    assert set(model_dict["config"]) == {"head", "head_scale", "hypernet", "layers", "params"}
+    assert set(model_dict["config"]) == {
+        "head",
+        "head_scale",
+        "hypernet",
+        "layers",
+        "params",
+    }
     assert "layers_configs" not in model_dict["config"]
     assert "hypernet" in model_dict["config"]
     delta_map = model_dict["config"]["hypernet"]["delta_map"]
@@ -327,8 +335,8 @@ def test_parametric_scale_compensation_targets_base_head_scale_slot(tmp_path):
     _export_parametric(model, tmp_path, basename="unscaled")
     _export_parametric(model, tmp_path, basename="scaled", output_scale=output_scale)
 
-    unscaled = _load_nam(tmp_path / "unscaled.nam")
-    scaled = _load_nam(tmp_path / "scaled.nam")
+    unscaled = _load_nam(tmp_path / "unscaled.pnam")
+    scaled = _load_nam(tmp_path / "scaled.pnam")
 
     assert scaled["config"]["head_scale"] == _pytest.approx(
         unscaled["config"]["head_scale"] / output_scale
@@ -348,16 +356,14 @@ def test_export_parametric_recovers_output_scale_from_concat_dataset(tmp_path):
         _make_parametric_dataset(y_scale=output_scale),
         _make_parametric_dataset(y_scale=output_scale),
     ]
-    datasets = _ConcatDataset(
-        _cast(_Sequence[_Dataset], wrappers)
-    )
+    datasets = _ConcatDataset(_cast(_Sequence[_Dataset], wrappers))
     recovered = _output_scale_from_datasets(datasets)
 
     _export_parametric(model, tmp_path, basename="unscaled")
     _export_parametric(model, tmp_path, basename="scaled", output_scale=recovered)
 
-    unscaled = _load_nam(tmp_path / "unscaled.nam")
-    scaled = _load_nam(tmp_path / "scaled.nam")
+    unscaled = _load_nam(tmp_path / "unscaled.pnam")
+    scaled = _load_nam(tmp_path / "scaled.pnam")
 
     assert scaled["config"]["head_scale"] == _pytest.approx(
         unscaled["config"]["head_scale"] / output_scale
@@ -376,7 +382,9 @@ def test_output_scale_from_datasets_validates_shared_scale():
     assert _output_scale_from_datasets(
         [_DummyDataset(0.25), _DummyDataset(0.25)]
     ) == _pytest.approx(0.25)
-    assert _output_scale_from_datasets([_DummyDataset(None), _DummyDataset(None)]) is None
+    assert (
+        _output_scale_from_datasets([_DummyDataset(None), _DummyDataset(None)]) is None
+    )
     with _pytest.raises(ValueError):
         _output_scale_from_datasets([_DummyDataset(0.25), _DummyDataset(0.5)])
 

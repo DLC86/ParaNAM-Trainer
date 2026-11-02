@@ -135,11 +135,9 @@ def make_job(workspace, resume=False):
             # Restarting a complete epoch allows a different physical batch size or
             # device after OOM/device failure, while keeping model/data checks strict.
             for split in ("train_dataloader", "val_dataloader"):
-                spec["learning"][split]["batch_size"] = workspace.preferences[
-                    "batch_size"
-                ]
-            for key in ("batch_size", "device"):
-                spec["preferences"][key] = workspace.preferences[key]
+                spec["learning"][split]["batch_size"] = workspace.training_batch_size()
+            spec["preferences"]["batch_size"] = workspace.training_batch_size()
+            spec["preferences"]["device"] = workspace.preferences["device"]
             spec["learning"]["trainer"]["accelerator"] = workspace.preferences["device"]
             spec["fingerprint"] = workspace.fingerprint()
             atomic_write_json(job / "spec.json", spec)
@@ -151,7 +149,7 @@ def make_job(workspace, resume=False):
             round_index = read_json(previous / "spec.json")["round"] + 1
         job = root / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
         job.mkdir()
-        prefs = workspace.preferences
+        prefs = {**workspace.preferences, "batch_size": workspace.training_batch_size()}
         data = build_data_config(workspace.project)
         if not data["validation"]:
             raise ValueError(
@@ -162,7 +160,7 @@ def make_job(workspace, resume=False):
         if is_static:
             from .static_training import model_config
 
-            model = model_config(workspace.project, prefs["static_size"])
+            model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
         learning = build_hyper_learning_config(workspace.project)
@@ -228,7 +226,7 @@ def build_progress_callback(job, spec, member, shared):
     from pytorch_lightning.callbacks import Callback
 
     label = (
-        f"A2 {spec['preferences']['static_size'].title()}: {spec['static_captures'][member]['name']}"
+        f"A2 Full + Lite: {spec['static_captures'][member]['name']}"
         if spec.get("static_captures")
         else "HyperA2 Full + Lite"
     )
@@ -607,11 +605,14 @@ def run_job(job):
             chosen = min(quality)[1]
             export = workspace.directory / "models" / f"round-{spec['round'] + 1}"
             export.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(
-                job / f"member-{chosen}" / "model_parametric.nam",
-                export / "ParaNAM_HyperA2.nam",
-            )
-            shared.update(export=str(export / "ParaNAM_HyperA2.nam"))
+            source = job / f"member-{chosen}" / "model_parametric.pnam"
+            if not source.exists():
+                # Completed members from a job started by an older app may
+                # still use .nam. Read those without renaming the user's files.
+                source = source.with_suffix(".nam")
+            destination = export / "ParaNAM_HyperA2.pnam"
+            shutil.copy2(source, destination)
+            shared.update(export=str(destination))
             additions = []
             if (
                 spec["preferences"]["mode"] == "active_learning"

@@ -27,10 +27,10 @@ from nam.capture.project import (
 DEFAULTS = {
     "capture_level_dbfs": 0.0,
     "capture_type": "parametric",
-    "static_size": "full",
     "mode": "normal",
     "epochs": 200,
     "batch_size": 32,
+    "static_batch_size": 16,
     "device": "auto",
     "rounds": 2,
     "additions": 8,
@@ -70,6 +70,8 @@ class Workspace:
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
+        if self.project.capture_type == "static" and "static_batch_size" not in stored:
+            self.preferences["static_batch_size"] = stored.get("batch_size", 16)
         if "capture_level_dbfs" not in stored:
             self.preferences["capture_level_dbfs"] = self.project.capture_level_dbfs
         if "capture_type" not in stored:
@@ -413,6 +415,14 @@ class Workspace:
             for e in self.project.entries
         )
 
+    def training_batch_size(self):
+        key = (
+            "static_batch_size"
+            if self.preferences["capture_type"] == "static"
+            else "batch_size"
+        )
+        return self.preferences[key]
+
     def fingerprint(self, *, batch_size=None):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import build_data_config
@@ -425,9 +435,7 @@ class Workspace:
             ),
             "capture_type": self.project.capture_type,
             "static_size": (
-                self.preferences["static_size"]
-                if self.project.capture_type == "static"
-                else None
+                "full+lite-v1" if self.project.capture_type == "static" else None
             ),
             "static_batch": (
                 self.preferences["static_captures"]
@@ -468,6 +476,7 @@ class Workspace:
             path = self.directory / relative
             stat = path.stat()
             data["files"].append([relative, stat.st_size, stat.st_mtime_ns])
+        data["settings"]["batch_size"] = self.training_batch_size()
         if batch_size is not None:
             data["settings"]["batch_size"] = batch_size
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

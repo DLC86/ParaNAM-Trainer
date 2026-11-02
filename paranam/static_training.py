@@ -8,19 +8,27 @@ import time
 from nam.capture.project import atomic_write_json
 
 
-def model_config(project, size="full"):
+def model_config(project, size=None):
     from nam.models.parametric._hyper_a2 import _template_config
 
-    if size not in ("full", "lite"):
-        raise ValueError("Choose A2 Full or Lite")
-    template = _template_config(8 if size == "full" else 3, 0.01)
+    submodels = []
+    for channels in (3, 8):
+        template = _template_config(channels, 0.01)
+        submodels.append(
+            dict(
+                name=f"channels_{channels}",
+                config=dict(
+                    layers_configs=template["layers"], head_scale=template["head_scale"]
+                ),
+            )
+        )
     config = dict(
-        layers_configs=template["layers"],
-        head_scale=template["head_scale"],
+        submodels=submodels,
         sample_rate=project.sample_rate,
+        export=dict(container_max_values="uniform"),
     )
     return dict(
-        net=dict(name="WaveNet", config=config),
+        net=dict(name="PackedWaveNet", config=config),
         loss=dict(val_loss="esr", mrstft_weight=0.0005),
         optimizer=dict(lr=0.002, weight_decay=3.17e-7),
         lr_scheduler=dict(**{"class": "ExponentialLR"}, kwargs=dict(gamma=0.994)),
@@ -36,10 +44,15 @@ def train(data_config, model_config, learning, output, callback):
         apply_joint_dataset_hooks,
         get_joint_dataset_hooks,
     )
-    from nam.train.lightning_module import LightningModule
+    from nam.train.lightning_module import LightningModule, PackedLightningModule
     from .training import epoch_checkpoint
 
-    model = LightningModule.init_from_config(model_config)
+    module_class = (
+        PackedLightningModule
+        if model_config["net"]["name"] == "PackedWaveNet"
+        else LightningModule
+    )
+    model = module_class.init_from_config(model_config)
     data = copy.deepcopy(data_config)
     data.setdefault("common", {})["nx"] = model.net.receptive_field
     datasets = []
@@ -73,8 +86,8 @@ def train(data_config, model_config, learning, output, callback):
         )
         trainer.fit(model, *loaders, **learning.get("trainer_fit_kwargs", {}))
         if best.best_model_path:
-            model = LightningModule.load_from_checkpoint(
-                best.best_model_path, **LightningModule.parse_config(model_config)
+            model = module_class.load_from_checkpoint(
+                best.best_model_path, **module_class.parse_config(model_config)
             )
         model.eval()
         model.net.sample_rate = datasets[0].sample_rate
@@ -131,13 +144,19 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             learning[split]["pin_memory"] = pinned
         shared.update(
             elapsed=elapsed_base + time.monotonic() - clock_start,
-            message=f"Training A2 {spec['preferences']['static_size'].title()}: {capture['name']}",
+            message=f"Training A2 Full + Lite: {capture['name']}",
         )
         callback = build_progress_callback(job, spec, member, shared)
         train(data, spec["model"], learning, output, callback)
         model = read_json(output / "model.nam")
         model.setdefault("metadata", {}).update(metadata)
         model["metadata"].update(capture.get("metadata", {}), name=capture["name"])
+        if model.get("architecture") == "SlimmableContainer":
+            for child in model["config"]["submodels"]:
+                child["model"].setdefault("metadata", {}).update(metadata)
+                child["model"]["metadata"].update(
+                    capture.get("metadata", {}), name=capture["name"]
+                )
         safe_name = (
             re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", capture["name"]).rstrip(" .")
             or "Capture"

@@ -188,9 +188,9 @@ def bake(
             baked_inner = _deepcopy(model._template)
             for name, parameter in baked_inner.named_parameters():
                 parameter.data.copy_(
-                    weight_dict[name].detach().to(
-                        device=parameter.device, dtype=parameter.dtype
-                    )
+                    weight_dict[name]
+                    .detach()
+                    .to(device=parameter.device, dtype=parameter.dtype)
                 )
         baked = _WaveNet(wavenet=baked_inner, sample_rate=model.sample_rate)
         baked.eval()
@@ -272,7 +272,7 @@ def export_parametric(
     other_metadata=None,
 ) -> None:
     """
-    Export the parametric `.nam` for a future parametric-aware runtime.
+    Export a parametric `.pnam`, preserving the NAM JSON schema and metadata.
 
     ``output_scale`` follows the same contract as :func:`bake`: the caller supplies the
     shared dataset ``_y_scale`` when training normalized the targets, and export writes the

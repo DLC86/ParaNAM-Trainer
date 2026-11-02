@@ -1,12 +1,12 @@
 # ParaNAM Trainer
 
-A desktop wizard for parametric **HyperA2 Full + Lite inside one nested `.nam` model**
-and batches of independent static **A2 Full or Lite** models. Based on DLC86's `Knobs+Switch` trainer branch,
+A desktop wizard for parametric **HyperA2 Full + Lite inside one nested `.pnam` model**
+and batches of independent static **A2 Full + Lite nested `.nam` models**. Based on DLC86's `Knobs+Switch` trainer branch,
 with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.3.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.3.0-preview)**
+**[Download the 0.4.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.0-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts
@@ -26,7 +26,10 @@ Linux packages target Ubuntu 22.04 or newer and the corresponding system ABI.
 The desktop package installer resolves standard OS audio/display libraries. There is
 one installer per OS/architecture. Windows offers an unchecked NVIDIA option during
 setup; Linux offers the same choice on first launch. Both can manage it later from
-Training settings. CPU training and offline capture work without downloading anything.
+Training settings, using **Add NVIDIA GPU support**, shown only while the component
+is missing. Windows setup shows GPU preparation in an additional progress bar in the
+installer itself, with no separate setup dialog or second confirmation.
+CPU training and offline capture work without downloading anything.
 The optional engine downloads compatible, checksum-verified PyTorch/NVIDIA wheels
 from official sources into a per-user folder, retaining all their runtime dependencies
 and license files. Matching installed components are reused and interrupted downloads
@@ -49,14 +52,14 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 ## Guided workflow
 
 1. **Project & routing.** Create/open a project or pick a recent one. Choose your
-   interface and channels. The connection diagram shows the reamp/rig/return path
-   and optional clean timing loopback. Test the connection and optionally enter
+   interface and channels. Clean timing loopback is enabled by default.
+   Test the connection and optionally enter
    send/return dBu calibration. Channel selectors use driver labels, and buffer
    choices come from the driver: 2048 samples is selected when available, otherwise
    its highest supported value. When an API exposes no names or sizes, the UI says
    so and uses its driver-managed buffer instead of offering invented choices.
-2. **Controls & plan.** Choose Parametric or Static batch (A2 Full by default, Lite
-   selectable). Enter model metadata: name, author, gear type, manufacturer, model,
+2. **Controls & plan.** Choose Parametric or Static batch; both always train Full
+   and Lite together. Enter model metadata: name, author, gear type, manufacturer, model,
    tone type and notes. Existing custom metadata is preserved. In Parametric, add/edit knobs and named multi-position switches, choose
    Normal or Active learning, and select Standard or Custom training input. Capture
    counts include all switch combinations; corners are repeated for every state.
@@ -74,9 +77,11 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    2-opt improves the route without changing capture IDs or training data order.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
    epoch, best validation ESR, elapsed time and an estimate based on completed epoch
-   durations. Epoch progress bars are also retained in the training details log. Export is always `models/round-N/ParaNAM_HyperA2.nam`, containing both
+   durations. Static batch size defaults to 16, matching the official NAM trainer;
+   parametric defaults to 32. The two settings are saved independently.
+   Epoch progress bars are also retained in the training details log. Parametric export is `models/round-N/ParaNAM_HyperA2.pnam`, containing both
    Full and Lite with Full as the playback default. Static batches export one standard
-   WaveNet A2 `.nam` per named item under `models/<run>/`, with its metadata and
+   A2 Full + Lite `SlimmableContainer` `.nam` per named item under `models/<run>/`, with its metadata and
    send/return dBu calibration. Channel selectors use driver labels, and buffer
    choices come from the driver: 2048 samples is selected when available, otherwise
    its highest supported value. When an API exposes no names or sizes, the UI says

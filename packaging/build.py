@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 def run(*args):
@@ -81,7 +81,12 @@ def main():
         executable = bundle / "ParaNAM Trainer"
     # Test the frozen bundle, not the developer's Python environment.
     smoke = ROOT / "build" / "bundle-smoke.json"
-    from validate_bundle import clean_environment, validate_training, validate_static
+    from validate_bundle import (
+        clean_environment,
+        validate_training,
+        validate_static,
+        validate_installer_configuration,
+    )
 
     environment = clean_environment()
     result = subprocess.run(
@@ -97,6 +102,7 @@ def main():
         or not json.loads(smoke.read_text())["ok"]
     ):
         raise RuntimeError("Frozen application smoke test failed")
+    validate_installer_configuration(executable, ROOT / "build")
     validate_training(executable, ROOT / "build")
     validate_static(executable, ROOT / "build")
     if sys.platform == "win32":

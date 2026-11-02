@@ -120,6 +120,43 @@ def test_stop_does_not_publish_an_incomplete_model(workspace, monkeypatch):
     assert all(e.status == "captured" for e in workspace.project.entries)
 
 
+@pytest.mark.parametrize("extension", [".nam", ".pnam"])
+def test_completed_parametric_member_exports_pnam_without_losing_metadata(
+    workspace, monkeypatch, extension
+):
+    job = tiny_job(workspace, monkeypatch)
+    member = job / "member-0"
+    member.mkdir()
+    model = {
+        "architecture": "HyperA2",
+        "config": {"submodels": [{"name": "lite"}, {"name": "full"}]},
+        "weights": [1.25, -0.5],
+        "metadata": {
+            "input_level_dbu": 18.125,
+            "output_level_dbu": 12.625,
+            "custom": {"labels": ["Clean", "Lead"], "keep": True},
+        },
+    }
+    original = member / f"model_parametric{extension}"
+    atomic_write_json(original, model)
+    torch.save({"callbacks": {"quality": {"best_esr": 0.01}}}, job / "resume-0.ckpt")
+    progress = training.job_progress(job)
+    progress["completed_members"] = [0]
+    atomic_write_json(job / "progress.json", progress)
+
+    def unexpected_training(*args, **kwargs):
+        raise AssertionError("A completed member must not be trained again")
+
+    monkeypatch.setattr("nam.train.parametric.main", unexpected_training)
+    training.run_job(job)
+    progress = training.job_progress(job)
+    assert progress["status"] == "completed", progress
+    exported = Path(progress["export"])
+    assert exported.suffix == ".pnam"
+    assert read_json(exported) == model
+    assert original.exists()
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_mid_epoch_pause_restarts_only_the_incomplete_epoch(
     workspace, monkeypatch, legacy
@@ -234,7 +271,7 @@ def test_real_active_learning_round_exports_nested_models_and_returns_to_capture
     assert progress["status"] == "needs_captures", progress
     assert progress["additions"] == 1
     for member in range(2):
-        model = read_json(job / f"member-{member}" / "model_parametric.nam")
+        model = read_json(job / f"member-{member}" / "model_parametric.pnam")
         assert model["architecture"] == "HyperA2"
         assert len(model["config"]["submodels"]) == 2
     reopened = Workspace(workspace.directory)
