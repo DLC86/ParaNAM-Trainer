@@ -402,12 +402,17 @@ def annotate_validation_metadata(model, metrics, optimizer):
             )
 
 
-def export_best_nam(trainer, spec, member, target):
+def intermediate_export_extension(spec):
+    return ".nam" if spec.get("static_captures") else ".pnam"
+
+
+def export_best_model(trainer, spec, member, target):
     """Build one independent Full/Lite snapshot at a safe training boundary."""
     import torch
     import tempfile
     from nam.train.parametric import _ParametricLightningModule
     from nam.train.lightning_module import PackedLightningModule, PackedBestCheckpoint
+    from nam.models.parametric import export_parametric
 
     static = bool(spec.get("static_captures"))
     checkpoint_class = PackedLightningModule if static else _ParametricLightningModule
@@ -436,7 +441,7 @@ def export_best_nam(trainer, spec, member, target):
         math.isfinite(value) for value in scores.values()
     ):
         raise ValueError("A validated Full and Lite checkpoint is not available yet")
-    # Constructors and baking consume CPU RNG; exporting must not change the run.
+    # Constructors consume CPU RNG; exporting must not change the run.
     with torch.random.fork_rng(devices=[]), torch.no_grad():
         checkpoints = {
             size: torch.load(path, map_location="cpu", weights_only=False)
@@ -457,21 +462,28 @@ def export_best_nam(trainer, spec, member, target):
             net.branch("lite").load_state_dict(
                 models["lite"].net.branch("lite").state_dict()
             )
-            export_net = net.bake(net.nominal_params)
+            export_net = net
         target = Path(target)
+        extension = intermediate_export_extension(spec)
+        if target.suffix.lower() != extension:
+            target = target.with_suffix(extension)
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix=".paranam-export-", dir=target.parent
         ) as directory:
-            export_net.export(Path(directory), basename="snapshot")
-            exported = read_json(Path(directory) / "snapshot.nam")
+            if static:
+                export_net.export(Path(directory), basename="snapshot")
+            else:
+                export_parametric(export_net, Path(directory), basename="snapshot")
+            exported = read_json(Path(directory) / ("snapshot" + extension))
         metadata = dict(spec["model"].get("metadata", {}))
         if static:
             capture = spec["static_captures"][member]
             metadata.update(capture.get("metadata", {}), name=capture["name"])
         exported.setdefault("metadata", {}).update(metadata)
-        for child in exported.get("config", {}).get("submodels", []):
-            child["model"].setdefault("metadata", {}).update(metadata)
+        if exported.get("architecture") == "SlimmableContainer":
+            for child in exported["config"]["submodels"]:
+                child["model"].setdefault("metadata", {}).update(metadata)
         epochs = {
             size: int(checkpoints[size]["epoch"]) + 1 for size in ("full", "lite")
         }
@@ -565,7 +577,7 @@ def build_progress_callback(job, spec, member, shared):
             if self.best is None:
                 return
             try:
-                path = export_best_nam(self.trainer, spec, member, request["path"])
+                path = export_best_model(self.trainer, spec, member, request["path"])
                 result = dict(id=request["id"], ok=True, path=path)
             except Exception as error:
                 result = dict(id=request["id"], ok=False, error=str(error))

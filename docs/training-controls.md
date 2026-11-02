@@ -61,17 +61,19 @@ upstream exporter enables compilation and uses validation batches of 32.
 
 ## Export while training
 
-**Export best NAM** becomes available after validated Full and Lite checkpoints
+**Export best PNAM** (parametric) or **Export best NAM** (static) becomes available after validated Full and Lite checkpoints
 exist. Choose a destination; the training worker handles the request at a batch
 boundary and automatically continues. Export takes some processing time, but
 requires no pause/resume or restart. An export error is reported in the UI and
 does not fail training.
 
-The result is **one standard `.nam` SlimmableContainer** combining Full from its
+The result is **one model file** combining Full from its
 best Full checkpoint and Lite from its own best Lite checkpoint. They may come
 from different epochs; each score and epoch is recorded in export metadata.
-Parametric weights are baked at the project's default knob/switch values: this
-fixed-setting `.nam` does not expose live parameter controls. Static batches
-export the currently training named capture. Calibration and user metadata are
+Parametric training exports a **`.pnam` HyperA2** retaining both branches'
+hypernetworks, knob/switch definitions and live parameter controls. It is not
+baked to fixed knob values. Static training exports a **`.nam` SlimmableContainer**
+for the currently training named capture. The button label, file dialog and file
+extension follow the training type automatically. Calibration and user metadata are
 retained. The snapshot does not modify live weights, optimizer state or training
 RNG, and writes atomically to the selected destination.

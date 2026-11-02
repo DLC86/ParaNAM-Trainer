@@ -711,7 +711,7 @@ class WizardWindow(QMainWindow):
         row.addWidget(self.train_button)
         row.addWidget(self.pause_button)
         row.addWidget(self.stop_button)
-        self.export_best_button = button("Export best NAM", self.export_best_nam)
+        self.export_best_button = button("Export best model", self.export_best_model)
         row.addWidget(self.export_best_button)
         row.addStretch()
         row.addWidget(self.models_button)
@@ -1908,19 +1908,29 @@ class WizardWindow(QMainWindow):
             )
             self.pause_button.setEnabled(False)
 
-    def export_best_nam(self):
+    def export_best_model(self):
         if not self.job or not self.process:
             return
+        spec = read_json(self.job / "spec.json")
+        extension = training.intermediate_export_extension(spec)
+        title = "Export best PNAM" if extension == ".pnam" else "Export best NAM"
+        file_filter = (
+            "Parametric NAM model (*.pnam)"
+            if extension == ".pnam"
+            else "NAM model (*.nam)"
+        )
         default = (
-            self.workspace.directory / "models" / f"{self.job.name}-intermediate.nam"
+            self.workspace.directory
+            / "models"
+            / f"{self.job.name}-intermediate{extension}"
         )
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Export best NAM", str(default), "NAM model (*.nam)"
+            self, title, str(default), file_filter
         )
         if not filename:
             return
-        if not filename.lower().endswith(".nam"):
-            filename += ".nam"
+        if Path(filename).suffix.lower() != extension:
+            filename = str(Path(filename).with_suffix(extension))
         atomic_write_json(
             self.job / "export-request.json",
             {"id": str(time.time_ns()), "path": filename},
@@ -2081,6 +2091,11 @@ class WizardWindow(QMainWindow):
         self.train_button.setEnabled(ready and not active)
         self.pause_button.setEnabled(self.process is not None)
         self.stop_button.setEnabled(self.process is not None)
+        self.export_best_button.setText(
+            "Export best PNAM"
+            if present and self.workspace.preferences["capture_type"] == "parametric"
+            else "Export best NAM"
+        )
         request = read_json(self.job / "export-request.json", {}) if self.job else {}
         result = read_json(self.job / "export-result.json", {}) if self.job else {}
         self.export_best_button.setEnabled(

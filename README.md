@@ -13,7 +13,7 @@ Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 (sign in with an account that can access this private repository).
 
 Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
-an intermediate **Export best NAM** button during training, independent base and
+an intermediate **Export best PNAM/NAM** button during training, independent base and
 hypernetwork learning rates, optional gradient clipping/NaN/Inf checks, and
 HyperA2 / HyperWaveNet (Phillip Self) recipe presets. See
 [training controls and presets](docs/training-controls.md).

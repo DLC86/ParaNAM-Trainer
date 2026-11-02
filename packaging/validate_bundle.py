@@ -116,6 +116,10 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
         progress["completed_epoch"] == 0
     ), "Pause must not wait for an epoch to finish"
     assert make_job(workspace, resume=True) == job
+    intermediate = directory / "intermediate.pnam"
+    atomic_write_json(
+        job / "export-request.json", dict(id="frozen-export", path=str(intermediate))
+    )
     result = subprocess.run(
         [
             str(executable),
@@ -141,6 +145,13 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     assert validation["validation_esr_lite"] is not None
     assert validation["optimizer"] == "Adam"
     assert validation["validation_esr"] == progress["best_esr"]
+    intermediate_result = read_json(job / "export-result.json")
+    assert intermediate_result.get("ok"), intermediate_result
+    snapshot = read_json(intermediate)
+    assert snapshot["architecture"] == "HyperA2"
+    assert snapshot["config"]["params"]
+    assert [s["name"] for s in snapshot["config"]["submodels"]] == ["lite", "full"]
+    assert not intermediate.with_suffix(".nam").exists()
     if gpu_runtime and device == "auto":
         assert str(progress["device"]).startswith("cuda"), progress
     print("Frozen worker completed real HyperA2 Full/Lite training and metadata export")

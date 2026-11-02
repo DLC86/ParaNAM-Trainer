@@ -153,13 +153,13 @@ def test_export_request_while_training_does_not_stop_training(
     workspace, monkeypatch, fail_export
 ):
     job = tiny_job(workspace, monkeypatch)
-    target = workspace.directory / "intermediate.nam"
+    target = workspace.directory / "intermediate.pnam"
     if fail_export:
 
         def fail(*args, **kwargs):
             raise OSError("Test export failure")
 
-        monkeypatch.setattr(training, "export_best_nam", fail)
+        monkeypatch.setattr(training, "export_best_model", fail)
     original = _ParametricLightningModule.training_step
 
     def request_at_second_epoch(module, *args, **kwargs):
@@ -181,7 +181,9 @@ def test_export_request_while_training_does_not_stop_training(
         return
     assert result.get("ok"), result
     model = read_json(target)
-    assert model["architecture"] == "SlimmableContainer"
+    assert model["architecture"] == "HyperA2"
+    assert model["config"]["params"][0]["name"] == "Gain"
+    assert not target.with_suffix(".nam").exists()
     assert len(model["config"]["submodels"]) == 2
     assert model["metadata"]["training"]["intermediate"] is True
     assert model["metadata"]["training"]["epoch_full"] == 1
@@ -195,6 +197,7 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
     workspace, monkeypatch, kind
 ):
     from nam.train.lightning_module import PackedLightningModule, PackedBestCheckpoint
+    from nam.models.parametric import HyperA2
 
     if kind == "static":
         from tests.paranam.test_static import static_workspace
@@ -224,15 +227,18 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
         models[size] = cls.init_from_config(spec["model"])
         models[size].net.sample_rate = 48000
         models[size].eval()
+        if kind == "parametric":
+            with torch.no_grad():
+                for branch in models[size].net._branches.values():
+                    branch._hypernet._final.weight.normal_(0, 0.003)
         checkpoint = dict(epoch=index * 2, state_dict=models[size].state_dict())
         models[size].on_save_checkpoint(checkpoint)
         paths[size] = job / f"best-{size}.ckpt"
         torch.save(checkpoint, paths[size])
         net = models[size].net
-        (net if kind == "static" else net.bake(net.nominal_params)).export(
-            job, basename=f"expected-{size}"
-        )
-        expected[size] = read_json(job / f"expected-{size}.nam")
+        if kind == "static":
+            net.export(job, basename=f"expected-{size}")
+            expected[size] = read_json(job / f"expected-{size}.nam")
     trainer = SimpleNamespace(
         checkpoint_callbacks=[
             SimpleNamespace(
@@ -254,15 +260,45 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
         }
         trainer.callbacks = [packed]
     before = torch.get_rng_state()
-    target = job / "snapshot.nam"
-    training.export_best_nam(trainer, spec, 0, target)
+    target = job / ("snapshot.nam" if kind == "static" else "snapshot.pnam")
+    training.export_best_model(trainer, spec, 0, target)
     assert torch.equal(before, torch.get_rng_state())
     exported = read_json(target)
-    for index, size in enumerate(("lite", "full")):
-        assert (
-            exported["config"]["submodels"][index]["model"]["weights"]
-            == expected[size]["config"]["submodels"][index]["model"]["weights"]
-        )
+    if kind == "static":
+        assert exported["architecture"] == "SlimmableContainer"
+        for index, size in enumerate(("lite", "full")):
+            assert (
+                exported["config"]["submodels"][index]["model"]["weights"]
+                == expected[size]["config"]["submodels"][index]["model"]["weights"]
+            )
+    else:
+        assert exported["architecture"] == "HyperA2"
+        restored = HyperA2.init_from_config(exported["config"]).eval()
+        restored.import_weights(exported["weights"])
+        assert restored.param_specs == models["full"].net.param_specs
+        signal = 0.1 * torch.randn(restored.receptive_field + 15)
+        with torch.no_grad():
+            for size in ("full", "lite"):
+                restored.set_size(size)
+                source = models[size].net.branch(size)
+                torch.testing.assert_close(
+                    torch.from_numpy(restored.branch(size)._export_weights()),
+                    torch.from_numpy(source._export_weights()),
+                    rtol=0,
+                    atol=0,
+                )
+                outputs = []
+                for setting in (2.0, 8.0):
+                    params = torch.tensor([setting])
+                    output = restored(signal, params, pad_start=False)
+                    torch.testing.assert_close(
+                        output, source(signal, params, pad_start=False)
+                    )
+                    outputs.append(output)
+                assert not torch.equal(
+                    *outputs
+                ), "Exported knobs no longer affect the audio"
+        assert not target.with_suffix(".nam").exists()
     assert exported["metadata"]["training"] == "Keep my custom training metadata"
     metadata = exported["metadata"]["paranam_training"]
     assert metadata["intermediate"] is True
@@ -284,3 +320,39 @@ def test_esr_chart_handles_missing_and_nonfinite_scores(qapp):
     assert not chart.grab().isNull()
     chart.set_history([])
     assert not chart.grab().isNull()
+
+
+@pytest.mark.parametrize(
+    "kind,extension", [("parametric", ".pnam"), ("static", ".nam")]
+)
+def test_export_button_selects_the_training_model_format(
+    window, workspace, monkeypatch, kind, extension
+):
+    if kind == "static":
+        from tests.paranam.test_static import static_workspace
+
+        workspace = static_workspace(workspace)
+    ready(workspace)
+    window._attach(workspace)
+    job = training.make_job(workspace)
+    window.job = job
+    dialogs = []
+
+    def choose_file(*args):
+        dialogs.append(args)
+        return str(workspace.directory / "chosen.wrong"), ""
+
+    monkeypatch.setattr("paranam.wizard.QFileDialog.getSaveFileName", choose_file)
+    window.process = object()
+    try:
+        window.update_enabled()
+        assert window.export_best_button.text() == (
+            "Export best PNAM" if extension == ".pnam" else "Export best NAM"
+        )
+        window.export_best_model()
+        assert str(dialogs[0][2]).endswith(extension)
+        assert "*" + extension in dialogs[0][3]
+        request = read_json(job / "export-request.json")
+        assert request["path"].endswith("chosen" + extension)
+    finally:
+        window.process = None
