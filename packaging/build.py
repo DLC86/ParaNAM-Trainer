@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
     from PIL import Image, ImageDraw
 
-    image = Image.new("RGBA", (256, 256), "#191b23")
+    image = Image.new("RGBA", (256, 256), "#1b1b1b")
     draw = ImageDraw.Draw(image)
     draw.line(
         [
@@ -37,7 +37,7 @@ def main():
             (183, 132),
             (222, 132),
         ],
-        fill="#ff8b4b",
+        fill="#bf0000",
         width=15,
         joint="curve",
     )
