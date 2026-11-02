@@ -9,6 +9,10 @@ def training_preset(name):
     hyper_a2 = name == "HyperA2"
     return dict(
         hypernetwork_recipe=name,
+        hypernetwork_mode="full" if hyper_a2 else "low_rank",
+        hypernetwork_rank=2,
+        condition_dilated_convolutions=hyper_a2,
+        branch_loss_reduction="sum" if hyper_a2 else "mean",
         optimizer="Adam" if hyper_a2 else "AdamW",
         learning_rate=0.004 if hyper_a2 else 0.002,
         hypernetwork_learning_rate=0.0004 if hyper_a2 else 0.002,

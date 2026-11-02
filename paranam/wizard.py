@@ -659,6 +659,44 @@ class WizardWindow(QMainWindow):
         self.advanced_fields["check_nonfinite_gradients"] = nonfinite
         advanced_form.addRow(nonfinite)
         nonfinite.toggled.connect(self.save_preferences)
+        weight_mode = QComboBox()
+        weight_mode.addItem("Full", "full")
+        weight_mode.addItem("Low rank", "low_rank")
+        weight_mode.setToolTip(
+            "How knob-dependent weight deltas are generated. Independent of Full/Lite audio size."
+        )
+        self.advanced_fields["hypernetwork_mode"] = weight_mode
+        advanced_form.addRow("Hypernetwork weight mode", weight_mode)
+        rank = QSpinBox()
+        rank.setRange(1, 8)
+        rank.setValue(2)
+        rank.setToolTip(
+            "Rank of generated matrix deltas, from 1 to 8. Effective rank is also limited by each matrix's dimensions."
+        )
+        self.advanced_fields["hypernetwork_rank"] = rank
+        advanced_form.addRow("Rank (low-rank mode)", rank)
+        dilated = QCheckBox("Condition dilated convolution kernels on knobs")
+        dilated.setToolTip(
+            "When disabled, dilated convolution kernel weights remain trainable and shared across settings. Their biases may still be conditioned."
+        )
+        self.advanced_fields["condition_dilated_convolutions"] = dilated
+        advanced_form.addRow(dilated)
+        reduction = QComboBox()
+        reduction.addItem("Sum", "sum")
+        reduction.addItem("Mean", "mean")
+        reduction.setToolTip(
+            "Changes how Full/Lite training losses are combined before backpropagation, not the definition of validation ESR."
+        )
+        self.advanced_fields["branch_loss_reduction"] = reduction
+        advanced_form.addRow("Full/Lite loss reduction", reduction)
+        for field, signal in (
+            (weight_mode, weight_mode.currentIndexChanged),
+            (rank, rank.valueChanged),
+            (dilated, dilated.toggled),
+            (reduction, reduction.currentIndexChanged),
+        ):
+            signal.connect(self.save_preferences)
+            signal.connect(lambda *_: self.refresh_hypernetwork_controls())
         self.advanced_fields["lr_decay"].setToolTip(
             "Exponential learning-rate multiplier after each epoch."
         )
@@ -758,12 +796,35 @@ class WizardWindow(QMainWindow):
         ) == "parametric"
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
+        self.refresh_hypernetwork_controls(kind)
+
+    def refresh_hypernetwork_controls(self, kind=None):
+        if not self.workspace:
+            return
+        parametric = (
+            kind or self.workspace.preferences["capture_type"]
+        ) == "parametric"
+        for key in (
+            "hypernetwork_mode",
+            "condition_dilated_convolutions",
+            "branch_loss_reduction",
+        ):
+            self.advanced_fields[key].setEnabled(parametric)
+        low_rank = self.advanced_fields["hypernetwork_mode"].currentData() == "low_rank"
+        self.advanced_fields["hypernetwork_rank"].setEnabled(parametric and low_rank)
+        mode = (
+            f"low rank (rank {self.advanced_fields['hypernetwork_rank'].value()})"
+            if low_rank
+            else "full"
+        )
+        kernels = (
+            "conditioned"
+            if self.advanced_fields["condition_dilated_convolutions"].isChecked()
+            else "shared"
+        )
+        reduction = self.advanced_fields["branch_loss_reduction"].currentData()
         self.preset_description.setText(
-            (
-                "HyperA2: all audio weights are conditioned on the controls."
-                if options["hypernetwork_recipe"] == "HyperA2"
-                else "Phillip Self's low-rank HyperWaveNet recipe, adapted to Full + Lite."
-            )
+            f"Weight deltas: {mode}; dilated kernels: {kernels}; Full/Lite loss: {reduction}."
             if parametric
             else "Static A2 training; hypernetwork settings are not used."
         )

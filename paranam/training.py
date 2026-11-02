@@ -91,6 +91,36 @@ def job_can_resume(workspace, job):
     )
     legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
     options = workspace.training_options()
+    generation_keys = (
+        "hypernetwork_mode",
+        "hypernetwork_rank",
+        "condition_dilated_convolutions",
+        "branch_loss_reduction",
+    )
+    legacy_generation = not any(key in (saved_options or {}) for key in generation_keys)
+    old_hypernet = (
+        spec.get("model", {}).get("net", {}).get("config", {}).get("hypernet", {})
+    )
+    old_mode = old_hypernet.get("mode", "low_rank")
+    same_generation = bool(spec.get("static_captures")) or (
+        options["hypernetwork_mode"] == old_mode
+        and (
+            old_mode != "low_rank"
+            or options["hypernetwork_rank"] == old_hypernet.get("rank", 2)
+        )
+        and options["condition_dilated_convolutions"]
+        == (
+            "_conv.weight"
+            not in old_hypernet.get("selector", {}).get("exclude_suffixes", [])
+        )
+        and options["branch_loss_reduction"]
+        == (
+            "sum"
+            if spec.get("model", {}).get("loss", {}).get("training_recipe", "legacy")
+            == "a2"
+            else "mean"
+        )
+    )
     old_clip = spec.get("learning", {}).get("trainer", {}).get("gradient_clip_val")
     old_check = spec.get("model", {}).get(
         "check_nonfinite_gradients",
@@ -105,23 +135,20 @@ def job_can_resume(workspace, job):
         old_hyper_lr = spec.get("model", {}).get("optimizer", {}).get(
             "lr", 0.004
         ) * spec.get("model", {}).get("hypernet_lr_scale", 1.0)
-        old_mode = (
-            spec.get("model", {})
-            .get("net", {})
-            .get("config", {})
-            .get("hypernet", {})
-            .get("mode", "low_rank")
-        )
-        same_safety = (
-            same_safety
-            and math.isclose(options["hypernetwork_learning_rate"], old_hyper_lr)
-            and options["hypernetwork_recipe"]
-            == ("HyperA2" if old_mode == "full" else "HyperWaveNet")
+        same_safety = same_safety and math.isclose(
+            options["hypernetwork_learning_rate"], old_hyper_lr
         )
     fingerprints = [
         workspace.fingerprint(batch_size=spec.get("preferences", {}).get("batch_size"))
     ]
-    if legacy_safety and same_safety:
+    if legacy_generation and same_generation:
+        fingerprints.append(
+            workspace.fingerprint(
+                batch_size=spec.get("preferences", {}).get("batch_size"),
+                include_hypernetwork_controls=False,
+            )
+        )
+    if legacy_safety and same_safety and same_generation:
         fingerprints.append(
             workspace.fingerprint(
                 batch_size=spec.get("preferences", {}).get("batch_size"),
@@ -143,6 +170,7 @@ def job_can_resume(workspace, job):
             "optimizer" not in (saved_options or {})
             and "class" not in model.get("optimizer", {})
             and (not legacy_safety or same_safety)
+            and (not legacy_generation or same_generation)
             and options["optimizer"] == legacy_optimizer
             and model.get("optimizer", {}).get("lr") == options["learning_rate"]
             and model.get("optimizer", {}).get("weight_decay")
@@ -162,6 +190,7 @@ def job_can_resume(workspace, job):
             include_advanced=saved_options is not None,
             include_optimizer=False,
             include_gradient_safety=not legacy_safety,
+            include_hypernetwork_controls=not legacy_generation,
         ):
             return False
     member = progress.get("member", 0)
@@ -259,17 +288,35 @@ def make_job(workspace, resume=False):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
-            if options["hypernetwork_recipe"] == "HyperWaveNet":
-                model["net"]["config"]["hypernet"].update(
-                    mode="low_rank",
-                    rank=2,
-                    selector={"exclude_suffixes": ["_conv.weight"]},
-                )
-                model["loss"]["training_recipe"] = "legacy"
-            elif options["hypernetwork_recipe"] != "HyperA2":
+            if options["hypernetwork_recipe"] not in ("HyperA2", "HyperWaveNet"):
                 raise ValueError(
                     "Choose HyperA2 or HyperWaveNet as the training preset"
                 )
+            if options["hypernetwork_mode"] not in ("full", "low_rank"):
+                raise ValueError("Hypernetwork weight mode must be full or low_rank")
+            rank = options["hypernetwork_rank"]
+            if (
+                isinstance(rank, bool)
+                or not isinstance(rank, int)
+                or not 1 <= rank <= 8
+            ):
+                raise ValueError("Hypernetwork rank must be an integer from 1 to 8")
+            if not isinstance(options["condition_dilated_convolutions"], bool):
+                raise ValueError("Condition dilated convolutions must be a boolean")
+            if options["branch_loss_reduction"] not in ("sum", "mean"):
+                raise ValueError("Full/Lite loss reduction must be sum or mean")
+            model["net"]["config"]["hypernet"].update(
+                mode=options["hypernetwork_mode"],
+                rank=rank,
+                selector=(
+                    {}
+                    if options["condition_dilated_convolutions"]
+                    else {"exclude_suffixes": ["_conv.weight"]}
+                ),
+            )
+            model["loss"]["training_recipe"] = (
+                "a2" if options["branch_loss_reduction"] == "sum" else "legacy"
+            )
             if (
                 not math.isfinite(options["hypernetwork_learning_rate"])
                 or options["hypernetwork_learning_rate"] <= 0

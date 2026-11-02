@@ -440,6 +440,11 @@ class Workspace:
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
         options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
+        hyper_a2 = options["hypernetwork_recipe"] == "HyperA2"
+        options.setdefault("hypernetwork_mode", "full" if hyper_a2 else "low_rank")
+        options.setdefault("hypernetwork_rank", 2)
+        options.setdefault("condition_dilated_convolutions", hyper_a2)
+        options.setdefault("branch_loss_reduction", "sum" if hyper_a2 else "mean")
         return options
 
     def fingerprint(
@@ -449,6 +454,7 @@ class Workspace:
         include_advanced=True,
         include_optimizer=True,
         include_gradient_safety=True,
+        include_hypernetwork_controls=True,
     ):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import build_data_config
@@ -514,6 +520,14 @@ class Workspace:
                     "check_nonfinite_gradients",
                     "hypernetwork_learning_rate",
                     "hypernetwork_recipe",
+                ):
+                    data["settings"]["advanced_training"].pop(key, None)
+            if not include_gradient_safety or not include_hypernetwork_controls:
+                for key in (
+                    "hypernetwork_mode",
+                    "hypernetwork_rank",
+                    "condition_dilated_convolutions",
+                    "branch_loss_reduction",
                 ):
                     data["settings"]["advanced_training"].pop(key, None)
         if batch_size is not None:

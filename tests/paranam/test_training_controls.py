@@ -356,3 +356,128 @@ def test_export_button_selects_the_training_model_format(
         assert request["path"].endswith("chosen" + extension)
     finally:
         window.process = None
+
+
+@pytest.mark.parametrize("mode", ["full", "low_rank"])
+@pytest.mark.parametrize("condition_dilated", [False, True])
+@pytest.mark.parametrize("reduction", ["sum", "mean"])
+def test_weight_generation_and_loss_controls_are_independent(
+    workspace, mode, condition_dilated, reduction
+):
+    torch.set_num_threads(1)
+    workspace.preferences["advanced_parametric"] = dict(
+        hypernetwork_recipe="HyperA2",
+        hypernetwork_mode=mode,
+        hypernetwork_rank=3,
+        condition_dilated_convolutions=condition_dilated,
+        branch_loss_reduction=reduction,
+        fit_mrstft=False,
+    )
+    ready(workspace)
+    job = training.make_job(workspace)
+    spec = read_json(job / "spec.json")
+    config = spec["model"]["net"]["config"]["hypernet"]
+    assert config["mode"] == mode and config["rank"] == 3
+    module = _ParametricLightningModule.init_from_config(spec["model"])
+    for branch in module.net._branches.values():
+        convolutions = {
+            name
+            for name in branch._template_parameters
+            if name.endswith("_conv.weight")
+        }
+        assert convolutions
+        assert convolutions.issubset(branch._hypernet.target_names) is condition_dilated
+        if not condition_dilated:
+            assert not convolutions.intersection(branch._hypernet.target_names)
+        assert all(
+            branch._template_parameters[name].requires_grad for name in convolutions
+        )
+    module.net.set_uniform_batch_params(True)
+    x = 0.1 * torch.randn(1, module.net.receptive_field + 31)
+    params, y = torch.tensor([[3.0]]), 0.1 * torch.randn(1, 32)
+    module.on_train_epoch_start()
+    with torch.no_grad():
+        predictions = module.net.forward_sizes(x, params)
+        losses = (predictions - y[:, None]).square().mean(dim=(0, 2))
+        expected = losses.sum() if reduction == "sum" else losses.mean()
+    actual = module.training_step((x, params, y), 0)
+    torch.testing.assert_close(actual, expected)
+    actual.backward()
+    for branch in module.net._branches.values():
+        assert any(
+            p.grad is not None and p.grad.abs().sum() > 0
+            for name, p in branch._template_parameters.items()
+            if name.endswith("_conv.weight")
+        )
+
+
+def test_generation_controls_persist_and_presets_reset_visible_values(
+    window, workspace
+):
+    window._attach(workspace)
+    fields = window.advanced_fields
+    assert not fields["hypernetwork_rank"].isEnabled()
+    fields["hypernetwork_mode"].setCurrentIndex(
+        fields["hypernetwork_mode"].findData("low_rank")
+    )
+    assert fields["hypernetwork_rank"].isEnabled()
+    fields["hypernetwork_rank"].setValue(3)
+    fields["condition_dilated_convolutions"].setChecked(False)
+    fields["branch_loss_reduction"].setCurrentIndex(
+        fields["branch_loss_reduction"].findData("mean")
+    )
+    options = Workspace(workspace.directory).training_options()
+    assert (
+        options["hypernetwork_mode"] == "low_rank" and options["hypernetwork_rank"] == 3
+    )
+    assert options["condition_dilated_convolutions"] is False
+    assert options["branch_loss_reduction"] == "mean"
+    fields["hypernetwork_mode"].setCurrentIndex(
+        fields["hypernetwork_mode"].findData("full")
+    )
+    assert not fields["hypernetwork_rank"].isEnabled()
+    assert not fields["condition_dilated_convolutions"].isChecked()
+    assert fields["branch_loss_reduction"].currentData() == "mean"
+    for preset in ("HyperWaveNet", "HyperA2"):
+        fields["hypernetwork_recipe"].setCurrentIndex(
+            fields["hypernetwork_recipe"].findData(preset)
+        )
+        window.apply_training_preset()
+        assert workspace.training_options() == training_preset(preset)
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    for key in (
+        "hypernetwork_mode",
+        "hypernetwork_rank",
+        "condition_dilated_convolutions",
+        "branch_loss_reduction",
+    ):
+        assert not fields[key].isEnabled()
+
+
+@pytest.mark.parametrize("preset", ["HyperA2", "HyperWaveNet"])
+def test_existing_044_job_resumes_only_with_matching_generation(workspace, preset):
+    workspace.preferences["advanced_parametric"] = training_preset(preset)
+    ready(workspace)
+    job = training.make_job(workspace)
+    spec = read_json(job / "spec.json")
+    for key in (
+        "hypernetwork_mode",
+        "hypernetwork_rank",
+        "condition_dilated_convolutions",
+        "branch_loss_reduction",
+    ):
+        spec["preferences"]["advanced_training"].pop(key)
+    spec["fingerprint"] = workspace.fingerprint(include_hypernetwork_controls=False)
+    atomic_write_json(job / "spec.json", spec)
+    (job / "resume-0.ckpt").touch()
+    assert training.job_can_resume(workspace, job)
+    for key, value in dict(
+        hypernetwork_mode="low_rank" if preset == "HyperA2" else "full",
+        condition_dilated_convolutions=(preset != "HyperA2"),
+        branch_loss_reduction="mean" if preset == "HyperA2" else "sum",
+    ).items():
+        workspace.preferences["advanced_parametric"] = {
+            **training_preset(preset),
+            key: value,
+        }
+        assert not training.job_can_resume(workspace, job)

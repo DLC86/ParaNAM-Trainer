@@ -20,6 +20,14 @@ The base **Learning Rate** and **Hypernetwork Learning Rate** can be set
 independently. Both use the selected exponential LR decay. Hypernetwork controls
 apply only to parametric training.
 
+**Hypernetwork weight mode** selects Full or Low rank independently of
+**Condition dilated convolution kernels on knobs**. All four combinations are supported.
+**Rank (low-rank mode)** is editable from 1 to 8 when Low rank is selected;
+the effective rank also depends on each matrix's dimensions. When dilated
+convolutions are not conditioned, their base weights remain trainable and shared
+across settings; their biases may still be conditioned. **Full/Lite loss reduction** independently selects Sum or Mean
+for training; it does not change the displayed validation ESR reduction.
+
 **Gradient clipping** enables norm clipping; **Maximum gradient norm** specifies
 its positive limit. **Check NaN/Inf gradients** skips an entire optimizer update
 when any gradient is nonfinite, preserving weights and optimizer moments.
@@ -36,6 +44,9 @@ resume with matching original settings and optimizer state.
 
 Selecting a preset restores its advanced settings and batch size. Values can
 then be customized and remain saved in the project.
+All differences between the two presets are visible controls. A preset does not
+activate additional hidden model behavior. Hidden-layer size, activation, audio
+topologies, validation and compilation settings are common to both recipes.
 
 | Setting | HyperA2 | HyperWaveNet (Phillip Self) |
 | --- | --- | --- |

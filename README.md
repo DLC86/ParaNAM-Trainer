@@ -17,6 +17,9 @@ an intermediate **Export best PNAM/NAM** button during training, independent bas
 hypernetwork learning rates, optional gradient clipping/NaN/Inf checks, and
 HyperA2 / HyperWaveNet (Phillip Self) recipe presets. See
 [training controls and presets](docs/training-controls.md).
+Weight-delta mode (Full/Low rank), rank, conditioning of dilated convolutions,
+and Full/Lite training-loss reduction (Sum/Mean) are independently editable;
+presets only initialize the visible settings.
 
 Download the package for your computer from this repository's installer artifacts
 or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,
