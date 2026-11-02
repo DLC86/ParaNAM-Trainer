@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QProgressBar,
     QPlainTextEdit,
+    QToolButton,
 )
 
 from nam.capture.audio import list_devices
@@ -145,7 +146,7 @@ class WizardWindow(QMainWindow):
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         rail.addWidget(label("ParaNAM", "brand"))
-        rail.addWidget(label("TRAINER  /  0.4.0", "eyebrow"))
+        rail.addWidget(label("TRAINER  /  0.4.1", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -549,9 +550,58 @@ class WizardWindow(QMainWindow):
         )
         self.accelerator.addItem("CPU — works on every supported computer", "cpu")
         form.addRow("Epochs per model / round", self.epochs)
-        form.addRow("Batch size", self.batch_size)
         form.addRow("Training device", self.accelerator)
         box.addLayout(form)
+        self.advanced_toggle = QToolButton()
+        self.advanced_toggle.setText("Advanced training settings")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        box.addWidget(self.advanced_toggle)
+        self.advanced_panel = QWidget()
+        self.advanced_panel.setObjectName("advancedTraining")
+        advanced_form = QFormLayout(self.advanced_panel)
+        advanced_form.setContentsMargins(0, 0, 0, 0)
+        advanced_form.addRow("Batch Size", self.batch_size)
+        self.advanced_fields = {}
+        for key, caption, initial, low, high, decimals in (
+            ("learning_rate", "Learning Rate", 0.002, 1e-9, 10, 9),
+            ("lr_decay", "LR Decay", 0.994, 0, 1, 6),
+            ("ny", "NY (samples)", 8192, 1, 1048576, 0),
+            ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
+            ("weight_decay", "Weight Decay", 3.17e-7, 0, 10, 12),
+        ):
+            field = QSpinBox() if key == "ny" else QDoubleSpinBox()
+            if decimals:
+                field.setDecimals(decimals)
+                field.setSingleStep(0.001 if key != "weight_decay" else 1e-7)
+            field.setRange(low, high)
+            field.setValue(initial)
+            self.advanced_fields[key] = field
+            advanced_form.addRow(caption, field)
+            field.valueChanged.connect(self.save_preferences)
+        fit = QCheckBox("Fit MRSTFT")
+        fit.setChecked(True)
+        self.advanced_fields["fit_mrstft"] = fit
+        advanced_form.insertRow(4, fit)
+        fit.toggled.connect(self.advanced_fields["mrstft_weight"].setEnabled)
+        fit.toggled.connect(self.save_preferences)
+        self.advanced_fields["lr_decay"].setToolTip(
+            "Exponential learning-rate multiplier after each epoch."
+        )
+        self.advanced_fields["ny"].setToolTip(
+            "Number of training output samples per window. Validation keeps its independent window."
+        )
+        box.addWidget(self.advanced_panel)
+        self.advanced_panel.hide()
+        self.advanced_toggle.toggled.connect(self.advanced_panel.setVisible)
+        self.advanced_toggle.toggled.connect(
+            lambda expanded: self.advanced_toggle.setArrowType(
+                Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+            )
+        )
         box.addWidget(
             label(
                 "Full and Lite are trained together. Pause stops at the next batch boundary; resume restarts the interrupted epoch from its last complete checkpoint.",
@@ -607,6 +657,17 @@ class WizardWindow(QMainWindow):
         self.epochs.valueChanged.connect(self.save_preferences)
         self.batch_size.valueChanged.connect(self.save_preferences)
         self.accelerator.currentIndexChanged.connect(self.save_preferences)
+
+    def load_advanced_options(self, kind=None):
+        options = self.workspace.training_options(kind)
+        for key, field in self.advanced_fields.items():
+            field.blockSignals(True)
+            if isinstance(field, QCheckBox):
+                field.setChecked(options[key])
+            else:
+                field.setValue(options[key])
+            field.blockSignals(False)
+        self.advanced_fields["mrstft_weight"].setEnabled(options["fit_mrstft"])
 
     def busy(self):
         return (
@@ -733,6 +794,7 @@ class WizardWindow(QMainWindow):
             ):
                 field.setValue(prefs[key])
             self.batch_size.setValue(workspace.training_batch_size())
+            self.load_advanced_options()
             self.corners.setChecked(prefs["corners"])
             self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
             self.signal_mode.setCurrentIndex(
@@ -1232,11 +1294,16 @@ class WizardWindow(QMainWindow):
         next_type = self.capture_kind.currentData()
         batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
         prefs[batch_key] = self.batch_size.value()
+        prefs["advanced_" + previous_type] = {
+            key: field.isChecked() if isinstance(field, QCheckBox) else field.value()
+            for key, field in self.advanced_fields.items()
+        }
         if previous_type != next_type:
             next_key = "static_batch_size" if next_type == "static" else "batch_size"
             self.batch_size.blockSignals(True)
             self.batch_size.setValue(prefs[next_key])
             self.batch_size.blockSignals(False)
+            self.load_advanced_options(next_type)
         prefs.update(
             capture_type=self.capture_kind.currentData(),
             mode=(

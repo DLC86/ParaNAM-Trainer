@@ -86,7 +86,29 @@ def job_can_resume(workspace, job):
     if spec.get("fingerprint") != workspace.fingerprint(
         batch_size=spec.get("preferences", {}).get("batch_size")
     ):
-        return False
+        # Older jobs did not fingerprint these controls. Resume only if their
+        # actual recipe matches the options currently shown in the application.
+        options = workspace.training_options()
+        model = spec.get("model", {})
+        same_recipe = (
+            spec.get("preferences", {}).get("advanced_training") is None
+            and model.get("optimizer", {}).get("lr") == options["learning_rate"]
+            and model.get("optimizer", {}).get("weight_decay")
+            == options["weight_decay"]
+            and model.get("lr_scheduler", {}).get("kwargs", {}).get("gamma")
+            == options["lr_decay"]
+            and model.get("loss", {}).get("mrstft_weight")
+            == (options["mrstft_weight"] if options["fit_mrstft"] else None)
+            and all(
+                item.get("ny") == options["ny"]
+                for item in spec.get("data", {}).get("train", [])
+            )
+        )
+        if not same_recipe or spec.get("fingerprint") != workspace.fingerprint(
+            batch_size=spec.get("preferences", {}).get("batch_size"),
+            include_advanced=False,
+        ):
+            return False
     member = progress.get("member", 0)
     return (
         (Path(job) / f"resume-{member}.ckpt").is_file()
@@ -149,7 +171,12 @@ def make_job(workspace, resume=False):
             round_index = read_json(previous / "spec.json")["round"] + 1
         job = root / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
         job.mkdir()
-        prefs = {**workspace.preferences, "batch_size": workspace.training_batch_size()}
+        options = workspace.training_options()
+        prefs = {
+            **workspace.preferences,
+            "batch_size": workspace.training_batch_size(),
+            "advanced_training": options,
+        }
         data = build_data_config(workspace.project)
         if not data["validation"]:
             raise ValueError(
@@ -163,6 +190,15 @@ def make_job(workspace, resume=False):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
+        model["optimizer"].update(
+            lr=options["learning_rate"], weight_decay=options["weight_decay"]
+        )
+        model["lr_scheduler"]["kwargs"]["gamma"] = options["lr_decay"]
+        model["loss"]["mrstft_weight"] = (
+            options["mrstft_weight"] if options["fit_mrstft"] else None
+        )
+        for entry in data["train"]:
+            entry["ny"] = options["ny"]
         learning = build_hyper_learning_config(workspace.project)
         learning["export_checkpoints"] = False
         learning["torch_compile"] = {

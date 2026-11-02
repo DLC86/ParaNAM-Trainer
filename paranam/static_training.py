@@ -30,7 +30,7 @@ def model_config(project, size=None):
     return dict(
         net=dict(name="PackedWaveNet", config=config),
         loss=dict(val_loss="esr", mrstft_weight=0.0005),
-        optimizer=dict(lr=0.002, weight_decay=3.17e-7),
+        optimizer=dict(lr=0.004, weight_decay=3.17e-7),
         lr_scheduler=dict(**{"class": "ExponentialLR"}, kwargs=dict(gamma=0.994)),
     )
 

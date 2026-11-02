@@ -59,6 +59,9 @@ QLabel#metric { font-size: 30px; font-weight: 650; }
 QLabel#brand { font-size: 22px; font-weight: 750; color: #ff8b4b; }
 QPushButton { background: #292c38; border: 1px solid #3c4050; border-radius: 8px; padding: 10px 16px; font-weight: 600; }
 QPushButton:hover { background: #353a48; border-color: #74798c; }
+QToolButton { background: #292c38; border: 1px solid #3c4050; border-radius: 8px; padding: 8px 12px; font-weight: 600; }
+QToolButton:hover { background: #353a48; border-color: #74798c; }
+QWidget#advancedTraining { background: transparent; }
 QPushButton:disabled { color: #626677; background: #20222b; border-color: #292c38; }
 QPushButton#primary { background: #ff8b4b; color: #19140f; border: 1px solid #ff8b4b; }
 QPushButton#primary:hover { background: #ffa06d; }

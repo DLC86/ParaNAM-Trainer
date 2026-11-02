@@ -6,7 +6,7 @@ with the established recording, alignment and model code retained.
 
 ## Install and launch
 
-**[Download the 0.4.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.0-preview)**
+**[Download the 0.4.1 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.1-preview)**
 (sign in with an account that can access this private repository).
 
 Download the package for your computer from this repository's installer artifacts
@@ -78,7 +78,14 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
 4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
    epoch, best validation ESR, elapsed time and an estimate based on completed epoch
    durations. Static batch size defaults to 16, matching the official NAM trainer;
-   parametric defaults to 32. The two settings are saved independently.
+   parametric defaults to 32. Batch Size, Learning Rate, LR Decay, NY, Fit MRSTFT,
+   MRSTFT Weight and Weight Decay are inside **Advanced training settings**, collapsed
+   initially. Each capture type retains its own values. Static defaults follow A2
+   (LR 0.004), parametric defaults follow HyperWaveNet (LR 0.002); both use decay
+   0.994, NY 8192, MRSTFT enabled with weight 0.0005, and weight decay 3.17e-7.
+   NY controls training windows; validation retains its independent window. Changing
+   the recipe requires a new training run; batch size and device remain adjustable
+   when resuming.
    Epoch progress bars are also retained in the training details log. Parametric export is `models/round-N/ParaNAM_HyperA2.pnam`, containing both
    Full and Lite with Full as the playback default. Static batches export one standard
    A2 Full + Lite `SlimmableContainer` `.nam` per named item under `models/<run>/`, with its metadata and
