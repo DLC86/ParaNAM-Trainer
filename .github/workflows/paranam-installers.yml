@@ -88,7 +88,7 @@ jobs:
           else
             python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
           fi
-      - name: Upload tested installer directly to the private draft
+      - name: Upload tested installer directly to the release draft
         if: inputs.release_id != ''
         env:
           GH_TOKEN: ${{ github.token }}

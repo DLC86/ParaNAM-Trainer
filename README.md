@@ -10,7 +10,6 @@ The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
 **[Download the 0.4.4 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.4-preview)**
-(sign in with an account that can access this private repository).
 
 Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
 an intermediate **Export best PNAM/NAM** button during training, independent base and

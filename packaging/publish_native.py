@@ -1,4 +1,4 @@
-"""Upload tested native packages directly to a private draft, avoiding CI storage."""
+"""Upload tested native packages directly to a release draft, avoiding CI storage."""
 
 import json
 import os
@@ -17,7 +17,7 @@ def main():
     assert release_id.isdecimal()
     repo = json.loads(gh("api", f"repos/{repository}"))
     release = json.loads(gh("api", f"repos/{repository}/releases/{release_id}"))
-    assert repo["private"], "Direct installer publication is for the private trainer"
+    assert repo["full_name"].casefold() == repository.casefold(), "Repository mismatch"
     assert release["draft"] and release["prerelease"], "Expected a draft preview"
     assert release["target_commitish"] == os.environ["GITHUB_SHA"], "Source mismatch"
     tag = release["tag_name"]
