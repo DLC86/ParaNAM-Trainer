@@ -17,6 +17,9 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QPushButton,
     QCheckBox,
+    QComboBox,
+    QScrollArea,
+    QWidget,
 )
 
 
@@ -201,6 +204,7 @@ class LevelCalibrationDialog(QDialog):
     level_changed = Signal(object)
     send_calibrated = Signal(float)
     return_calibrated = Signal(float)
+    instrument_calibrated = Signal(float)
 
     def __init__(
         self,
@@ -212,10 +216,13 @@ class LevelCalibrationDialog(QDialog):
         frequency=1000.0,
         parent=None,
         channel_names=None,
+        instrument_channel=None,
+        instrument_name=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Send and return level calibration")
-        self.setMinimumWidth(680)
+        self.setWindowTitle("Send, return and instrument level calibration")
+        self.setMinimumSize(680, 500)
+        self.resize(760, 760)
         self.device, self.channels, self.blocksize = (
             device,
             (input_channel, output_channel),
@@ -223,7 +230,13 @@ class LevelCalibrationDialog(QDialog):
         )
         self.worker, self.send_measurement, self.last_measurement = None, None, None
         self._closing = False
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
         input_name, output_name = channel_names or (
             f"Input {input_channel}",
             f"Output {output_channel}",
@@ -268,8 +281,23 @@ class LevelCalibrationDialog(QDialog):
         )
         instruction.setWordWrap(True)
         layout.addWidget(instruction)
+        self.measure_input = QComboBox()
+        self.measure_input.addItem(f"Return: {input_name}", input_channel)
+        if instrument_channel is not None:
+            self.measure_input.addItem(
+                f"Instrument: {instrument_name or instrument_channel}",
+                instrument_channel,
+            )
+        layout.addWidget(self.measure_input)
+        instrument_instruction = QLabel(
+            "3. To calibrate Instrument, stop the sine and move the same measured cable directly to the instrument input. Select Instrument above, confirm the direct cable, restart the sine and apply instrument calibration. Keep its input gain unchanged afterwards. This reference is used by Play."
+            if instrument_channel is not None
+            else "Configure Instrument input in Project & routing to calibrate it here."
+        )
+        instrument_instruction.setWordWrap(True)
+        layout.addWidget(instrument_instruction)
         self.direct = QCheckBox(
-            "Cable connected directly from reamp output to selected return input"
+            "Cable connected directly from reamp output to the selected measurement input"
         )
         layout.addWidget(self.direct)
         self.meter = QLabel(
@@ -281,16 +309,26 @@ class LevelCalibrationDialog(QDialog):
         self.use_return.setEnabled(False)
         self.use_return.clicked.connect(self.apply_return)
         layout.addWidget(self.use_return)
+        self.use_instrument = QPushButton("Apply instrument calibration")
+        self.use_instrument.setEnabled(False)
+        self.use_instrument.clicked.connect(self.apply_instrument)
+        layout.addWidget(self.use_instrument)
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         close = QPushButton("Done")
         close.clicked.connect(self.reject)
-        layout.addWidget(close)
+        outer.addWidget(close)
         self.frequency.valueChanged.connect(self.update_tone)
         self.level.editingFinished.connect(self.update_tone)
         self.volts.valueChanged.connect(self.invalidate_voltage)
         self.direct.toggled.connect(self.update_return)
+        self.measure_input.currentIndexChanged.connect(self.change_measurement_input)
+
+    def change_measurement_input(self, *_):
+        self.last_measurement = None
+        self.direct.setChecked(False)
+        self.update_return()
 
     def update_tone(self, *_):
         try:
@@ -321,7 +359,8 @@ class LevelCalibrationDialog(QDialog):
             self.level_changed.emit(level)
             self.worker = ToneWorker(
                 self.device,
-                *self.channels,
+                self.measure_input.currentData(),
+                self.channels[1],
                 self.blocksize,
                 self.frequency.value(),
                 level,
@@ -332,6 +371,7 @@ class LevelCalibrationDialog(QDialog):
             self.worker.finished.connect(self.finished_tone)
             self.start.setEnabled(False)
             self.stop.setEnabled(True)
+            self.measure_input.setEnabled(False)
             self.worker.start()
         except ValueError as error:
             self.status.setText(str(error))
@@ -349,6 +389,7 @@ class LevelCalibrationDialog(QDialog):
         self.last_measurement = None
         self.start.setEnabled(True)
         self.stop.setEnabled(False)
+        self.measure_input.setEnabled(True)
         self.meter.setText("Sine stopped.")
         self.update_return()
         if self._closing:
@@ -357,15 +398,15 @@ class LevelCalibrationDialog(QDialog):
     def measured(self, result):
         self.last_measurement = result
         self.meter.setText(
-            "Clipping detected: lower the return input gain."
+            "Clipping detected: lower the selected input gain."
             if result.get("clipping")
             else (
                 "Audio stream lost samples. Increase the interface buffer."
                 if result.get("stream_error")
                 else (
-                    f"Return sine: {result['dbfs']:.3f} dBFS peak"
+                    f"Measured input sine: {result['dbfs']:.3f} dBFS peak"
                     if result["valid"]
-                    else "No clean sine detected on the selected return. Check the direct cable and input selection."
+                    else "No clean sine detected. Check the direct cable and selected measurement input."
                 )
             )
         )
@@ -406,13 +447,23 @@ class LevelCalibrationDialog(QDialog):
         )
 
     def update_return(self, *_):
-        self.use_return.setEnabled(self.return_ready())
+        ready = self.return_ready()
+        self.use_return.setEnabled(ready and self.measure_input.currentIndex() == 0)
+        self.use_instrument.setEnabled(ready and self.measure_input.currentIndex() == 1)
 
     def apply_return(self):
-        if self.return_ready():
+        if self.return_ready() and self.measure_input.currentIndex() == 0:
             reference = self.send_measurement[0] - self.last_measurement["dbfs"]
             self.return_calibrated.emit(reference)
             self.status.setText(f"Return calibrated: {reference:.3f} dBu at 0 dBFS.")
+
+    def apply_instrument(self):
+        if self.return_ready() and self.measure_input.currentIndex() == 1:
+            reference = self.send_measurement[0] - self.last_measurement["dbfs"]
+            self.instrument_calibrated.emit(reference)
+            self.status.setText(
+                f"Instrument calibrated: {reference:.3f} dBu at 0 dBFS. Used by Play."
+            )
 
     def reject(self):
         if self.worker:

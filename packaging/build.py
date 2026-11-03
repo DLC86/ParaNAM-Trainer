@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.4.4"
+VERSION = "0.5.0"
 
 
 def run(*args):
@@ -35,6 +35,9 @@ def main():
     installers = ROOT / "installers"
     installers.mkdir(exist_ok=True)
     if not args.skip_freeze:
+        from native_engine import build as build_playback
+
+        build_playback()
         if sys.platform in ("win32", "linux"):
             import torch
 

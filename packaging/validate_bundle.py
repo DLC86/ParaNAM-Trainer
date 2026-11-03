@@ -48,6 +48,71 @@ def validate_installer_configuration(executable, build_directory):
     print("Frozen installer helper streamed completion without opening a setup dialog")
 
 
+def validate_playback(executable, model):
+    report = model.parent / "playback-check.json"
+    result = subprocess.run(
+        [str(executable), "--playback-check", str(model), str(report)],
+        env=clean_environment(),
+        timeout=60,
+    )
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert result.returncode == 0 and data["ok"], data
+    assert "full" in data and "lite" in data
+    print(
+        "Frozen native playback engine rendered Full and Lite:", model.name, flush=True
+    )
+
+
+def validate_queue(executable, workspace, original_spec, build_directory):
+    """Exercise the frozen scheduler launching its own frozen training subprocess."""
+    import copy
+    from paranam.training_queue import TrainingQueue
+    from paranam.workspace import read_json
+    from nam.capture.project import atomic_write_json
+
+    queue = TrainingQueue(
+        Path(build_directory) / ("bundle-queue-" + uuid.uuid4().hex[:8])
+    )
+    entry = queue.add(workspace)
+    job = Path(entry["job"])
+    spec = read_json(job / "spec.json")
+    data = copy.deepcopy(original_spec["data"])
+
+    def diagnostic_paths(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in ("x_path", "y_path"):
+                    value[key] = str((workspace.directory / item).resolve())
+                else:
+                    diagnostic_paths(item)
+        elif isinstance(value, list):
+            for item in value:
+                diagnostic_paths(item)
+
+    diagnostic_paths(data)
+    spec.update(
+        data=data,
+        model=copy.deepcopy(original_spec["model"]),
+        learning=copy.deepcopy(original_spec["learning"]),
+    )
+    spec["learning"]["trainer_fit_kwargs"] = {}
+    atomic_write_json(job / "spec.json", spec)
+    report = queue.directory / "frozen-queue.json"
+    result = subprocess.run(
+        [str(executable), "--queue-check", str(queue.directory), str(report)],
+        env=clean_environment(),
+        timeout=180,
+    )
+    information = json.loads(report.read_text(encoding="utf-8"))
+    if result.returncode or not information["ok"]:
+        print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        raise RuntimeError(f"Frozen queue failed: {information}")
+    assert all(Path(path).is_file() for path in information["exports"])
+    print(
+        "Frozen queue launched and completed its own frozen training worker", flush=True
+    )
+
+
 def validate_training(executable, build_directory, gpu_runtime=False, device="cpu"):
     import numpy as np
     import torch
@@ -155,6 +220,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     if gpu_runtime and device == "auto":
         assert str(progress["device"]).startswith("cuda"), progress
     print("Frozen worker completed real HyperA2 Full/Lite training and metadata export")
+    validate_playback(executable, Path(progress["export"]))
+    if not gpu_runtime:
+        validate_queue(executable, workspace, spec, build_directory)
 
 
 def validate_gpu(executable, build_directory):
@@ -242,6 +310,7 @@ def validate_static(executable, build_directory):
         assert validation["validation_esr"] == validation["validation_esr_full"]
         assert validation["validation_esr_lite"] is not None
         assert validation["optimizer"] == "Adam"
+        validate_playback(executable, Path(path))
     print(
         "Frozen app trained, paused and resumed two independent static A2 models",
         flush=True,

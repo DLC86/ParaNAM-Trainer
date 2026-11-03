@@ -30,3 +30,9 @@ The Michroma title typeface is bundled under the SIL Open Font
 License 1.1; its full license is in paranam/assets/Michroma-OFL.txt.
 
 The TTS logo is included from NAM On Steroids and belongs to The Tone Scientist.
+
+The bundled native playback library uses the NAM Parametric Plugin DSP engine
+at commit 03b423f336dbfb4f86308e65445f468e2e00ad46, its pinned parametric NAM Core,
+AudioDSPTools and Eigen dependencies. Their license files are included in the
+application's licenses/playback-* folders. The library does not link JUCE; the
+desktop interface and audio streaming use Qt and PortAudio as before.

@@ -201,7 +201,7 @@ def job_can_resume(workspace, job):
     )
 
 
-def make_job(workspace, resume=False):
+def make_job(workspace, resume=False, job_directory=None):
     from filelock import FileLock
     from nam.capture.export import (
         build_data_config,
@@ -245,8 +245,10 @@ def make_job(workspace, resume=False):
                     )
             # Restarting a complete epoch allows a different physical batch size or
             # device after OOM/device failure, while keeping model/data checks strict.
-            for split in ("train_dataloader", "val_dataloader"):
-                spec["learning"][split]["batch_size"] = workspace.training_batch_size()
+            spec["learning"]["train_dataloader"][
+                "batch_size"
+            ] = workspace.training_batch_size()
+            spec["learning"]["val_dataloader"]["batch_size"] = 1
             spec["preferences"]["batch_size"] = workspace.training_batch_size()
             spec["preferences"]["device"] = workspace.preferences["device"]
             spec["learning"]["trainer"]["accelerator"] = workspace.preferences["device"]
@@ -258,8 +260,14 @@ def make_job(workspace, resume=False):
         round_index = 0
         if previous and job_progress(previous).get("status") == "needs_captures":
             round_index = read_json(previous / "spec.json")["round"] + 1
-        job = root / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
-        job.mkdir()
+        if job_directory is None:
+            job = root / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
+            job.mkdir()
+        else:
+            job = Path(job_directory).resolve()
+            if job.exists() and any(p.name != "project" for p in job.iterdir()):
+                raise ValueError("The training instance folder is not empty")
+            job.mkdir(parents=True, exist_ok=True)
         options = workspace.training_options()
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
@@ -1114,7 +1122,10 @@ def run_job(job):
                     (min(float(v) for v in best) if best else float("inf"), member)
                 )
             chosen = min(quality)[1]
-            export = workspace.directory / "models" / f"round-{spec['round'] + 1}"
+            export = (
+                Path(spec.get("models_directory", str(workspace.directory / "models")))
+                / f"round-{spec['round'] + 1}"
+            )
             export.mkdir(parents=True, exist_ok=True)
             source = job / f"member-{chosen}" / "model_parametric.pnam"
             if not source.exists():

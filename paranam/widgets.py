@@ -69,6 +69,7 @@ QWidget#advancedTraining { background: transparent; }
 QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2c; }
 QPushButton#primary { background: #bf0000; color: #ffffff; border: 1px solid #bf0000; }
 QPushButton#primary:hover { background: #d51919; }
+QPushButton#source:checked { background: #bf0000; color: #ffffff; border-color: #bf0000; }
 QPushButton#primary:disabled { background: #343434; color: #999999; border-color: #343434; }
 QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 10px; color: #969696; }
 QPushButton#step:checked { color: #f0f0f0; background: #2b2b2b; border: 1px solid #bf0000; }
@@ -88,6 +89,9 @@ QCheckBox { spacing: 8px; padding: 3px; }
 QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #686868; border-radius: 4px; background: #1f1f1f; }
 QCheckBox::indicator:checked { background: #bf0000; border-color: #bf0000; }
 QToolTip { background: #2d2d2d; color: #f0f0f0; border: 1px solid #686868; padding: 6px; }
+QTabWidget::pane { border: 1px solid #343434; background: #171717; }
+QTabBar::tab { background: #242424; color: #b8b8b8; padding: 8px 16px; border: 1px solid #343434; }
+QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #bf0000; }
 """
 
 

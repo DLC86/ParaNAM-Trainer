@@ -4,6 +4,7 @@ import copy
 import os
 import re
 import time
+from pathlib import Path
 
 from nam.capture.project import atomic_write_json
 
@@ -195,12 +196,12 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", capture["name"]).rstrip(" .")
             or "Capture"
         )
-        target = (
-            workspace.directory
-            / "models"
-            / job.name
-            / f"{member + 1:03d}-{safe_name}.nam"
+        export_root = (
+            Path(spec["models_directory"])
+            if spec.get("models_directory")
+            else workspace.directory / "models" / job.name
         )
+        target = export_root / f"{member + 1:03d}-{safe_name}.nam"
         atomic_write_json(target, model)
         exports.append(str(target))
         completed.append(member)

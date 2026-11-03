@@ -13,6 +13,16 @@ for package in ("nam", "paranam", "pytorch_lightning", "lightning_fabric", "libr
 for package in ("pytorch_lightning", "lightning_fabric"):
     data += collect_data_files(package, includes=["__about__.py", "__version__.py"], include_py_files=True)
 binaries = []
+binaries += collect_dynamic_libs("paranam")
+runtime = root / "external" / "playback-runtime"
+for path, target in (
+    (runtime / "LICENSE", "licenses/playback-plugin"),
+    (runtime / "THIRD-PARTY-NOTICES.md", "licenses/playback-plugin"),
+    (runtime / "external/nam_core_parametric/LICENSE", "licenses/playback-nam-core"),
+    (runtime / "external/AudioDSPTools/LICENSE", "licenses/playback-audio-dsp"),
+    (runtime / "external/nam_core_parametric/Dependencies/eigen/COPYING.MPL2", "licenses/playback-eigen"),
+):
+    data.append((str(path), target))
 for package in ("torch", "scipy", "numpy"):
     binaries += collect_dynamic_libs(package)
 try:
@@ -49,7 +59,7 @@ bundle = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=False,
 if sys.platform == "darwin":
     app = BUNDLE(bundle, name="ParaNAM Trainer.app", bundle_identifier="com.dlc86.paranamtrainer",
                  icon=str(root / "packaging" / "icon.icns"),
-                 info_plist={"CFBundleShortVersionString":"0.4.4", "CFBundleVersion":"0.4.4",
+                 info_plist={"CFBundleShortVersionString":"0.5.0", "CFBundleVersion":"0.5.0",
                              "NSMicrophoneUsageDescription":"Record your rig and timing loopback to create an amp model.",
                              "NSHighResolutionCapable":True})
 

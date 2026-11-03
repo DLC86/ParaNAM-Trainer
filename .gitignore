@@ -156,3 +156,4 @@ packaging/icon.png
 !paranam/assets/*.wav
 !packaging/ParaNAM.spec
 paranam/assets/gpu-*.json
+paranam/native/

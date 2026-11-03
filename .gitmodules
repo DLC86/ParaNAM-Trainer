@@ -1,0 +1,3 @@
+[submodule "external/playback-runtime"]
+	path = external/playback-runtime
+	url = https://github.com/DLC86/NamParametricPlugin.git

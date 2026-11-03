@@ -151,6 +151,9 @@ class AudioSettingsModel(_BaseModel):
     input_device: _Optional[str] = None
     output_channel: int = 1
     input_channel: int = 1
+    instrument_input_channel: _Optional[int] = None
+    monitor_output_left: _Optional[int] = None
+    monitor_output_right: _Optional[int] = None
     # Optional second I/O pair (on the same devices) wired as a direct loopback: a copy
     # of the capture playback (timing blips and input audio alike) goes out
     # ``loopback_output_channel`` and is patched straight back into

@@ -9,7 +9,16 @@ with the established recording, alignment and model code retained.
 The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.4.4 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.4.4-preview)**
+**[Download the 0.5.0 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.0-preview)**
+
+Version 0.5.0 adds a persistent **Training queue** and **Play** screen. Each Train
+click creates a separate instance with frozen audio, metadata and training settings.
+Edit or capture another project while the queue runs, reorder waiting jobs, and
+pause/resume individual instances independently of the open project. Metadata
+defaults now live in Train & export. Project & routing also configures Instrument
+input and stereo Monitor outputs. Calibrate Instrument using the measured sine
+cable, then play static or parametric models and compare the real Gear / Model
+through the same monitoring route. [Workflow and playback details](docs/workflow-0.5.0.md).
 
 Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
 an intermediate **Export best PNAM/NAM** button during training, independent base and
@@ -86,9 +95,9 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    the route starts from the last recorded setting; active-learning suggestions
    follow the same rule. A deterministic nearest-neighbour route plus bounded
    2-opt improves the route without changing capture IDs or training data order.
-4. **Train & export.** Set epochs, batch size and automatic/CPU execution. See current
-   epoch, best Full validation ESR, elapsed time and an estimate based on completed epoch
-   durations. Static batch size defaults to 16, matching the official NAM trainer;
+4. **Train & export.** Set metadata, epochs, batch size and automatic/CPU execution.
+   Train creates a separate instance in the queue. Static batch size defaults to
+   16, matching the official NAM trainer;
    both static and parametric modes default to batch 16. Optimizer (Adam by default,
    or AdamW), Batch Size, Learning Rate, LR Decay, NY, Fit MRSTFT, MRSTFT Weight and
    Weight Decay are inside **Advanced training settings**, initially collapsed.
@@ -103,13 +112,25 @@ are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
    is disabled, preserving capture output levels across control settings.
    Changing the recipe requires a new run; batch size and device can be changed
    when resuming.
-   Epoch progress bars are also retained in the training details log. Parametric export is `models/round-N/ParaNAM_HyperA2.pnam`, containing both
+   Parametric export is `models/<instance>/round-N/ParaNAM_HyperA2.pnam`, containing both
    Full and Lite with Full as the playback default. Static batches export one standard
    A2 Full + Lite `SlimmableContainer` `.nam` per named item under `models/<run>/`, with its metadata and
    send/return dBu calibration. Channel selectors use driver labels, and buffer
    choices come from the driver: 2048 samples is selected when available, otherwise
    its highest supported value. When an API exposes no names or sizes, the UI says
    so and uses its driver-managed buffer instead of offering invented choices.
+
+5. **Training queue.** Start waiting instances, pause/stop/resume a selected job,
+   reorder waiting jobs or remove rows. Completed jobs remain visible. The queue
+   owns epoch progress, Full ESR, elapsed/remaining time, the ESR chart, training
+   log and intermediate best-model export. Resume uses the instance's own saved
+   data/settings; edit its resume batch size/device here after a recoverable error.
+   Other projects can be edited and captured while training continues.
+6. **Play.** Load an exported or imported static/parametric model, select Full/Lite
+   and adjust its controls. Instrument input feeds the model and real reamp path;
+   Gear/Model switches the stereo monitoring source. Instrument calibration is
+   applied alongside model and send/return calibration. Playback uses a separate
+   driver-reported buffer and explicit Start/Stop.
 
 **Back** and the step sidebar let you revisit settings. Drafts are saved. A changed
 capture plan is confirmed before recordings are archived into `history/`; they are
@@ -189,7 +210,7 @@ batch boundary; it is not interrupted inside a CUDA kernel.
 
 An atomic rolling checkpoint is saved initially and after every complete epoch,
 so unexpected training errors and process interruption also leave a recovery point.
-Fix the error and choose **Resume training**; batch size may be lowered after OOM,
+Fix the error and choose **Resume** on that instance in Training queue; batch size may be lowered after OOM,
 or the execution device changed. Older jobs with a complete native Lightning
 checkpoint can be recovered even if they have no ParaNAM resume file. Corrupt or
 partial-epoch checkpoints are not used. The window can close safely after Pause.
@@ -200,7 +221,7 @@ training log. ETA covers the current round's training, not future manual capture
 
 ## GPU training throughput
 
-New projects default to batch **32**, matching the reference HyperWaveNet recipe;
+The HyperA2 preset defaults to batch **16**; the reference HyperWaveNet preset uses **32**;
 existing projects keep their chosen batch. The log and training status show the
 actual device, batch size and batches per epoch. CUDA data transfers use pinned
 host memory. Both Full and Lite are still trained and exported together.

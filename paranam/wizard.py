@@ -1,4 +1,4 @@
-"""Four-step desktop workflow; audio and training never block the UI thread."""
+"""Six-screen desktop workflow; audio and training never block the UI thread."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QToolButton,
+    QTabWidget,
 )
 
 from nam.capture.audio import list_devices
@@ -70,6 +71,9 @@ from . import training
 from .audio_devices import capabilities
 from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 from .signals import asset_path
+from .queue_ui import QueueActions
+from .play_ui import PlayActions
+from .queue_controller import QueueController
 
 
 def label(text, style=None):
@@ -106,7 +110,7 @@ def duration(seconds):
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes:02d}:{seconds:02d}"
 
 
-class WizardWindow(QMainWindow):
+class WizardWindow(QueueActions, PlayActions, QMainWindow):
     def __init__(self):
         super().__init__()
         load_font()
@@ -115,6 +119,21 @@ class WizardWindow(QMainWindow):
         self.resize(1260, 840)
         self.setMinimumSize(1000, 700)
         self.settings = QSettings("DLC86", "ParaNAM Trainer")
+        import os
+
+        default_queue = (
+            Path(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppLocalDataLocation
+                )
+            )
+            / "training-queue"
+        )
+        if self.settings.format() == type(self.settings).Format.IniFormat:
+            default_queue = Path(self.settings.fileName()).parent / "training-queue"
+        queue_root = Path(os.environ.get("PARANAM_QUEUE_ROOT", str(default_queue)))
+        self.queue_controller = QueueController(queue_root, self)
+        self.selected_job_id = None
         self.workspace = None
         self.session = None
         self.worker = None
@@ -129,6 +148,8 @@ class WizardWindow(QMainWindow):
         self._static_edit_id = None
         self._capture_table_kind = None
         self._build()
+        self.queue_controller.changed.connect(self.refresh_training)
+        self.queue_controller.failed.connect(self.notify_error)
         self._refresh_recent()
         self.refresh_devices()
         self.timer = QTimer(self)
@@ -163,7 +184,7 @@ class WizardWindow(QMainWindow):
         brand.addWidget(self.shop_button)
         brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
         rail.addLayout(brand)
-        rail.addWidget(label("VERSION  /  0.4.4", "eyebrow"))
+        rail.addWidget(label("VERSION  /  0.5.0", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -172,6 +193,8 @@ class WizardWindow(QMainWindow):
                 "02   Controls & plan",
                 "03   Capture your rig",
                 "04   Train & export",
+                "05   Training queue",
+                "06   Play",
             )
         ):
             step = button(text, lambda checked=False, i=index: self.navigate(i))
@@ -194,14 +217,21 @@ class WizardWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.page_contents = []
         for index, builder in enumerate(
-            (self._welcome, self._controls, self._capture, self._training)
+            (
+                self._welcome,
+                self._controls,
+                self._capture,
+                self._training,
+                self._queue,
+                self._play,
+            )
         ):
             page = QWidget()
             layout = QVBoxLayout(page)
             layout.setContentsMargins(0, 0, 10, 0)
             layout.setSpacing(20)
             builder(layout)
-            if index != 2:
+            if index not in (2, 4):
                 layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -215,6 +245,8 @@ class WizardWindow(QMainWindow):
         self.next_button = button("Next →", self.next, True)
         footer.addWidget(self.back_button)
         footer.addWidget(self.footer_note, 1)
+        footer.addWidget(self.play_action_bar)
+        self.play_action_bar.hide()
         footer.addWidget(self.next_button)
         content.addLayout(footer)
         root.addWidget(right, 1)
@@ -266,6 +298,14 @@ class WizardWindow(QMainWindow):
         self.loop_input.setCurrentIndex(1)
         form.addRow("Output → reamp / rig", self.output_channel)
         form.addRow("Input ← load box / microphone", self.input_channel)
+        self.instrument_input, self.monitor_left, self.monitor_right = [
+            QComboBox() for _ in range(3)
+        ]
+        for combo in (self.instrument_input, self.monitor_left, self.monitor_right):
+            combo.addItem("Not configured", None)
+        form.addRow("Instrument input ← guitar", self.instrument_input)
+        form.addRow("Monitor out L → speakers / headphones", self.monitor_left)
+        form.addRow("Monitor out R → speakers / headphones", self.monitor_right)
         self.loop_enabled = QCheckBox(
             "Use a separate clean loopback for precise alignment"
         )
@@ -312,6 +352,16 @@ class WizardWindow(QMainWindow):
             spin.valueChanged.connect(self.save_calibration)
         box.addLayout(form)
         self.capture_level = OutputLevelEdit(0.0)
+        instrument_row = QFormLayout()
+        self.instrument_calibration = QCheckBox("Instrument input at 0 dBFS")
+        self.instrument_dbu = QDoubleSpinBox()
+        self.instrument_dbu.setRange(-200, 200)
+        self.instrument_dbu.setDecimals(3)
+        self.instrument_dbu.setSuffix(" dBu")
+        instrument_row.addRow(self.instrument_calibration, self.instrument_dbu)
+        box.addLayout(instrument_row)
+        self.instrument_calibration.toggled.connect(self.save_instrument_calibration)
+        self.instrument_dbu.valueChanged.connect(self.save_instrument_calibration)
         self.capture_level.editingFinished.connect(self.save_capture_level)
         attenuation_form = QFormLayout()
         attenuation_form.addRow(
@@ -332,6 +382,9 @@ class WizardWindow(QMainWindow):
             self.output_channel,
             self.loop_input,
             self.loop_output,
+            self.instrument_input,
+            self.monitor_left,
+            self.monitor_right,
         ):
             spin.currentIndexChanged.connect(self.save_audio)
         self.loop_enabled.toggled.connect(self.save_audio)
@@ -546,10 +599,12 @@ class WizardWindow(QMainWindow):
         layout.addWidget(label("TURN CAPTURES INTO AN INSTRUMENT", "eyebrow"))
         self.training_title = label("Train your HyperA2.", "title")
         layout.addWidget(self.training_title)
-        self.training_status = label(
-            "Complete the capture plan to unlock training.", "muted"
+        layout.addWidget(
+            label(
+                "Choose settings and metadata, then add a new independent training instance to the queue.",
+                "muted",
+            )
         )
-        layout.addWidget(self.training_status)
         self.training_settings, box = card("Training settings")
         form = QFormLayout()
         self.epochs = QSpinBox()
@@ -722,59 +777,123 @@ class WizardWindow(QMainWindow):
             self.gpu_setup_button = button("Add NVIDIA GPU support", self.configure_gpu)
             box.addWidget(self.gpu_setup_button)
             self.refresh_gpu_button()
+        layout.addWidget(self.metadata_card)
+        self.train_button = button("Train · add to queue", self.start_training, True)
+        layout.addWidget(self.train_button)
+        self.epochs.valueChanged.connect(self.save_preferences)
+        self.batch_size.valueChanged.connect(self.save_preferences)
+        self.accelerator.currentIndexChanged.connect(self.save_preferences)
+
+    def _queue(self, layout):
+        layout.setSpacing(8)
+        layout.addWidget(label("Training queue", "title"))
+        layout.addWidget(
+            label(
+                "Each row is an independent training instance. Reordering affects waiting jobs; removing a row keeps its models and checkpoints on disk.",
+                "muted",
+            )
+        )
+        self.queue_run_row = QHBoxLayout()
+        layout.addLayout(self.queue_run_row)
+        self.queue_table = QTableWidget(0, 7)
+        self.queue_table.setHorizontalHeaderLabels(
+            ["Order", "Project", "Created", "Model", "Status", "Epoch", "Full ESR"]
+        )
+        self.queue_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.queue_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.queue_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Interactive
+        )
+        self.queue_table.horizontalHeader().setStretchLastSection(True)
+        self.queue_table.setMinimumHeight(120)
+        self.queue_table.setMaximumHeight(230)
+        for column, width in enumerate((45, 120, 110, 90, 100, 65, 85)):
+            self.queue_table.setColumnWidth(column, width)
+        self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
+        layout.addWidget(self.queue_table, 1)
+        actions = QHBoxLayout()
+        self.resume_button = button("Resume", self.resume_training)
+        self.job_up = button("Move up", lambda: self.move_job(-1))
+        self.job_down = button("Move down", lambda: self.move_job(1))
+        self.remove_job_button = button("Remove from queue", self.remove_job)
+        self.capture_round_button = button(
+            "Capture next active-learning round", self.open_capture_round
+        )
+        for widget in (self.job_up, self.job_down, self.remove_job_button):
+            actions.addWidget(widget)
+        layout.addLayout(actions)
+        secondary_actions = QHBoxLayout()
+        secondary_actions.addWidget(self.capture_round_button)
+        layout.addLayout(secondary_actions)
+        self.resume_options_widget = QWidget()
+        resume_options = QHBoxLayout(self.resume_options_widget)
+        resume_options.setContentsMargins(0, 0, 0, 0)
+        self.resume_batch_size = QSpinBox()
+        self.resume_batch_size.setRange(1, 128)
+        self.resume_device = QComboBox()
+        self.resume_device.addItem("Automatic", "auto")
+        self.resume_device.addItem("CPU", "cpu")
+        resume_options.addWidget(label("Resume batch size"))
+        resume_options.addWidget(self.resume_batch_size)
+        resume_options.addWidget(label("Device"))
+        resume_options.addWidget(self.resume_device)
+        resume_options.addStretch()
+        layout.addWidget(self.resume_options_widget)
+        self.training_status = label("Add training from a project to begin.", "muted")
+        layout.addWidget(self.training_status)
         grid = QGridLayout()
         self.metrics = {}
         for index, (name, text) in enumerate(
             (
-                ("epoch", "CURRENT EPOCH"),
+                ("epoch", "EPOCH"),
                 ("esr", "BEST FULL ESR"),
                 ("elapsed", "ELAPSED"),
-                ("eta", "ESTIMATED REMAINING"),
+                ("eta", "REMAINING"),
             )
         ):
             frame, metric_layout = card(text)
+            metric_layout.setContentsMargins(12, 10, 12, 10)
             metric = label("—", "metric")
+            metric.setStyleSheet("font-size: 22px;")
             metric_layout.addWidget(metric)
             self.metrics[name] = metric
-            grid.addWidget(frame, index // 2, index % 2)
+            grid.addWidget(frame, 0, index)
         layout.addLayout(grid)
         self.train_progress = QProgressBar()
         self.train_progress.setRange(0, 1000)
         layout.addWidget(self.train_progress)
-        row = QHBoxLayout()
-        self.train_button = button("Train", self.start_training, True)
+        row = self.queue_run_row
+        self.queue_start_button = button("Start queue", self.run_queue, True)
         self.pause_button = button("Pause & save", self.pause_training)
         self.stop_button = button("Stop", self.stop_training)
         self.models_button = button("Open model folder", self.open_models)
-        row.addWidget(self.train_button)
+        row.addWidget(self.queue_start_button)
         row.addWidget(self.pause_button)
         row.addWidget(self.stop_button)
+        row.addWidget(self.resume_button)
         self.export_best_button = button("Export best model", self.export_best_model)
         row.addWidget(self.export_best_button)
         row.addStretch()
-        row.addWidget(self.models_button)
-        layout.addLayout(row)
+        actions.addWidget(self.models_button)
         self.export_status = label("", "muted")
         layout.addWidget(self.export_status)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.details.setMaximumHeight(180)
-        self.details.setVisible(False)
-        layout.addWidget(
-            button(
-                "Show / hide training details",
-                lambda: self.details.setVisible(not self.details.isVisible()),
-            )
-        )
-        layout.addWidget(self.details)
         from .esr_chart import ESRChart
 
         self.esr_chart = ESRChart()
-        layout.addWidget(self.esr_chart)
-        self.epochs.valueChanged.connect(self.save_preferences)
-        self.batch_size.valueChanged.connect(self.save_preferences)
-        self.accelerator.currentIndexChanged.connect(self.save_preferences)
+        self.esr_chart.setMinimumHeight(140)
+        self.training_tabs = QTabWidget()
+        self.training_tabs.addTab(self.esr_chart, "ESR chart")
+        self.training_tabs.addTab(self.details, "Training log")
+        layout.addWidget(self.training_tabs, 1)
 
     def load_advanced_options(self, kind=None):
         options = self.workspace.training_options(kind)
@@ -847,18 +966,18 @@ class WizardWindow(QMainWindow):
         self.save_preferences()
 
     def busy(self):
-        return (
-            self.worker is not None and self.worker.isRunning()
-        ) or self.process is not None
+        return (self.worker is not None and self.worker.isRunning()) or getattr(
+            self, "play_worker", None
+        ) is not None
 
     def notify_error(self, error):
         QMessageBox.warning(self, "ParaNAM Trainer", str(error))
 
     def navigate(self, index):
-        if index > 0 and not self.workspace:
+        if index in (1, 2, 3, 5) and not self.workspace:
             self.notify_error("Create or open a project first.")
             return
-        if index >= 2 and not self.busy():
+        if index in (2, 3) and not self.busy():
             try:
                 if self.workspace.plan_changed() and not self.apply_plan():
                     return
@@ -866,8 +985,13 @@ class WizardWindow(QMainWindow):
                 self.notify_error(error)
                 return
         self.pages.setCurrentIndex(index)
+        listening = getattr(self, "play_worker", None) is not None
+        self.play_action_bar.setVisible(index == 5 or listening)
+        self.footer_note.setVisible(index != 5 and not listening)
         if index == 3:
             self.refresh_gpu_button()
+        if index == 5:
+            self.refresh_play_models()
         for i, step in enumerate(self.steps):
             step.setChecked(i == index)
         self.back_button.setEnabled(index > 0)
@@ -876,7 +1000,7 @@ class WizardWindow(QMainWindow):
         self.update_enabled()
 
     def back(self):
-        self.navigate(max(0, self.pages.currentIndex() - 1))
+        self.navigate(max(0, self.pages.currentIndex() - 1) if self.workspace else 0)
 
     def next(self):
         index = self.pages.currentIndex()
@@ -897,6 +1021,11 @@ class WizardWindow(QMainWindow):
             metadata = (
                 read_json(path / "capture_project.json", {}) if path.exists() else {}
             )
+            if metadata:
+                try:
+                    self.queue_controller.store.register_legacy(Workspace(path))
+                except (OSError, ValueError):
+                    pass  # A missing/older project remains visible in Recent projects.
             item = QListWidgetItem(f"{metadata.get('name') or path.name}\n{path}")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             self.recent.addItem(item)
@@ -941,7 +1070,7 @@ class WizardWindow(QMainWindow):
     def _attach(self, workspace):
         self.close_audio()
         self.workspace = workspace
-        self.job = training.current_job(workspace.directory)
+        self.queue_controller.store.register_legacy(workspace)
         self.project_label.setText(
             f"{workspace.project.name or workspace.directory.name}  ·  Saved locally"
         )
@@ -1004,6 +1133,9 @@ class WizardWindow(QMainWindow):
                 (self.output_channel, audio.output_channel),
                 (self.loop_input, audio.loopback_input_channel or 2),
                 (self.loop_output, audio.loopback_output_channel or 2),
+                (self.instrument_input, audio.instrument_input_channel),
+                (self.monitor_left, audio.monitor_output_left),
+                (self.monitor_right, audio.monitor_output_right),
             ):
                 index = field.findData(value)
                 if index < 0:
@@ -1015,6 +1147,11 @@ class WizardWindow(QMainWindow):
             if index >= 0:
                 self.buffer.setCurrentIndex(index)
             self.capture_level.set_level(prefs["capture_level_dbfs"])
+            instrument_level = prefs.get("instrument_level_dbu")
+            self.instrument_calibration.setChecked(instrument_level is not None)
+            self.instrument_dbu.setValue(
+                instrument_level if instrument_level is not None else 12.0
+            )
             calibration = prefs.get("pending_calibration", {})
             for check, field, value in (
                 (
@@ -1092,10 +1229,15 @@ class WizardWindow(QMainWindow):
                 (self.loop_input, result.inputs, 2),
                 (self.output_channel, result.outputs, 1),
                 (self.loop_output, result.outputs, 2),
+                (self.instrument_input, result.inputs, None),
+                (self.monitor_left, result.outputs, None),
+                (self.monitor_right, result.outputs, None),
             ):
                 previous = combo.currentData() or default
                 combo.blockSignals(True)
                 combo.clear()
+                if default is None:
+                    combo.addItem("Not configured", None)
                 for number, name in enumerate(names, 1):
                     combo.addItem(name, number)
                 combo.setCurrentIndex(max(0, combo.findData(previous)))
@@ -1130,6 +1272,9 @@ class WizardWindow(QMainWindow):
             input_device=info.name if info else None,
             output_device=info.name if info else None,
             input_channel=self.input_channel.currentData() or 1,
+            instrument_input_channel=self.instrument_input.currentData(),
+            monitor_output_left=self.monitor_left.currentData(),
+            monitor_output_right=self.monitor_right.currentData(),
             output_channel=self.output_channel.currentData() or 1,
             loopback_input_channel=(
                 self.loop_input.currentData() if self.loop_enabled.isChecked() else None
@@ -1152,7 +1297,19 @@ class WizardWindow(QMainWindow):
         self.close_audio()
         self._diagram()
         if self.workspace:
-            self.workspace.project.audio = self.audio_settings()
+            old = self.workspace.project.audio
+            updated = self.audio_settings()
+            if (old.host_api, old.input_device, old.instrument_input_channel) != (
+                updated.host_api,
+                updated.input_device,
+                updated.instrument_input_channel,
+            ):
+                self.workspace.preferences["instrument_level_dbu"] = None
+                self.instrument_calibration.blockSignals(True)
+                self.instrument_calibration.setChecked(False)
+                self.instrument_calibration.blockSignals(False)
+                self._refresh_play_calibration()
+            self.workspace.project.audio = updated
             self.workspace.save()
 
     def save_calibration(self, *_):
@@ -1175,6 +1332,22 @@ class WizardWindow(QMainWindow):
             self.workspace.project.output_level_dbu = returned
         self.workspace.save()
         self.refresh_training()
+
+    def save_instrument_calibration(self, *_):
+        if not self._loading and self.workspace and not self.busy():
+            self.workspace.preferences["instrument_level_dbu"] = (
+                self.instrument_dbu.value()
+                if self.instrument_calibration.isChecked()
+                else None
+            )
+            self.workspace.save()
+            self._refresh_play_calibration()
+
+    def apply_instrument_calibration(self, value):
+        self._apply_level_calibration(
+            self.instrument_calibration, self.instrument_dbu, value
+        )
+        self.save_instrument_calibration()
 
     def save_capture_level(self, *_):
         if self._loading or self.busy():
@@ -1229,6 +1402,8 @@ class WizardWindow(QMainWindow):
                     self.input_channel.currentText(),
                     self.output_channel.currentText(),
                 ),
+                instrument_channel=self.instrument_input.currentData(),
+                instrument_name=self.instrument_input.currentText(),
             )
             dialog.level_changed.connect(self._set_capture_level)
             dialog.send_calibrated.connect(
@@ -1241,6 +1416,7 @@ class WizardWindow(QMainWindow):
                     self.output_calibration, self.output_dbu, value
                 )
             )
+            dialog.instrument_calibrated.connect(self.apply_instrument_calibration)
             dialog.exec()
             self.workspace.preferences["calibration_frequency"] = (
                 dialog.frequency.value()
@@ -1879,74 +2055,6 @@ class WizardWindow(QMainWindow):
         if self.cancel_token:
             self.cancel_token.cancel()
 
-    def start_training(self):
-        if not self.workspace or self.busy():
-            return
-        if (
-            self.job
-            and training.job_progress(self.job).get("status") == "needs_captures"
-            and not self.workspace.training_ready()
-        ):
-            self.navigate(2)
-            return
-        self.save_preferences()
-        try:
-            if self.workspace.plan_changed():
-                raise ValueError(
-                    "Apply the modified controls/plan in step 2 before training."
-                )
-            self.close_audio()
-            existing = training.current_job(self.workspace.directory)
-            resume = bool(
-                existing
-                and training.job_progress(existing).get("status")
-                in ("paused", "running", "scoring", "failed")
-                and training.job_can_resume(self.workspace, existing)
-            )
-            if (
-                existing
-                and not resume
-                and training.job_progress(existing).get("status") == "paused"
-            ):
-                answer = QMessageBox.question(
-                    self,
-                    "Training settings changed",
-                    "The paused checkpoint belongs to different settings or captures. Start a new training run? The previous run will be kept.",
-                )
-                if answer != QMessageBox.StandardButton.Yes:
-                    return
-            self.job = training.make_job(self.workspace, resume=resume)
-            process = QProcess(self)
-            process.setWorkingDirectory(str(self.workspace.directory))
-            process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-            environment = QProcessEnvironment.systemEnvironment()
-            if not getattr(sys, "frozen", False):
-                import os
-
-                source_root = str(Path(__file__).resolve().parent.parent)
-                environment.insert(
-                    "PYTHONPATH",
-                    source_root + os.pathsep + environment.value("PYTHONPATH"),
-                )
-            process.setProcessEnvironment(environment)
-            process.readyReadStandardOutput.connect(
-                lambda: process.readAllStandardOutput()
-            )
-            process.finished.connect(self._training_finished)
-            process.errorOccurred.connect(self._process_error)
-            self.process = process
-            args = ["--train-worker", str(self.job)]
-            from . import gpu_runtime
-
-            if self.workspace.preferences["device"] != "cpu" and gpu_runtime.ready():
-                args.append("--gpu-runtime")
-            if not getattr(sys, "frozen", False):
-                args = ["-m", "paranam"] + args
-            process.start(sys.executable, args)
-            self.update_enabled()
-        except Exception as error:
-            self.notify_error(error)
-
     def configure_gpu(self):
         if self.busy():
             return
@@ -1961,16 +2069,12 @@ class WizardWindow(QMainWindow):
 
             self.gpu_setup_button.setVisible(not ready())
 
-    def pause_training(self):
-        if self.job and self.process:
-            training.command(self.job, "pause")
-            self.training_status.setText(
-                "Pausing at the next batch boundary. The interrupted epoch will restart from its last complete checkpoint."
-            )
-            self.pause_button.setEnabled(False)
-
     def export_best_model(self):
-        if not self.job or not self.process:
+        if (
+            not self.job
+            or not self.selected_job_id
+            or self.selected_job_id != self.queue_controller.active_id
+        ):
             return
         spec = read_json(self.job / "spec.json")
         extension = training.intermediate_export_extension(spec)
@@ -1981,8 +2085,7 @@ class WizardWindow(QMainWindow):
             else "NAM model (*.nam)"
         )
         default = (
-            self.workspace.directory
-            / "models"
+            Path(spec.get("models_directory", str(Path(spec["project"]) / "models")))
             / f"{self.job.name}-intermediate{extension}"
         )
         filename, _ = QFileDialog.getSaveFileName(
@@ -2001,56 +2104,55 @@ class WizardWindow(QMainWindow):
         )
         self.export_best_button.setEnabled(False)
 
-    def _process_error(self, _error):
-        if self.process is None:
-            return
-        message = self.process.errorString()
-        if self.process.state() == QProcess.ProcessState.NotRunning:
-            self.process.deleteLater()
-            self.process = None
-            if self.job:
-                progress = training.job_progress(self.job)
-                progress.update(status="failed", message=message)
-                atomic_write_json(self.job / "progress.json", progress)
-            self.refresh_training()
-            self.update_enabled()
-        self.notify_error(message)
-
-    def stop_training(self):
-        if self.job and self.process:
-            training.command(self.job, "stop")
-            self.training_status.setText(
-                "Stopping training. Captures and previous saved checkpoints will be kept."
-            )
-
-    def _training_finished(self, *_):
-        process = self.process
-        self.process = None
-        if process:
-            process.deleteLater()
-        if self.workspace:
-            self.workspace = Workspace(self.workspace.directory)
-            self.refresh_captures()
-        self.refresh_training()
-        self.update_enabled()
-        if self._close_after_pause:
-            self.close()
-
-    def refresh_training(self):
-        if not self.workspace:
-            return
-        self.job = training.current_job(self.workspace.directory)
+    def _render_job_progress(self):
         progress = training.job_progress(self.job)
         if not progress:
             self.esr_chart.set_history([])
+            entry = (
+                self.queue_controller.store.get(self.selected_job_id)
+                if self.selected_job_id
+                else None
+            )
+            self.training_status.setText(
+                (entry or {}).get("error")
+                or "This training instance has no progress data yet."
+            )
+            for metric in self.metrics.values():
+                metric.setText("—")
+            self.train_progress.setValue(0)
             self.update_enabled()
             return
         self.esr_chart.set_history(progress.get("esr_history", []))
         status = progress.get("status", "starting")
+        selected = (
+            self.queue_controller.store.get(self.selected_job_id)
+            if self.selected_job_id
+            else None
+        )
+        queue_state = selected["state"] if selected else status
+        if queue_state in (
+            "queued",
+            "paused",
+            "stopped",
+            "interrupted",
+            "pausing",
+            "stopping",
+        ):
+            status = queue_state
         message = progress.get("message", status.replace("_", " ").title())
+        if queue_state == "queued":
+            message = "Waiting in the training queue. This instance keeps its original settings and recordings."
+        elif queue_state in ("paused", "stopped", "interrupted"):
+            message = f"{queue_state.title()}. Resume belongs to this training instance, independently of the open project."
+        elif queue_state in ("pausing", "stopping"):
+            message = f"{queue_state.title()} at the next batch boundary. The last complete epoch is kept."
         if status == "failed" and progress.get("resume_available"):
             message += f"\nA checkpoint is available. Resume restarts epoch {progress.get('restart_epoch', 1)}. You can reduce batch size after a memory error."
-        if self.process is None and status in ("running", "scoring", "starting"):
+        if self.selected_job_id != self.queue_controller.active_id and status in (
+            "running",
+            "scoring",
+            "starting",
+        ):
             message = "Previous session interrupted. Resume from the last complete saved epoch."
         self.training_status.setText(
             f"Round {progress.get('round', 1)} · Model {min(progress.get('member', 0) + 1, progress.get('members', 1))} / {progress.get('members', 1)}\n{message}"
@@ -2066,7 +2168,8 @@ class WizardWindow(QMainWindow):
         self.metrics["esr"].setText("—" if esr is None else f"{esr:.5f}")
         live = (
             max(0, time.time() - progress.get("updated_at", time.time()))
-            if self.process is not None
+            if self.selected_job_id == self.queue_controller.active_id
+            and self.selected_job_id is not None
             else 0
         )
         self.metrics["elapsed"].setText(duration(progress.get("elapsed", 0) + live))
@@ -2109,116 +2212,3 @@ class WizardWindow(QMainWindow):
                 else f"Export failed: {result.get('error', 'Unknown error')}"
             )
         self.update_enabled()
-
-    def open_models(self):
-        if self.workspace:
-            directory = self.workspace.directory / "models"
-            directory.mkdir(exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
-
-    def update_enabled(self, *_):
-        active = self.busy()
-        present = self.workspace is not None
-        for widget in (self.new_button, self.open_button, self.recent, self.audio_card):
-            widget.setEnabled(not active)
-        for widget in (
-            self.control_card,
-            self.plan_card,
-            self.signal_card,
-            self.calibration_card,
-            self.training_settings,
-        ):
-            widget.setEnabled(present and not active)
-        self.route_button.setEnabled(
-            not active and self.device.currentData() is not None
-        )
-        self.record_button.setEnabled(
-            present
-            and not active
-            and self.rig_ready.isChecked()
-            and self.capture_table.currentRow() >= 0
-        )
-        self.rig_ready.setEnabled(present and not active)
-        self.cancel_button.setEnabled(self.worker is not None)
-        self.capture_table.setEnabled(not active)
-        self.metadata_card.setEnabled(not active)
-        self.static_card.setEnabled(not active)
-        if hasattr(self, "gpu_setup_button"):
-            self.gpu_setup_button.setEnabled(not active)
-        ready = present and self.workspace.training_ready()
-        self.next_button.setEnabled(
-            present and not active and (self.pages.currentIndex() != 2 or ready)
-        )
-        self.train_button.setEnabled(ready and not active)
-        self.pause_button.setEnabled(self.process is not None)
-        self.stop_button.setEnabled(self.process is not None)
-        self.export_best_button.setText(
-            "Export best PNAM"
-            if present and self.workspace.preferences["capture_type"] == "parametric"
-            else "Export best NAM"
-        )
-        request = read_json(self.job / "export-request.json", {}) if self.job else {}
-        result = read_json(self.job / "export-result.json", {}) if self.job else {}
-        self.export_best_button.setEnabled(
-            self.process is not None
-            and self.job is not None
-            and training.job_progress(self.job).get("best_esr") is not None
-            and (not request or request.get("id") == result.get("id"))
-        )
-        self.models_button.setEnabled(
-            present and (self.workspace.directory / "models").exists()
-        )
-        self.custom_button.setEnabled(
-            present and not active and self.signal_mode.currentData() == "custom"
-        )
-        self.train_button.setText("Train")
-        if (
-            self.job
-            and not active
-            and training.job_progress(self.job).get("status") == "needs_captures"
-        ):
-            self.train_button.setText(
-                "Train next round" if ready else "Capture suggested settings →"
-            )
-            self.train_button.setEnabled(present)
-        if self.job and not active and ready:
-            try:
-                status = training.job_progress(self.job).get("status")
-                if status in (
-                    "paused",
-                    "running",
-                    "scoring",
-                    "failed",
-                ) and training.job_can_resume(self.workspace, self.job):
-                    self.train_button.setText("Resume training")
-            except (ValueError, OSError):
-                pass
-        if present:
-            enabled = self.mode.currentData() == "active_learning" and not active
-            self.rounds.setEnabled(enabled)
-            self.additions.setEnabled(enabled)
-
-    def closeEvent(self, event):
-        if self.process is not None:
-            if not self._close_after_pause:
-                answer = QMessageBox.question(
-                    self,
-                    "Save training before closing?",
-                    "Pause at the next batch boundary and close? Resume will restart the interrupted epoch from the last complete checkpoint, even after restarting the computer.",
-                )
-                if answer != QMessageBox.StandardButton.Yes:
-                    event.ignore()
-                    return
-            self._close_after_pause = True
-            self.pause_training()
-            event.ignore()
-            return
-        if self.worker is not None:
-            self._close_after_pause = True
-            self.cancel_capture()
-            event.ignore()
-            return
-        if self.workspace:
-            self.workspace.save()
-        self.close_audio()
-        event.accept()

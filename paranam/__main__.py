@@ -79,6 +79,64 @@ def main():
                     progress.update(status="failed", message=str(error))
                     atomic_write_json(job / "progress.json", progress)
                     return 1
+    if args and args[0] == "--queue-check":
+        import json
+        import time
+        from PySide6.QtWidgets import QApplication
+        from .queue_controller import QueueController
+        from . import training
+
+        app = QApplication.instance() or QApplication([])
+        controller = QueueController(args[1])
+        controller.start()
+        deadline = time.monotonic() + 150
+        while time.monotonic() < deadline:
+            app.processEvents()
+            controller.tick()
+            if not controller.active_id and not any(
+                e["state"] == "queued" for e in controller.store.entries()
+            ):
+                break
+            time.sleep(0.02)
+        if controller.process:
+            controller.process.kill()
+            controller.process.waitForFinished(10000)
+        entries = controller.store.entries()
+        result = dict(
+            ok=bool(entries) and all(e["state"] == "completed" for e in entries),
+            states=[e["state"] for e in entries],
+            exports=[training.job_progress(e["job"]).get("export") for e in entries],
+        )
+        Path(args[2]).write_text(json.dumps(result), encoding="utf-8")
+        return 0 if result["ok"] else 1
+    if args and args[0] == "--playback-check":
+        import json
+        import numpy as np
+        from .playback import NativeModel, runtime_path
+
+        report = Path(args[2])
+        result = {"ok": False}
+        try:
+            for lite in (False, True):
+                model = NativeModel(args[1], block_size=128, lite=lite)
+                try:
+                    values = [p["default"] for p in model.info["controls"]]
+                    model.parameters(values)
+                    output = model.process(
+                        (0.05 * np.sin(np.arange(1024) * 0.03)).astype(np.float32)
+                    )
+                    if not np.isfinite(output).all():
+                        raise ValueError("Native model produced non-finite samples")
+                    result["lite" if lite else "full"] = dict(
+                        controls=len(values), peak=float(np.abs(output).max())
+                    )
+                finally:
+                    model.close()
+            result.update(ok=True, library=runtime_path().name)
+        except Exception as error:
+            result["error"] = str(error)
+        report.write_text(json.dumps(result), encoding="utf-8")
+        return 0 if result["ok"] else 1
     if args and args[0] == "--self-test":
         if sys.stdout is None:
             sys.stdout = open(os.devnull, "w")
@@ -97,6 +155,9 @@ def main():
         import paranam.wizard as wizard
 
         wizard.list_devices = lambda **kwargs: []
+        os.environ["PARANAM_QUEUE_ROOT"] = str(
+            Path(args[1]).resolve().parent / "self-test-queue"
+        )
         app = QApplication.instance() or QApplication([])
         window = WizardWindow()
         window.close()
@@ -112,7 +173,7 @@ def main():
                         "optimizer"
                     ].currentData(),
                     "validation_reference": "full",
-                    "pages": 4,
+                    "pages": window.pages.count(),
                 }
             ),
             encoding="utf-8",

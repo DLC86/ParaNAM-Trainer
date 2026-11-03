@@ -336,6 +336,12 @@ def test_export_button_selects_the_training_model_format(
     window._attach(workspace)
     job = training.make_job(workspace)
     window.job = job
+    window.queue_controller.store.register_legacy(workspace)
+    entry = next(
+        e for e in window.queue_controller.store.entries() if e["job"] == str(job)
+    )
+    window.selected_job_id = entry["id"]
+    window.queue_controller.active_id = entry["id"]
     dialogs = []
 
     def choose_file(*args):
@@ -356,6 +362,7 @@ def test_export_button_selects_the_training_model_format(
         assert request["path"].endswith("chosen" + extension)
     finally:
         window.process = None
+        window.queue_controller.active_id = None
 
 
 @pytest.mark.parametrize("mode", ["full", "low_rank"])
