@@ -3,7 +3,7 @@
 import math
 
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QTableWidget,
     QStyledItemDelegate,
@@ -58,32 +58,52 @@ class CaptureTable(QTableWidget):
 
 
 class RecentProjectDelegate(QStyledItemDelegate):
+    @staticmethod
+    def fonts():
+        title = QFont("Inter")
+        title.setPixelSize(16)
+        title.setWeight(QFont.Weight.Bold)
+        path = QFont("Inter")
+        path.setPixelSize(12)
+        path.setWeight(QFont.Weight.Normal)
+        return title, path
+
     def sizeHint(self, option, index):
-        return QSize(200, 72)
+        title, path = self.fonts()
+        return QSize(
+            200, QFontMetrics(title).height() + QFontMetrics(path).height() + 30
+        )
 
     def paint(self, painter, option, index):
-        option = QStyleOptionViewItem(option)
-        self.initStyleOption(option, index)
-        title, _, path = option.text.partition("\n")
-        option.text = ""
-        option.widget.style().drawControl(
-            QStyle.ControlElement.CE_ItemViewItem, option, painter, option.widget
-        )
+        title, _, path = str(index.data() or "").partition("\n")
         painter.save()
-        bounds = option.rect.adjusted(16, 8, -16, -8)
-        painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
+        # Avoid QStyleSheetStyle applying its item padding/font/clip a second time.
+        painter.fillRect(
+            option.rect,
+            QColor(
+                "#3f3f3f"
+                if option.state & QStyle.StateFlag.State_Selected
+                else "#171717"
+            ),
+        )
+        painter.setPen(QColor("#2d2d2d"))
+        painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+        title_font, path_font = self.fonts()
+        bounds = option.rect.adjusted(16, 12, -16, -12)
+        title_height = QFontMetrics(title_font).height()
+        painter.setFont(title_font)
         painter.setPen(QColor("#f0f0f0"))
         painter.drawText(
-            bounds.adjusted(0, 0, 0, -26),
+            bounds.adjusted(0, 0, 0, -(bounds.height() - title_height)),
             Qt.AlignmentFlag.AlignVCenter,
             painter.fontMetrics().elidedText(
                 title, Qt.TextElideMode.ElideRight, bounds.width()
             ),
         )
-        painter.setFont(QFont("Inter", 9))
+        painter.setFont(path_font)
         painter.setPen(QColor("#a0a0a0"))
         painter.drawText(
-            bounds.adjusted(0, 27, 0, 0),
+            bounds.adjusted(0, title_height + 6, 0, 0),
             Qt.AlignmentFlag.AlignVCenter,
             painter.fontMetrics().elidedText(
                 path, Qt.TextElideMode.ElideMiddle, bounds.width()
@@ -104,12 +124,11 @@ def navigation_icon(kind):
             QPen(QColor(color), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         )
         p.setBrush(Qt.BrushStyle.NoBrush)
-        if kind == 0:  # Audio interface and routing.
-            p.drawRoundedRect(QRectF(2, 5, 20, 14), 3, 3)
-            for x in (7, 17):
-                p.drawEllipse(QPointF(x, 12), 2.4, 2.4)
-            p.drawLine(10, 3, 14, 3)
-            p.drawLine(10, 21, 14, 21)
+        if kind == 0:  # Projects folder.
+            p.drawRoundedRect(QRectF(2, 7, 20, 14), 2, 2)
+            p.drawPolyline(
+                [QPointF(3, 7), QPointF(3, 3), QPointF(10, 3), QPointF(13, 7)]
+            )
         elif kind == 1:  # Knob.
             p.drawArc(QRectF(3, 3, 18, 18), 220 * 16, -260 * 16)
             p.drawEllipse(QRectF(6, 6, 12, 12))
@@ -130,7 +149,7 @@ def navigation_icon(kind):
             for y in (5, 12, 19):
                 p.drawEllipse(QPointF(4, y), 1, 1)
                 p.drawLine(9, y, 21, y)
-        else:  # Guitar.
+        elif kind == 5:  # Guitar.
             p.save()
             p.translate(12, 12)
             p.rotate(38)
@@ -139,6 +158,15 @@ def navigation_icon(kind):
             p.drawEllipse(QRectF(-3.5, -3, 7, 7))
             p.drawEllipse(QPointF(0, 3), 1.3, 1.3)
             p.restore()
+        else:  # Settings gear.
+            for i in range(8):
+                angle = math.radians(i * 45)
+                p.drawLine(
+                    QPointF(12 + 8 * math.cos(angle), 12 + 8 * math.sin(angle)),
+                    QPointF(12 + 10.5 * math.cos(angle), 12 + 10.5 * math.sin(angle)),
+                )
+            p.drawEllipse(QPointF(12, 12), 8, 8)
+            p.drawEllipse(QPointF(12, 12), 3, 3)
         p.end()
         icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
     return icon

@@ -1,4 +1,4 @@
-"""Six-screen desktop workflow; audio and training never block the UI thread."""
+"""Seven-screen desktop workflow; audio and training never block the UI thread."""
 
 from __future__ import annotations
 
@@ -170,11 +170,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.navigate(0)
 
     def _build(self):
-        central = QWidget()
+        central = QWidget(self)
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        sidebar = QFrame()
+        sidebar = QFrame(central)
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(256)
         rail = QVBoxLayout(sidebar)
@@ -184,28 +184,42 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.shop_button = QToolButton()
         self.shop_button.setObjectName("brandLink")
         self.shop_button.setIcon(QIcon(str(asset_path("TTSLogo.png"))))
-        self.shop_button.setIconSize(QSize(44, 44))
-        self.shop_button.setFixedSize(46, 46)
         self.shop_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.shop_button.setToolTip("Visit The Tone Scientist shop")
         self.shop_button.setAccessibleName("The Tone Scientist shop")
         self.shop_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl("https://shop.thetonescientist.com"))
         )
+        self.brand_title = label("ParaNAM\nTrainer", "brand")
+        self.version_label = label("VERSION 0.5.3", "eyebrow")
+        self.brand_title.setParent(sidebar)
+        self.version_label.setParent(sidebar)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(4)
+        brand_text.addWidget(self.brand_title)
+        brand_text.addWidget(self.version_label)
+        self.brand_title.ensurePolished()
+        self.version_label.ensurePolished()
+        logo_height = (
+            self.brand_title.sizeHint().height()
+            + self.version_label.sizeHint().height()
+            + 4
+        )
+        self.shop_button.setIconSize(QSize(logo_height, logo_height))
+        self.shop_button.setFixedSize(logo_height, logo_height)
         brand.addWidget(self.shop_button)
-        brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
+        brand.addLayout(brand_text, 1)
         rail.addLayout(brand)
-        rail.addWidget(label("VERSION  /  0.5.2", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
             (
-                "Project & routing",
-                "Controls & plan",
-                "Capture your rig",
-                "Train & export",
-                "Training queue",
-                "Play & Compare",
+                "Projects",
+                "Plan",
+                "Capture",
+                "Train",
+                "Queue",
+                "Compare",
             )
         ):
             step = button(text, lambda checked=False, i=index: self.navigate(i))
@@ -216,10 +230,13 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             rail.addWidget(step)
             self.steps.append(step)
         rail.addStretch()
-        rail.addWidget(label("ONE CAPTURE SET.\nA WHOLE RANGE OF TONE.", "eyebrow"))
-        rail.addSpacing(12)
-        self.model_badge = label("HyperA2\nFull + Lite, together.", "muted")
-        rail.addWidget(self.model_badge)
+        self.settings_button = button("Settings", lambda: self.navigate(6))
+        self.settings_button.setObjectName("step")
+        self.settings_button.setIcon(navigation_icon(6))
+        self.settings_button.setIconSize(QSize(24, 24))
+        self.settings_button.setCheckable(True)
+        rail.addWidget(self.settings_button)
+        self.steps.append(self.settings_button)
         root.addWidget(sidebar)
         right = QWidget()
         content = QVBoxLayout(right)
@@ -237,6 +254,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 self._training,
                 self._queue,
                 self._play,
+                self._settings,
             )
         ):
             page = QWidget()
@@ -244,7 +262,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             layout.setContentsMargins(0, 0, 10, 0)
             layout.setSpacing(20)
             builder(layout)
-            if index not in (2, 4):
+            if index not in (0, 2, 4):
                 layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -286,12 +304,18 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         box.addLayout(row)
         self.recent = QListWidget()
         self.recent.setItemDelegate(RecentProjectDelegate(self.recent))
-        self.recent.setMaximumHeight(180)
+        self.recent.setMinimumHeight(320)
         self.recent.itemDoubleClicked.connect(
             lambda item: self.open_project(Path(item.data(Qt.ItemDataRole.UserRole)))
         )
         box.addWidget(self.recent)
         layout.addWidget(projects)
+
+    def _settings(self, layout):
+        layout.addWidget(label("Settings", "title"))
+        layout.addWidget(
+            label("Audio routing and calibration are shared by every project.", "muted")
+        )
         self.audio_card, box = card("Connect your audio interface")
         form = QFormLayout()
         self.device = QComboBox()
@@ -546,17 +570,6 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.static_name.editingFinished.connect(self.rename_static)
         static_box.addWidget(self.static_name)
         static_box.addWidget(button("Add static capture…", self.add_static))
-        self.static_metadata = MetadataEditor(include_name=False)
-        self.static_metadata.changed.connect(self.save_static_metadata)
-        self.static_metadata.setVisible(False)
-        self.metadata_toggle = button(
-            "Edit metadata for this capture…",
-            lambda: self.static_metadata.setVisible(
-                not self.static_metadata.isVisible()
-            ),
-        )
-        static_box.addWidget(self.metadata_toggle)
-        static_box.addWidget(self.static_metadata)
         layout.addWidget(self.static_card)
         self.scene = ControlScene()
         layout.addWidget(self.scene)
@@ -826,7 +839,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         )
         self.queue_table.horizontalHeader().setStretchLastSection(True)
         self.queue_table.setMinimumHeight(100)
-        self.queue_table.setMaximumHeight(136)
+        self.queue_table.setMaximumHeight(16777215)
         for column, width in enumerate((56, 120, 110, 90, 100, 65, 85)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
@@ -1004,7 +1017,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             except ValueError as error:
                 self.notify_error(error)
                 return
+        if index == 6 and self.pages.currentIndex() != 6:
+            self._settings_return_page = self.pages.currentIndex()
         self.pages.setCurrentIndex(index)
+        self.project_label.setVisible(index != 6)
         listening = getattr(self, "play_worker", None) is not None
         self.play_transport_bar.setVisible(index != 5 and listening)
         self.footer_note.setVisible(index != 5 and not listening)
@@ -1020,6 +1036,9 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.update_enabled()
 
     def back(self):
+        if self.pages.currentIndex() == 6:
+            self.navigate(getattr(self, "_settings_return_page", 0))
+            return
         self.navigate(max(0, self.pages.currentIndex() - 1) if self.workspace else 0)
 
     def next(self):
@@ -1067,6 +1086,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             directory = Path(parent) / safe_name
             workspace = Workspace.create(directory, name.strip(), self.audio_settings())
             self._attach(workspace, use_last_setup=True)
+            self.navigate(1)
         except Exception as error:
             self.notify_error(error)
 
@@ -1080,13 +1100,13 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             return
         try:
             self._attach(Workspace(directory), use_last_setup=True)
+            self.navigate(1)
         except Exception as error:
             self.notify_error(error)
 
     def _attach(self, workspace, use_last_setup=False):
         self.close_audio()
-        if use_last_setup:
-            self.adopt_setup(workspace)
+        self.initialize_global_setup(workspace)
         self.workspace = workspace
         self.queue_controller.store.register_legacy(workspace)
         self.project_label.setText(
@@ -1130,65 +1150,6 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             self.accelerator.setCurrentIndex(
                 max(0, self.accelerator.findData(prefs["device"]))
             )
-            audio = workspace.project.audio
-            matched_device = False
-            for i in range(self.device.count()):
-                info = self.device.itemData(i)
-                if (
-                    info
-                    and info.name == audio.input_device
-                    and info.host_api == audio.host_api
-                ):
-                    self.device.setCurrentIndex(i)
-                    matched_device = True
-                    break
-            if audio.input_device and not matched_device:
-                self.device.addItem(f"Unavailable: {audio.input_device}", None)
-                self.device.setCurrentIndex(self.device.count() - 1)
-            self._populate_audio_controls(self.device.currentData())
-            for field, value in (
-                (self.input_channel, audio.input_channel),
-                (self.output_channel, audio.output_channel),
-                (self.loop_input, audio.loopback_input_channel or 2),
-                (self.loop_output, audio.loopback_output_channel or 2),
-                (self.instrument_input, audio.instrument_input_channel),
-                (self.monitor_left, audio.monitor_output_left),
-                (self.monitor_right, audio.monitor_output_right),
-            ):
-                index = field.findData(value)
-                if index < 0:
-                    field.addItem(f"Unavailable channel {value}", value)
-                    index = field.count() - 1
-                field.setCurrentIndex(index)
-            self.loop_enabled.setChecked(audio.loopback_enabled)
-            index = self.buffer.findData(audio.blocksize)
-            if index >= 0:
-                self.buffer.setCurrentIndex(index)
-            self.capture_level.set_level(prefs["capture_level_dbfs"])
-            instrument_level = prefs.get("instrument_level_dbu")
-            self.instrument_calibration.setChecked(instrument_level is not None)
-            self.instrument_dbu.setValue(
-                instrument_level if instrument_level is not None else 12.0
-            )
-            calibration = prefs.get("pending_calibration", {})
-            for check, field, value in (
-                (
-                    self.input_calibration,
-                    self.input_dbu,
-                    calibration.get(
-                        "input_level_dbu", workspace.project.input_level_dbu
-                    ),
-                ),
-                (
-                    self.output_calibration,
-                    self.output_dbu,
-                    calibration.get(
-                        "output_level_dbu", workspace.project.output_level_dbu
-                    ),
-                ),
-            ):
-                check.setChecked(value is not None)
-                field.setValue(12 if value is None else value)
         finally:
             self._loading = False
         self.save_preferences()
@@ -1315,83 +1276,42 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             return
         self.close_audio()
         self._diagram()
-        if self.workspace:
-            old = self.workspace.project.audio
-            updated = self.audio_settings()
-            if (old.host_api, old.input_device, old.instrument_input_channel) != (
-                updated.host_api,
-                updated.input_device,
-                updated.instrument_input_channel,
-            ):
-                self.workspace.preferences["instrument_level_dbu"] = None
-                self.instrument_calibration.blockSignals(True)
-                self.instrument_calibration.setChecked(False)
-                self.instrument_calibration.blockSignals(False)
-                self._refresh_play_calibration()
-            self.workspace.project.audio = updated
-            self.workspace.save()
+        audio = self.audio_settings()
+        key = (audio.host_api, audio.input_device, audio.instrument_input_channel)
+        if getattr(self, "_instrument_route_key", key) != key:
+            self.instrument_calibration.blockSignals(True)
+            self.instrument_calibration.setChecked(False)
+            self.instrument_calibration.blockSignals(False)
+        self._instrument_route_key = key
         self.remember_setup()
+        self._refresh_play_calibration()
 
     def save_calibration(self, *_):
         if self._loading or self.busy():
             return
         self.remember_setup()
-        if not self.workspace:
-            return
-        send = self.input_dbu.value() if self.input_calibration.isChecked() else None
-        returned = (
-            self.output_dbu.value() if self.output_calibration.isChecked() else None
-        )
-        if (
-            self.workspace.preferences["capture_level_dbfs"]
-            != self.workspace.project.capture_level_dbfs
-        ):
-            self.workspace.preferences["pending_calibration"] = dict(
-                input_level_dbu=send, output_level_dbu=returned
-            )
-        else:
-            self.workspace.preferences.pop("pending_calibration", None)
-            self.workspace.project.input_level_dbu = send
-            self.workspace.project.output_level_dbu = returned
-        self.workspace.save()
-        self.refresh_training()
+        self._refresh_play_calibration()
 
     def save_instrument_calibration(self, *_):
-        if not self._loading and not self.busy():
-            if self.workspace:
-                self.workspace.preferences["instrument_level_dbu"] = (
-                    self.instrument_dbu.value()
-                    if self.instrument_calibration.isChecked()
-                    else None
-                )
-                self.workspace.save()
-            self._refresh_play_calibration()
-            self.remember_setup()
+        self.save_calibration()
 
     def apply_instrument_calibration(self, value):
         self._apply_level_calibration(
             self.instrument_calibration, self.instrument_dbu, value
         )
-        self.save_instrument_calibration()
 
     def save_capture_level(self, *_):
         if self._loading or self.busy():
             return
         try:
             level = self.capture_level.level()
-            self.remember_setup()
-            if (
-                self.workspace
-                and level != self.workspace.preferences["capture_level_dbfs"]
-            ):
-                self.workspace.preferences["capture_level_dbfs"] = level
-                # The send metadata describes THIS attenuated capture setting.
-                # Changing it requires a fresh voltage measurement.
+            previous = (self.last_setup() or {}).get("capture_level_dbfs", level)
+            if level != previous:
+                self.input_calibration.blockSignals(True)
                 self.input_calibration.setChecked(False)
-                self.save_calibration()
-                self.workspace.save()
-                self.close_audio()
-                self.refresh_training()
+                self.input_calibration.blockSignals(False)
+            self.remember_setup()
+            self.close_audio()
         except ValueError as error:
             self.notify_error(error)
 
@@ -1409,10 +1329,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.save_calibration()
 
     def calibrate_levels(self):
-        if not self.workspace or not self.device.currentData():
-            self.notify_error(
-                "Create/open a project and select your audio interface before calibrating."
-            )
+        if not self.device.currentData():
+            self.notify_error("Select your audio interface before calibrating.")
             return
         try:
             self.close_audio()
@@ -1422,7 +1340,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 self.output_channel.currentData(),
                 self.buffer.currentData() or 0,
                 self.capture_level.level(),
-                self.workspace.preferences.get("calibration_frequency", 1000.0),
+                getattr(self, "_calibration_frequency", 1000.0),
                 self,
                 channel_names=(
                     self.input_channel.currentText(),
@@ -1444,10 +1362,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             )
             dialog.instrument_calibrated.connect(self.apply_instrument_calibration)
             dialog.exec()
-            self.workspace.preferences["calibration_frequency"] = (
-                dialog.frequency.value()
-            )
-            self.workspace.save()
+            self._calibration_frequency = dialog.frequency.value()
             self.remember_setup()
         except ValueError as error:
             self.notify_error(error)
@@ -1492,7 +1407,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         if self.session is None:
             if self.workspace:
                 self.session = CaptureSession(
-                    self.workspace.project, self.workspace.directory
+                    self.workspace.project.model_copy(
+                        update={"audio": self.audio_settings()}
+                    ),
+                    self.workspace.directory,
                 )
             else:
                 project = CaptureProject(
@@ -1527,6 +1445,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.update_enabled()
 
     def _audio_finished(self):
+        if self.workspace and self.session:
+            self.workspace.project = self.session.project
         self.worker.deleteLater()
         self.worker = None
         self.cancel_token = None
@@ -1702,13 +1622,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             input_mode=self.signal_mode.currentData(),
         )
         static = prefs["capture_type"] == "static"
+        self.metadata_editor.set_name_visible(not static)
         self.batch_size.setToolTip(
             "16 matches the official NAM trainer default for static models. Reduce it if GPU memory is insufficient."
             if static
             else "16 matches the official A2 recipe. Reduce it if GPU memory is insufficient."
-        )
-        self.model_badge.setText(
-            "A2 static batch" if static else "HyperA2\nFull + Lite, together."
         )
         self.control_card.setVisible(not static)
         self.plan_card.setVisible(not static)
@@ -1743,6 +1661,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         if not self.workspace or self.busy():
             return False
         self.save_preferences()
+        original_capture_settings = {
+            key: self.workspace.preferences.get(key)
+            for key in ("capture_level_dbfs", "pending_calibration")
+        }
+        self.prepare_capture_setup()
         try:
             if self.workspace.plan_changed():
                 if self.workspace.project.captured_entries():
@@ -1752,9 +1675,16 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                         "The controls, input signal, capture level, calibration or plan settings changed. Existing captures will be preserved in History, and a new plan will start. Continue?",
                     )
                     if answer != QMessageBox.StandardButton.Yes:
+                        for key, value in original_capture_settings.items():
+                            if value is None:
+                                self.workspace.preferences.pop(key, None)
+                            else:
+                                self.workspace.preferences[key] = value
+                        self.workspace.save()
                         return False
                 self.close_audio()
                 self.workspace.generate_plan()
+                self.remember_capture_calibration()
             self.refresh_captures()
             return True
         except Exception as error:
@@ -1770,16 +1700,21 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
     def save_metadata(self, metadata):
         if self.workspace and not self._loading and not self.busy():
             self.workspace.project.user_metadata = dict(metadata)
+            if self.workspace.preferences["capture_type"] == "static":
+                # Edited Train fields are authoritative for the batch. Retain
+                # unexposed legacy metadata, while names come from Capture.
+                keys = set(self.metadata_editor.fields) - {"name"}
+                for capture in self.workspace.preferences["static_captures"]:
+                    capture["metadata"] = {
+                        k: v
+                        for k, v in capture.get("metadata", {}).items()
+                        if k not in keys
+                    }
+                for entry in self.workspace.project.entries:
+                    entry.user_metadata = {
+                        k: v for k, v in entry.user_metadata.items() if k not in keys
+                    }
             self.workspace.save()
-
-    def save_static_metadata(self, metadata):
-        if (
-            self.workspace
-            and self._static_edit_id
-            and not self._loading
-            and not self.busy()
-        ):
-            self.workspace.set_static_metadata(self._static_edit_id, metadata)
 
     def add_static(self):
         if not self.workspace or self.busy():
@@ -1979,9 +1914,6 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             if self.workspace.project.capture_type == "static":
                 self._static_edit_id = entry.capture_id
                 self.static_name.setText(entry.capture_name or "")
-                self.static_metadata.set_metadata(
-                    {**self.workspace.project.user_metadata, **entry.user_metadata}
-                )
             else:
                 self._static_edit_id = None
                 self.scene.set_controls(
@@ -2003,6 +1935,22 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
 
     def record(self):
         if not self.workspace or self.busy() or not self.rig_ready.isChecked():
+            return
+        references = (
+            self.capture_level.level(),
+            self.input_dbu.value() if self.input_calibration.isChecked() else None,
+            self.output_dbu.value() if self.output_calibration.isChecked() else None,
+        )
+        historical = (
+            self.workspace.project.capture_level_dbfs,
+            self.workspace.project.input_level_dbu,
+            self.workspace.project.output_level_dbu,
+        )
+        if references != historical:
+            if self.apply_plan():
+                self.capture_status.setText(
+                    "Capture settings updated. Confirm the rig before recording."
+                )
             return
         index = self.capture_table.currentRow()
         if index < 0 or index >= len(self._capture_entries):
@@ -2040,6 +1988,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                         target = backup / relative
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(source, target)
+            self.remember_capture_calibration()
             session = self._get_session()
             self.capture_status.setText(
                 "Recording… Timing is checked at the beginning and end of this recording."

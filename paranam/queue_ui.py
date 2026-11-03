@@ -235,13 +235,18 @@ class QueueActions:
             self.footer_note.setVisible(
                 self.pages.currentIndex() != 5 and not listening
             )
-        for widget in (self.new_button, self.open_button, self.recent, self.audio_card):
+        for widget in (
+            self.new_button,
+            self.open_button,
+            self.recent,
+            self.audio_card,
+            self.calibration_card,
+        ):
             widget.setEnabled(not active)
         for widget in (
             self.control_card,
             self.plan_card,
             self.signal_card,
-            self.calibration_card,
             self.training_settings,
             self.metadata_card,
         ):

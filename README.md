@@ -9,7 +9,13 @@ with the established recording, alignment and model code retained.
 The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.5.2 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.2-preview)**
+**[Download the 0.5.3 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.3-preview)**
+
+Version 0.5.3 adds a dedicated global **Settings** page, clearer/taller recent
+projects, automatic navigation to **Plan**, simplified static metadata entry,
+responsive queue/log sizing and updated sidebar branding. Capture calibration
+values remain recorded in each project and training job independently of later
+global settings changes. [Complete 0.5.3 changes](docs/release-0.5.3.md).
 
 Version 0.5.2 remembers the latest audio/calibration setup and file-picker folder,
 adds the bundled **TTS input v11** option, simplifies static capture setup, and

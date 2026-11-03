@@ -122,6 +122,8 @@ def test_level_change_requires_new_plan_and_keeps_old_calibration_history(
     assert window.input_dbu.decimals() == window.output_dbu.decimals() == 3
     window._set_capture_level(-12.0)
     window._apply_level_calibration(window.input_calibration, window.input_dbu, 6.123)
+    assert not workspace.plan_changed()
+    window.prepare_capture_setup()
     assert workspace.plan_changed()
     assert workspace.project.capture_level_dbfs == 0.0
     assert workspace.project.input_level_dbu == 18.0

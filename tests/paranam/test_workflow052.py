@@ -51,10 +51,10 @@ def test_last_setup_survives_project_switch_and_application_restart(
     other = Workspace.create(tmp_path / "Other project", "Other project")
     window.open_project(other.directory)
     assert window.input_dbu.value() == 6.125
-    assert window.workspace.project.input_level_dbu == 6.125
-    assert window.workspace.preferences["instrument_level_dbu"] == 18.123
+    assert window.workspace.project.input_level_dbu is None
+    assert window.instrument_reference() == 18.123
     assert window.capture_level.level() == -12
-    assert window.workspace.project.audio.instrument_input_channel == 3
+    assert window.audio_settings().instrument_input_channel == 3
     restarted = wizard.WizardWindow()
     try:
         assert restarted.device.currentData().name == "Test interface"
@@ -119,7 +119,7 @@ def test_reusing_live_setup_does_not_rewrite_historical_capture_calibration(
     assert window.workspace.project.input_level_dbu == 7.0
     assert Workspace(other.directory).project.input_level_dbu == 7.0
     assert window.playback_project().input_level_dbu == 18.125
-    assert window.workspace.plan_changed()
+    assert not window.workspace.plan_changed()
 
 
 def test_export_names_preserve_unicode_and_safely_replace_invalid_filename_characters():

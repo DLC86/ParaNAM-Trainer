@@ -37,7 +37,10 @@ def load_font():
 
         if QFontDatabase.addApplicationFont(str(asset_path("Inter.ttf"))) < 0:
             raise RuntimeError("The bundled user-interface font could not be loaded")
-        if QFontDatabase.addApplicationFont(str(asset_path("Michroma-Regular.ttf"))) < 0:
+        if (
+            QFontDatabase.addApplicationFont(str(asset_path("Michroma-Regular.ttf")))
+            < 0
+        ):
             raise RuntimeError("The bundled title font could not be loaded")
         QApplication.instance().setFont(QFont("Inter", 10))
         _font_loaded = True
@@ -59,7 +62,7 @@ QLabel#title { font-size: 31px; font-weight: 700; }
 QLabel#section { font-size: 18px; font-weight: 650; }
 QLabel#muted { color: #969696; }
 QLabel#metric { font-size: 30px; font-weight: 650; }
-QLabel#brand { font-family: 'Michroma'; font-size: 18px; font-weight: 400; color: #bf0000; }
+QLabel#brand { font-family: 'Michroma'; font-size: 18px; font-weight: 700; color: #bf0000; }
 QPushButton { background: #2c2c2c; border: 1px solid #414141; border-radius: 8px; padding: 10px 16px; font-weight: 600; }
 QPushButton:hover { background: #3a3a3a; border-color: #797979; }
 QToolButton { background: #2c2c2c; border: 1px solid #414141; border-radius: 8px; padding: 8px 12px; font-weight: 600; }
@@ -428,6 +431,7 @@ class MetadataEditor(QWidget):
         self._metadata = {}
         self.fields = {}
         form = QFormLayout(self)
+        self.form = form
         form.setContentsMargins(0, 0, 0, 0)
         labels = [("name", "Name")] if include_name else []
         labels += [
@@ -456,6 +460,10 @@ class MetadataEditor(QWidget):
         notes.textChanged.connect(self.emit_metadata)
         self.fields["notes"] = notes
         form.addRow("Notes", notes)
+
+    def set_name_visible(self, visible):
+        if "name" in self.fields:
+            self.form.setRowVisible(self.fields["name"], visible)
 
     def set_metadata(self, metadata):
         self._loading_metadata = True

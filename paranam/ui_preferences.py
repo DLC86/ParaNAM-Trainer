@@ -53,14 +53,11 @@ class UIPreferences:
         return path, selected
 
     def remember_setup(self):
-        if self._loading or self.busy() or getattr(self, "_restoring_setup", False):
+        if self._loading or getattr(self, "_restoring_setup", False):
             return
         audio = self.audio_settings().model_dump()
         if self.device.currentData() is None:
-            if self.workspace and self.workspace.project.audio.input_device:
-                audio = self.workspace.project.audio.model_dump()
-            else:
-                audio = (self.last_setup() or {}).get("audio", audio)
+            audio = (self.last_setup() or {}).get("audio", audio)
         setup = dict(
             audio=audio,
             capture_level_dbfs=self.capture_level.level(),
@@ -76,13 +73,8 @@ class UIPreferences:
                 else None
             ),
         )
-        if self.workspace:
-            setup["calibration_frequency"] = self.workspace.preferences.get(
-                "calibration_frequency", 1000.0
-            )
-            setup["playback_blocksize"] = self.workspace.preferences.get(
-                "playback_blocksize", 128
-            )
+        setup["calibration_frequency"] = getattr(self, "_calibration_frequency", 1000.0)
+        setup["playback_blocksize"] = getattr(self, "_playback_blocksize", 128)
         self.settings.setValue("last_audio_setup", json.dumps(setup))
 
     def last_setup(self):
@@ -117,29 +109,71 @@ class UIPreferences:
         except (ValueError, TypeError, OSError):
             return None
 
-    def adopt_setup(self, workspace):
-        """Use the live rig setup without changing historical capture calibration."""
-        setup = self.last_setup()
-        if not setup:
+    def initialize_global_setup(self, workspace):
+        """One-time migration; opening projects never changes an existing setup."""
+        if self.settings.value("last_audio_setup", ""):
             return
-        workspace.project.audio = AudioSettingsModel(**setup["audio"])
-        calibration = {
-            key: setup.get(key) for key in ("input_level_dbu", "output_level_dbu")
+        pending = workspace.preferences.get("pending_calibration", {})
+        setup = dict(
+            audio=workspace.project.audio.model_dump(),
+            input_level_dbu=pending.get(
+                "input_level_dbu", workspace.project.input_level_dbu
+            ),
+            output_level_dbu=pending.get(
+                "output_level_dbu", workspace.project.output_level_dbu
+            ),
+            instrument_level_dbu=workspace.preferences.get("instrument_level_dbu"),
+            capture_level_dbfs=workspace.preferences["capture_level_dbfs"],
+            calibration_frequency=workspace.preferences.get(
+                "calibration_frequency", 1000.0
+            ),
+            playback_blocksize=workspace.preferences.get("playback_blocksize", 128),
+        )
+        self.settings.setValue("last_audio_setup", json.dumps(setup))
+        self.restore_startup_setup()
+
+    def instrument_reference(self):
+        return (
+            self.instrument_dbu.value()
+            if self.instrument_calibration.isChecked()
+            else None
+        )
+
+    def prepare_capture_setup(self):
+        """Copy physical references into a new capture plan, never into old audio."""
+        if not self.workspace:
+            return
+        self.workspace.preferences["capture_level_dbfs"] = self.capture_level.level()
+        self.workspace.preferences["pending_calibration"] = {
+            "input_level_dbu": (
+                self.input_dbu.value() if self.input_calibration.isChecked() else None
+            ),
+            "output_level_dbu": (
+                self.output_dbu.value() if self.output_calibration.isChecked() else None
+            ),
         }
-        if any(e.status == "captured" for e in workspace.project.entries):
-            workspace.preferences["pending_calibration"] = calibration
-        else:
-            workspace.preferences.pop("pending_calibration", None)
-            for key, value in calibration.items():
-                setattr(workspace.project, key, value)
-        for key in (
-            "capture_level_dbfs",
-            "instrument_level_dbu",
-            "calibration_frequency",
-            "playback_blocksize",
-        ):
-            if key in setup:
-                workspace.preferences[key] = setup[key]
+
+    def remember_capture_calibration(self):
+        if not self.workspace:
+            return
+        snapshot = {
+            key: (self.last_setup() or {}).get(key)
+            for key in (
+                "input_level_dbu",
+                "output_level_dbu",
+                "capture_level_dbfs",
+                "instrument_level_dbu",
+                "calibration_frequency",
+            )
+        }
+        self.workspace.preferences["capture_calibration"] = snapshot
+        self.workspace.preferences["instrument_level_dbu"] = snapshot[
+            "instrument_level_dbu"
+        ]
+        self.workspace.preferences["calibration_frequency"] = snapshot[
+            "calibration_frequency"
+        ]
+        self.workspace.save()
 
     def restore_startup_setup(self):
         setup = self.last_setup()
@@ -190,4 +224,12 @@ class UIPreferences:
                 field.setValue(setup[key] if setup.get(key) is not None else 12)
         finally:
             self._loading = False
+        self._calibration_frequency = setup.get("calibration_frequency", 1000.0)
+        self._playback_blocksize = setup.get("playback_blocksize", 128)
+        self._instrument_route_key = (
+            audio.host_api,
+            audio.input_device,
+            audio.instrument_input_channel,
+        )
+        self.settings.setValue("last_audio_setup", json.dumps(setup))
         self._diagram()

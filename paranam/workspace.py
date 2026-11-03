@@ -138,6 +138,23 @@ class Workspace:
         atomic_write_json(self.directory / "paranam.json", self.preferences)
         save_project(self.project, self.directory)
 
+    def capture_calibration(self):
+        """Historical references used by this dataset, independent of Settings."""
+        snapshot = dict(self.preferences.get("capture_calibration", {}))
+        snapshot.update(
+            input_level_dbu=self.project.input_level_dbu,
+            output_level_dbu=self.project.output_level_dbu,
+            capture_level_dbfs=self.project.capture_level_dbfs,
+        )
+        snapshot.setdefault(
+            "instrument_level_dbu", self.preferences.get("instrument_level_dbu")
+        )
+        snapshot.setdefault(
+            "calibration_frequency",
+            self.preferences.get("calibration_frequency", 1000.0),
+        )
+        return snapshot
+
     def controls(self):
         if self.preferences["capture_type"] == "static":
             return ()

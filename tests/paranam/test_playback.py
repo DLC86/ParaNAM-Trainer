@@ -94,7 +94,7 @@ def test_play_uses_current_calibration_without_rewriting_captured_levels(
     assert live.input_level_dbu == 6
     assert workspace.project.capture_level_dbfs == 0
     assert workspace.project.input_level_dbu == 18
-    assert workspace.preferences["instrument_level_dbu"] == pytest.approx(19.123)
+    assert window.instrument_reference() == pytest.approx(19.123)
     assert send_gain(live, 19.123) == pytest.approx(10 ** (1.123 / 20))
 
 

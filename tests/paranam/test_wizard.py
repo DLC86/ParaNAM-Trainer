@@ -108,9 +108,9 @@ def test_loopback_stays_enabled_when_mono_device_is_discovered(window, monkeypat
     assert not window.loop_enabled.isChecked()
 
 
-def test_six_pages_and_back_navigation_keep_drafts(window, workspace):
+def test_seven_pages_and_back_navigation_keep_drafts(window, workspace):
     window._attach(workspace)
-    assert window.pages.count() == 6
+    assert window.pages.count() == 7
     window.navigate(1)
     window.mode.setCurrentIndex(1)
     window.epochs.setValue(75)

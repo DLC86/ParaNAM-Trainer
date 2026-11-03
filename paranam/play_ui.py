@@ -336,11 +336,7 @@ class PlayActions:
         self._refresh_play_calibration()
         if not self.play_worker:
             self.play_buffer.blockSignals(True)
-            previous_buffer = (
-                self.workspace.preferences.get("playback_blocksize")
-                if self.workspace
-                else None
-            )
+            previous_buffer = getattr(self, "_playback_blocksize", 128)
             self.play_buffer.clear()
             device = self.device.currentData()
             from .audio_devices import capabilities
@@ -359,26 +355,14 @@ class PlayActions:
             self.play_buffer.blockSignals(False)
 
     def _refresh_play_calibration(self):
-        value = (
-            self.workspace.preferences.get("instrument_level_dbu")
-            if self.workspace
-            else None
-        )
+        value = self.instrument_reference()
         self.play_calibration.setText(
             f"Instrument input calibration: {value:.3f} dBu at 0 dBFS. Model input and real reamp send use this reference."
             if value is not None
             else "Instrument calibration is not set. Calibrate it in Project & routing for matched physical input levels."
         )
-        if (
-            value is not None
-            and self.workspace
-            and any(
-                self.workspace.preferences.get("pending_calibration", {}).get(
-                    key, getattr(self.workspace.project, key)
-                )
-                is None
-                for key in ("input_level_dbu", "output_level_dbu")
-            )
+        if value is not None and not (
+            self.input_calibration.isChecked() and self.output_calibration.isChecked()
         ):
             self.play_calibration.setText(
                 self.play_calibration.text()
@@ -387,13 +371,13 @@ class PlayActions:
 
     def playback_project(self):
         project = self.workspace.project.model_copy(deep=True)
-        pending = self.workspace.preferences.get("pending_calibration", {})
-        project.capture_level_dbfs = self.workspace.preferences["capture_level_dbfs"]
-        project.input_level_dbu = pending.get(
-            "input_level_dbu", project.input_level_dbu
+        project.audio = self.audio_settings()
+        project.capture_level_dbfs = self.capture_level.level()
+        project.input_level_dbu = (
+            self.input_dbu.value() if self.input_calibration.isChecked() else None
         )
-        project.output_level_dbu = pending.get(
-            "output_level_dbu", project.output_level_dbu
+        project.output_level_dbu = (
+            self.output_dbu.value() if self.output_calibration.isChecked() else None
         )
         project.audio.blocksize = self.play_buffer.currentData() or 0
         return project
@@ -548,17 +532,16 @@ class PlayActions:
             device = self.device.currentData()
             if not device:
                 raise ValueError("Select your audio interface in Project & routing.")
-            validate_route(device, self.workspace.project.audio)
+            validate_route(device, self.audio_settings())
             self.close_audio()
             project = self.playback_project()
-            self.workspace.preferences["playback_blocksize"] = project.audio.blocksize
-            self.workspace.save()
+            self._playback_blocksize = project.audio.blocksize
             self.remember_setup()
             self.play_worker = PlayWorker(
                 self.play_model.currentData(),
                 device,
                 project,
-                self.workspace.preferences.get("instrument_level_dbu"),
+                self.instrument_reference(),
                 self.play_size.currentData(),
                 self,
             )
@@ -618,11 +601,8 @@ class PlayActions:
             self.start_playback()
 
     def _play_buffer_changed(self, *_):
-        if self.workspace:
-            self.workspace.preferences["playback_blocksize"] = (
-                self.play_buffer.currentData() or 0
-            )
-            self.workspace.save()
+        self._playback_blocksize = self.play_buffer.currentData() or 0
+        self.remember_setup()
         if self.play_worker:
             self._play_restart = True
             self.stop_playback(reconfigure=True)

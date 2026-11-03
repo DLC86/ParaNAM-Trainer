@@ -10,7 +10,7 @@
 [Setup]
 AppId={{95150E04-60A8-43D8-A3C0-0FB244A1A128}
 AppName=ParaNAM Trainer
-AppVersion=0.5.2
+AppVersion=0.5.3
 AppPublisher=DLC86
 DefaultDirName={localappdata}\Programs\ParaNAM Trainer
 DefaultGroupName=ParaNAM Trainer
@@ -18,7 +18,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputRoot}
-OutputBaseFilename=ParaNAM-Trainer-0.5.2-Windows-x64-Setup
+OutputBaseFilename=ParaNAM-Trainer-0.5.3-Windows-x64-Setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

@@ -393,6 +393,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 "model": model,
                 "learning": learning,
                 "preferences": prefs,
+                "capture_calibration": workspace.capture_calibration(),
                 "static_captures": (
                     list(prefs["static_captures"]) if is_static else None
                 ),
