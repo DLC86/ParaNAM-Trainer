@@ -191,7 +191,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl("https://shop.thetonescientist.com"))
         )
         self.brand_title = label("ParaNAM\nTrainer", "brand")
-        self.version_label = label("VERSION 0.5.3", "eyebrow")
+        self.version_label = label("VERSION 0.5.4", "eyebrow")
         self.brand_title.setParent(sidebar)
         self.version_label.setParent(sidebar)
         brand_text = QVBoxLayout()

@@ -9,7 +9,7 @@ with the established recording, alignment and model code retained.
 The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.5.3 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.3-preview)**
+**[Download the 0.5.4 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.4-preview)**
 
 Version 0.5.3 adds a dedicated global **Settings** page, clearer/taller recent
 projects, automatic navigation to **Plan**, simplified static metadata entry,
@@ -39,12 +39,13 @@ Weight-delta mode (Full/Low rank), rank, conditioning of dilated convolutions,
 and Full/Lite training-loss reduction (Sum/Mean) are independently editable;
 presets only initialize the visible settings.
 
-The current source additionally makes static and parametric training reserve the standard input's first 10 and final
+Version 0.5.4 makes static and parametric training reserve the standard input's first 10 and final
 9 seconds, matching the official NAM v3 training interval (also supported by TTS
 v11). Each epoch reports Validation ESR on validation captures and Train ESR on
 the embedded held-out audio in training captures, separately for Full and Lite.
 Queue has independent best Full scores and Full/Lite chart tabs. Older jobs
 require a new training run to adopt this split; existing captures are reusable.
+[Complete 0.5.4 changes](docs/release-0.5.4.md).
 
 Download the package for your computer from this repository's installer artifacts
 or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,
