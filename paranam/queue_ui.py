@@ -89,6 +89,16 @@ class QueueActions:
         except Exception as error:
             self.notify_error(error)
 
+    def retrain_training(self):
+        if self.busy() or self.queue_controller.preparing:
+            return
+        try:
+            workspace = self.queue_controller.store.retrain(self.selected_job_id)
+            self._attach(workspace)
+            self.navigate(3)
+        except Exception as error:
+            self.notify_error(error)
+
     def select_queue_job(self):
         item = self.queue_table.item(self.queue_table.currentRow(), 0)
         if item:
@@ -216,8 +226,10 @@ class QueueActions:
             return
         active, present = self.busy(), self.workspace is not None
         listening = getattr(self, "play_worker", None) is not None
-        if hasattr(self, "play_action_bar"):
-            self.play_action_bar.setVisible(self.pages.currentIndex() == 5 or listening)
+        if hasattr(self, "play_transport_bar"):
+            self.play_transport_bar.setVisible(
+                self.pages.currentIndex() != 5 and listening
+            )
             self.footer_note.setVisible(
                 self.pages.currentIndex() != 5 and not listening
             )
@@ -255,6 +267,9 @@ class QueueActions:
         self.cancel_button.setEnabled(self.worker is not None)
         if hasattr(self, "play_start"):
             play_idle = self.play_worker is None and self.play_loader is None
+            self.play_start.setVisible(not listening)
+            self.play_stop.setVisible(listening)
+            self.play_quick_stop.setEnabled(listening and self.play_stop.isEnabled())
             self.play_start.setEnabled(
                 present and self._play_ready and play_idle and self.worker is None
             )
@@ -287,6 +302,9 @@ class QueueActions:
         )
         resumable = state in FINISHED - {"completed", "needs_captures"} and not running
         self.resume_button.setEnabled(resumable)
+        self.retrain_button.setEnabled(
+            state == "completed" and not active and not preparing
+        )
         self.resume_batch_size.setEnabled(resumable)
         self.resume_device.setEnabled(resumable)
         self.resume_options_widget.setVisible(resumable)

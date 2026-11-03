@@ -92,6 +92,56 @@ def test_reorder_remove_and_resume_belong_to_instances(workspace, tmp_path):
     assert not any(e["job"] == entries[2]["job"] for e in queue.entries())
 
 
+@pytest.mark.parametrize("kind", ["static", "parametric"])
+def test_retrain_edits_completed_instance_copy_before_creating_fresh_job(
+    window, workspace, tmp_path, kind
+):
+    small_ready(workspace, kind)
+    workspace.project.user_metadata = {"modeled_by": "Original job"}
+    workspace.save()
+    window._attach(workspace)
+    queue = window.queue_controller.store
+    entry = queue.add(workspace)
+    queue.update(entry["id"], state="completed")
+    job = Path(entry["job"])
+    spec_before = (job / "spec.json").read_bytes()
+    frozen = Workspace(Path(read_json(job / "spec.json")["project"]))
+    old_audio = frozen.directory / frozen.project.entries[0].y_path
+    audio_before = old_audio.read_bytes()
+    workspace.preferences["epochs"] = 999
+    workspace.project.user_metadata = {"modeled_by": "Later project edits"}
+    workspace.save()
+    window.selected_job_id = entry["id"]
+    window.navigate(4)
+    window.refresh_training()
+    assert window.retrain_button.isEnabled()
+    window.retrain_button.click()
+    editable = window.workspace
+    assert window.pages.currentIndex() == 3
+    assert window.epochs.value() == 2
+    assert editable.project.user_metadata == {"modeled_by": "Original job"}
+    assert editable.training_ready() and not editable.plan_changed()
+    assert editable.directory not in (workspace.directory, frozen.directory)
+    assert training.current_job(editable.directory) is None
+    assert len(queue.entries()) == 1
+    window.epochs.setValue(5)
+    (editable.directory / editable.project.entries[0].y_path).write_bytes(
+        b"new capture"
+    )
+    assert old_audio.read_bytes() == audio_before
+    new = queue.add(editable)
+    new_spec = read_json(Path(new["job"]) / "spec.json")
+    assert new_spec["preferences"]["epochs"] == 5
+    assert new_spec["round"] == 0
+    assert (
+        new_spec["models_directory"] != read_json(job / "spec.json")["models_directory"]
+    )
+    assert (job / "spec.json").read_bytes() == spec_before
+    assert queue.get(entry["id"])["state"] == "completed"
+    with pytest.raises(ValueError, match="completed"):
+        queue.retrain(new["id"])
+
+
 def test_queue_view_and_project_editing_are_independent(
     window, workspace, tmp_path, monkeypatch
 ):

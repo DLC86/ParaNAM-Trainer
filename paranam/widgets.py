@@ -70,6 +70,10 @@ QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2
 QPushButton#primary { background: #bf0000; color: #ffffff; border: 1px solid #bf0000; }
 QPushButton#primary:hover { background: #d51919; }
 QPushButton#source:checked { background: #bf0000; color: #ffffff; border-color: #bf0000; }
+QPushButton#compareSource { font-size: 25px; font-weight: 700; border: 2px solid #4a4a4a; border-radius: 16px; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #333333, stop:1 #202020); padding: 18px 30px; }
+QPushButton#compareSource:hover { border-color: #bf0000; background: #353535; }
+QPushButton#compareSource:checked { border-color: #f04040; color: #ffffff; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #bf0000, stop:1 #790000); }
+QPushButton#compareSource:focus { border-color: #ffffff; }
 QPushButton#primary:disabled { background: #343434; color: #999999; border-color: #343434; }
 QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 10px; color: #969696; }
 QPushButton#step:checked { color: #f0f0f0; background: #2b2b2b; border: 1px solid #bf0000; }

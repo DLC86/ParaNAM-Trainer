@@ -102,3 +102,15 @@ feedback-route rejection, output channel isolation, and Full/Lite native DSP
 against Python references with multiple switch combinations. Installers verify
 native playback from the frozen app using actual trained exports.
 Physical converter calibration and listening still require the user's hardware.
+
+## 0.5.1 refinements
+
+The three calibration fields share the same column and width. Play & Compare
+places Start playing above large, centered Gear/Model buttons; Stop playing
+replaces Start while audio runs. A compact Stop remains available on other pages.
+
+Select a completed queue row and press Retrain to open Train & export with an
+editable copy of that instance's captures, metadata and settings. Change the
+recipe, then press Train to create a fresh queue instance starting from scratch.
+The completed job and its results remain intact. Editable copies live under the
+original project's `retraining` folder; new exports keep distinct instance folders.

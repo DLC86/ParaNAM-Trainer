@@ -184,7 +184,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         brand.addWidget(self.shop_button)
         brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
         rail.addLayout(brand)
-        rail.addWidget(label("VERSION  /  0.5.0", "eyebrow"))
+        rail.addWidget(label("VERSION  /  0.5.1", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
@@ -194,7 +194,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
                 "03   Capture your rig",
                 "04   Train & export",
                 "05   Training queue",
-                "06   Play",
+                "06   Play & Compare",
             )
         ):
             step = button(text, lambda checked=False, i=index: self.navigate(i))
@@ -245,8 +245,8 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         self.next_button = button("Next →", self.next, True)
         footer.addWidget(self.back_button)
         footer.addWidget(self.footer_note, 1)
-        footer.addWidget(self.play_action_bar)
-        self.play_action_bar.hide()
+        footer.addWidget(self.play_transport_bar)
+        self.play_transport_bar.hide()
         footer.addWidget(self.next_button)
         content.addLayout(footer)
         root.addWidget(right, 1)
@@ -352,14 +352,12 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             spin.valueChanged.connect(self.save_calibration)
         box.addLayout(form)
         self.capture_level = OutputLevelEdit(0.0)
-        instrument_row = QFormLayout()
         self.instrument_calibration = QCheckBox("Instrument input at 0 dBFS")
         self.instrument_dbu = QDoubleSpinBox()
         self.instrument_dbu.setRange(-200, 200)
         self.instrument_dbu.setDecimals(3)
         self.instrument_dbu.setSuffix(" dBu")
-        instrument_row.addRow(self.instrument_calibration, self.instrument_dbu)
-        box.addLayout(instrument_row)
+        form.addRow(self.instrument_calibration, self.instrument_dbu)
         self.instrument_calibration.toggled.connect(self.save_instrument_calibration)
         self.instrument_dbu.valueChanged.connect(self.save_instrument_calibration)
         self.capture_level.editingFinished.connect(self.save_capture_level)
@@ -818,6 +816,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         layout.addWidget(self.queue_table, 1)
         actions = QHBoxLayout()
         self.resume_button = button("Resume", self.resume_training)
+        self.retrain_button = button("Retrain", self.retrain_training)
         self.job_up = button("Move up", lambda: self.move_job(-1))
         self.job_down = button("Move down", lambda: self.move_job(1))
         self.remove_job_button = button("Remove from queue", self.remove_job)
@@ -828,6 +827,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             actions.addWidget(widget)
         layout.addLayout(actions)
         secondary_actions = QHBoxLayout()
+        secondary_actions.addWidget(self.retrain_button)
         secondary_actions.addWidget(self.capture_round_button)
         layout.addLayout(secondary_actions)
         self.resume_options_widget = QWidget()
@@ -986,7 +986,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
                 return
         self.pages.setCurrentIndex(index)
         listening = getattr(self, "play_worker", None) is not None
-        self.play_action_bar.setVisible(index == 5 or listening)
+        self.play_transport_bar.setVisible(index != 5 and listening)
         self.footer_note.setVisible(index != 5 and not listening)
         if index == 3:
             self.refresh_gpu_button()
