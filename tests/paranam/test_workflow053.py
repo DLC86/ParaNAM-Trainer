@@ -172,3 +172,39 @@ def test_cancelling_recapture_does_not_invalidate_the_old_dataset(
     assert not window.apply_plan()
     assert workspace.training_ready()
     assert workspace.capture_calibration() == before
+
+
+def test_train_confirms_shared_static_metadata_before_queueing(
+    window, workspace, monkeypatch
+):
+    from tests.paranam.test_queue import small_ready
+    from PySide6.QtCore import QObject, Signal
+    from types import SimpleNamespace
+
+    small_ready(workspace, "static")
+    workspace.project.user_metadata = {"modeled_by": "Shared author"}
+    workspace.set_static_metadata(
+        workspace.preferences["static_captures"][0]["id"],
+        {"modeled_by": "Hidden old author"},
+    )
+    window._attach(workspace)
+
+    class Preparation(QObject):
+        ready = Signal(dict)
+
+    preparation = Preparation()
+    captured = []
+
+    def enqueue(current):
+        captured.append(current.preferences["static_captures"][0]["metadata"])
+        window.queue_controller.preparing = SimpleNamespace(
+            ready=preparation.ready, workspace=current
+        )
+
+    monkeypatch.setattr(window.queue_controller, "enqueue", enqueue)
+    try:
+        window.start_training()
+        assert captured == [{}]
+        assert workspace.project.user_metadata["modeled_by"] == "Shared author"
+    finally:
+        window.queue_controller.preparing = None

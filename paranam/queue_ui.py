@@ -24,6 +24,7 @@ class QueueActions:
                 )
             if not self.workspace.training_ready():
                 raise ValueError("Complete every planned capture first.")
+            self.metadata_editor.emit_metadata()
             self.queue_controller.enqueue(self.workspace)
             self.queue_controller.preparing.ready.connect(self._new_queue_entry)
             self.navigate(4)
