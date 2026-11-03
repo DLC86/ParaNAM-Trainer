@@ -41,6 +41,8 @@ def build():
         "-B",
         ROOT / "build" / "playback",
         "-DCMAKE_BUILD_TYPE=Release",
+        # The pinned AudioDSPTools headers require Clang on Linux, as in the plugin.
+        *(["-DCMAKE_CXX_COMPILER=clang++"] if sys.platform.startswith("linux") else []),
     )
     run(
         "cmake",
