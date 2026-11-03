@@ -159,6 +159,11 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     spec["model"]["net"]["config"]["hypernet"]["hidden_sizes"] = [4]
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     spec["data"]["common"]["require_input_pre_silence"] = None
+    # Diagnostic WAVs are intentionally short; production jobs reserve 0..10s
+    # and the final 9s. Still exercise the separate Train ESR evaluation path.
+    for split in ("train", "train_evaluation"):
+        for entry in spec["data"][split]:
+            entry.update(start_seconds=0, stop_seconds=None)
     atomic_write_json(job / "spec.json", spec)
     # Exercise checkpoint writing AND reloading in two independent frozen processes.
     command(job, "pause")
@@ -210,6 +215,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     assert validation["validation_esr_lite"] is not None
     assert validation["optimizer"] == "Adam"
     assert validation["validation_esr"] == progress["best_esr"]
+    assert progress["train_esr_full"] is not None
+    assert progress["train_esr_lite"] is not None
+    assert progress["best_train_esr"] <= progress["train_esr_full"]
     intermediate_result = read_json(job / "export-result.json")
     assert intermediate_result.get("ok"), intermediate_result
     snapshot = read_json(intermediate)
@@ -274,9 +282,11 @@ def validate_static(executable, build_directory):
     ws.save()
     job = make_job(ws)
     spec = read_json(job / "spec.json")
-    for split in ("train", "validation"):
+    for split in ("train", "validation", "train_evaluation"):
         for entry in spec["data"][split]:
-            entry.update(x_path="diagnostic.wav", ny=8192)
+            entry.update(
+                x_path="diagnostic.wav", ny=8192, start_seconds=0, stop_seconds=None
+            )
     spec["data"]["common"]["require_input_pre_silence"] = None
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     atomic_write_json(job / "spec.json", spec)
@@ -311,6 +321,8 @@ def validate_static(executable, build_directory):
         assert validation["validation_esr_lite"] is not None
         assert validation["optimizer"] == "Adam"
         validate_playback(executable, Path(path))
+        assert progress["train_esr_full"] is not None
+        assert progress["train_esr_lite"] is not None
     print(
         "Frozen app trained, paused and resumed two independent static A2 models",
         flush=True,

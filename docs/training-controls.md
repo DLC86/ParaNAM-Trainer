@@ -1,15 +1,42 @@
-# Training controls in 0.4.4
+# Training controls
 
 ## Log and ESR curves
 
 Each epoch updates one live progress line. Once validation finishes, that line
-contains Lite ESR, Full ESR (the primary checkpoint reference), and their mean.
+contains Validation ESR (Lite, Full and their mean), followed by Train ESR
+(Lite and Full). Both are evaluated with fixed end-of-epoch weights, without
+gradient updates. Validation ESR uses only separate validation captures. Train
+ESR uses only the final nine seconds in training captures, matching the official
+NAM v3 validation interval. Each capture contributes
+equally to its split's average, independently of its signal level. Train ESR is
+not the error on the audio used to update weights during the epoch.
+
+Train ESR calls NAM's `nam.models.losses.esr` directly on each complete held-out
+recording (`ny=None`, batch size 1, `pad_start=False`). Dataset context and delay
+alignment follow the same NAM code as official static validation. It then
+averages the per-capture ESRs equally. Validation ESR retains the existing
+separate seven-second validation recordings; the two metrics therefore use
+different clip boundaries. Train ESR follows the official static trainer's
+measurement, whereas Validation ESR also tests unseen control combinations.
+
+Static and parametric jobs use the official NAM v3 training interval: start at
+10 seconds and stop 9 seconds before the end. Neither copy of the validation
+audio enters gradient training. This layout also applies to TTS input v11;
+custom inputs must retain the same initial/final structure. Validation captures
+continue to use their whole separate validation recording. Queue shows separate
+**Best Validation ESR (Full)** and **Best Train ESR (Full)** cards; the minima
+can occur at different epochs. Best checkpoint selection and export continue to
+use Validation ESR only.
+
+Jobs made before this split change require a new run, since their weights have
+already learned the reserved segments. Existing recordings can be reused.
 The details viewer retains the entire log instead of only its last 18,000 bytes;
 repeated progress updates replace the current line. Diagnostic messages remain.
 Long lines scroll horizontally so an epoch does not wrap into multiple rows.
 
-The chart below the log shows Full and Lite validation ESR for each completed
-epoch, on a labelled logarithmic axis. Lower values are better. Missing or
+The chart below the log has **Full ESR chart** and **Lite ESR chart** tabs. Each
+shows Validation ESR (solid blue) and Train ESR (dashed orange) for its own model
+size at each completed epoch, on a labelled logarithmic axis. Lower values are better. Missing or
 nonfinite values break a curve rather than becoming a misleading point. History
 is saved with progress and checkpoints and survives pause/resume. Each static
 capture or ensemble member has its own displayed history.
@@ -37,8 +64,8 @@ neither a low LR nor clipping guarantees the absence of nonfinite gradients.
 The defaults retain 0.4.3 behavior: both protections enabled for HyperA2, with
 clipping norm 1.0; both disabled for static A2. Preferences are saved separately
 for static and parametric modes and recorded in each job's spec. Changing a
-recipe, an LR or gradient controls requires a new run. Existing 0.4.3 jobs can
-resume with matching original settings and optimizer state.
+recipe, an LR or gradient controls requires a new run. Jobs using the reserved
+validation-audio protocol can resume with matching settings and optimizer state.
 
 ## Presets
 

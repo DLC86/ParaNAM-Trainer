@@ -47,8 +47,9 @@ def test_navigation_brand_recent_rows_and_responsive_queue(window, workspace, qa
     window._attach(workspace)
     window.show()
     settle(qapp)
-    assert [button.text() for button in window.steps] == [
-        "Projects",
+    assert all(button.text().startswith(" ") for button in window.steps)
+    assert [button.text().strip() for button in window.steps] == [
+        "Project",
         "Plan",
         "Capture",
         "Train",

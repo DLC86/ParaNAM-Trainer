@@ -252,6 +252,9 @@ def test_checkpoint_resume_after_first_epoch_survives_project_edits(
     spec = read_json(job / "spec.json")
     spec["learning"]["trainer"].update(limit_train_batches=8, limit_val_batches=1)
     spec["data"]["common"]["require_input_pre_silence"] = None
+    for split in ("train", "train_evaluation"):
+        for item in spec["data"][split]:
+            item.update(start_seconds=0, stop_seconds=None)
     spec["model"]["net"]["config"]["hypernet"]["hidden_sizes"] = [4]
     frozen = Workspace(Path(spec["project"]))
     for item in spec["data"]["validation"]:
@@ -310,6 +313,9 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     spec = read_json(job / "spec.json")
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     spec["data"].setdefault("common", {})["require_input_pre_silence"] = None
+    for split in ("train", "train_evaluation"):
+        for item in spec["data"][split]:
+            item.update(start_seconds=0, stop_seconds=None)
     frozen = Workspace(Path(spec["project"]))
     for item in spec["data"]["validation"]:
         item["x_path"] = frozen.project.train_input

@@ -105,10 +105,11 @@ def test_real_static_batch_pause_resume_and_metadata(
     spec["data"]["common"].update(
         x_path="test-input.wav", ny=32, require_input_pre_silence=None
     )
-    for split in ("train", "validation"):
+    for split in ("train", "validation", "train_evaluation"):
         for entry in spec["data"][split]:
             entry["x_path"] = "test-input.wav"
             entry["ny"] = 32
+            entry.update(start_seconds=0, stop_seconds=None)
     spec["model"]["loss"] = {"val_loss": "esr"}
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     atomic_write_json(job / "spec.json", spec)
@@ -141,6 +142,8 @@ def test_real_static_batch_pause_resume_and_metadata(
     training.run_job(job)
     progress = training.job_progress(job)
     assert progress["status"] == "completed", progress
+    assert progress["train_esr_full"] is not None
+    assert progress["best_train_esr"] <= progress["train_esr_full"]
     assert len(progress["exports"]) == 2
     for path, name in zip(progress["exports"], ("Capture 1", "Lead")):
         model = read_json(Path(path))

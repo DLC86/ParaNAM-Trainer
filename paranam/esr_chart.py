@@ -1,19 +1,38 @@
-"""Dependency-free Qt chart of completed validation epochs."""
+"""Dependency-free Qt chart of held-out ESR at completed epochs."""
 
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QTabWidget, QWidget
+
+
+class ESRCharts(QTabWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.charts = {}
+        for size in ("full", "lite"):
+            chart = ESRChart(size=size)
+            self.charts[size] = chart
+            self.addTab(chart, f"{size.title()} ESR chart")
+
+    def set_history(self, history):
+        for chart in self.charts.values():
+            chart.set_history(history)
 
 
 class ESRChart(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, size="full"):
         super().__init__(parent)
+        self.model_size = size
         self.history = []
-        self.setMinimumHeight(190)
-        self.setMaximumHeight(240)
-        self.setAccessibleName("Full and Lite validation ESR by epoch")
+        self.setMinimumHeight(215)
+        self.setMaximumHeight(265)
+        self.setAccessibleName(f"{size.title()} Validation ESR and Train ESR by epoch")
+        self.setToolTip(
+            "Solid: validation captures. Dashed: held-out audio in training captures. "
+            "Each score is an equal-weight mean over captures, evaluated at epoch end."
+        )
 
     def set_history(self, history):
         history = [dict(entry) for entry in history]
@@ -26,11 +45,13 @@ class ESRChart(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#292929"))
         painter.setPen(QColor("#eeeeee"))
-        painter.drawText(12, 22, "Validation ESR · log scale · completed epochs")
+        painter.drawText(
+            12, 22, f"{self.model_size.title()} ESR · log scale · completed epochs"
+        )
         values = [
             max(float(entry[key]), 1e-12)
             for entry in self.history
-            for key in ("full", "lite")
+            for key in (self.model_size, f"train_{self.model_size}")
             if entry.get(key) is not None
             and math.isfinite(entry[key])
             and entry[key] >= 0
@@ -86,10 +107,16 @@ class ESRChart(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             "Epoch",
         )
-        for index, (size, color) in enumerate(
-            (("full", "#ff7777"), ("lite", "#7fc7ed"))
+        for index, (size, color, title) in enumerate(
+            (
+                (self.model_size, "#7fc7ed", "Validation ESR"),
+                (f"train_{self.model_size}", "#ffbb77", "Train ESR"),
+            )
         ):
-            painter.setPen(QPen(QColor(color), 2))
+            pen = QPen(QColor(color), 2)
+            if size.startswith("train_"):
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
             path = QPainterPath()
             connected = False
             for entry in self.history:
@@ -107,8 +134,8 @@ class ESRChart(QWidget):
             painter.drawPath(path)
             last = self.history[-1].get(size)
             text = (
-                f"{size.title()}  {last:.6g}"
+                f"{title}  {last:.6g}"
                 if last is not None and math.isfinite(last)
-                else size.title()
+                else title
             )
-            painter.drawText(15 + index * 200, 40, text)
+            painter.drawText(15 + index * max(220, self.width() // 2), 40, text)

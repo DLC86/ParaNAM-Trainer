@@ -82,6 +82,10 @@ def job_can_resume(workspace, job):
     if not job:
         return False
     spec = read_json(Path(job) / "spec.json", {})
+    from .evaluation import PROTOCOL
+
+    if spec.get("evaluation_protocol") != PROTOCOL:
+        return False
     progress = job_progress(job)
     saved_options = spec.get("preferences", {}).get("advanced_training")
     safety_keys = (
@@ -216,6 +220,16 @@ def make_job(workspace, resume=False, job_directory=None):
     with FileLock(str(root / "worker.lock"), timeout=0):
         if resume:
             job = current_job(workspace.directory)
+            from .evaluation import PROTOCOL
+
+            if (
+                job
+                and read_json(job / "spec.json").get("evaluation_protocol") != PROTOCOL
+            ):
+                raise ValueError(
+                    "Start a new training run to reserve the initial and final validation audio. "
+                    "Older checkpoints already learned those segments; existing captures can be reused."
+                )
             if not job_can_resume(workspace, job):
                 raise ValueError(
                     "The saved checkpoint does not match this project's current captures/settings."
@@ -349,6 +363,9 @@ def make_job(workspace, resume=False, job_directory=None):
             entry["ny"] = options["ny"]
         for entry in data["validation"]:
             entry["ny"] = None
+        from .evaluation import PROTOCOL, reserve_validation_audio
+
+        reserve_validation_audio(data)
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
         learning["checkpoint_metric"] = "ESR_full"
@@ -390,6 +407,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 "round": round_index,
                 "members": members,
                 "data": data,
+                "evaluation_protocol": PROTOCOL,
                 "model": model,
                 "learning": learning,
                 "preferences": prefs,
@@ -565,7 +583,7 @@ def export_best_model(trainer, spec, member, target):
     return str(target)
 
 
-def build_progress_callback(job, spec, member, shared):
+def build_progress_callback(job, spec, member, shared, evaluation_data=None):
     from pytorch_lightning.callbacks import Callback
 
     label = (
@@ -585,6 +603,8 @@ def build_progress_callback(job, spec, member, shared):
                 else []
             )
             self.best = None
+            self.best_train = None
+            self.train_evaluator = None
             self.best_metrics = None
             self.last_metrics = None
             self.best_lite_metrics = None
@@ -685,6 +705,7 @@ def build_progress_callback(job, spec, member, shared):
                 "last_validation": self.last_metrics,
                 "best_lite_validation": self.best_lite_metrics,
                 "best_esr": self.best,
+                "best_train_esr": self.best_train,
                 "epoch_times": self.epoch_times,
                 "esr_history": self.esr_history,
                 "torch_rng": torch.get_rng_state(),
@@ -701,6 +722,9 @@ def build_progress_callback(job, spec, member, shared):
             checkpoint["validation_esr_full"] = (self.last_metrics or {}).get("full")
             checkpoint["validation_esr_lite"] = (self.last_metrics or {}).get("lite")
             checkpoint["best_validation_esr_full"] = self.best
+            checkpoint["best_train_esr_full"] = self.best_train
+            checkpoint["train_esr_full"] = (self.last_metrics or {}).get("train_full")
+            checkpoint["train_esr_lite"] = (self.last_metrics or {}).get("train_lite")
 
         def load_state_dict(self, data):
             import random
@@ -709,6 +733,7 @@ def build_progress_callback(job, spec, member, shared):
 
             current_reference = data.get("validation_reference") == "full"
             self.best = data.get("best_esr") if current_reference else None
+            self.best_train = data.get("best_train_esr") if current_reference else None
             self.best_metrics = (
                 data.get("best_validation") if current_reference else None
             )
@@ -744,6 +769,7 @@ def build_progress_callback(job, spec, member, shared):
                 member=member,
                 elapsed=self.base + time.monotonic() - self.started,
                 best_esr=self.best,
+                best_train_esr=self.best_train,
                 validation_reference="full",
                 epoch_times=self.epoch_times,
                 esr_history=self.esr_history,
@@ -844,6 +870,28 @@ def build_progress_callback(job, spec, member, shared):
                 return float(value.detach().cpu()) if value is not None else None
 
             lite, full = size_esr("lite"), size_esr("full")
+            train_scores = {"lite": None, "full": None}
+            data = (
+                evaluation_data if evaluation_data is not None else spec.get("data", {})
+            )
+            if data.get("train_evaluation"):
+                from .evaluation import TrainEvaluator
+
+                if self.train_evaluator is None:
+                    self.train_evaluator = TrainEvaluator(
+                        data, spec["model"], module.net
+                    )
+                self.print_progress(trainer, 1, "Evaluating Train ESR")
+                train_scores = self.train_evaluator.compute(
+                    module.net, module.device, self.check_action
+                )
+            train_full, train_lite = train_scores["full"], train_scores["lite"]
+            if (
+                train_full is not None
+                and math.isfinite(train_full)
+                and (self.best_train is None or train_full < self.best_train)
+            ):
+                self.best_train = train_full
             epoch = trainer.current_epoch + 1
             total_epochs = spec["preferences"]["epochs"]
 
@@ -856,10 +904,12 @@ def build_progress_callback(job, spec, member, shared):
                 "\r"
                 + epoch_line(epoch, total_epochs, label, 1, "Validation ESR")
                 + " | "
-                f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}",
+                f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}"
+                f" | Train ESR | Lite={display(train_lite)} | Full={display(train_full)}",
                 flush=True,
             )
             self.last_metrics = dict(epoch=epoch, full=full, lite=lite, mean=esr)
+            self.last_metrics.update(train_full=train_full, train_lite=train_lite)
             self.esr_history = [
                 entry for entry in self.esr_history if entry["epoch"] < epoch
             ]
@@ -908,7 +958,14 @@ def build_progress_callback(job, spec, member, shared):
                 esr_lite=lite,
                 esr_full=full,
                 esr_mean=esr,
+                train_esr_full=train_full,
+                train_esr_lite=train_lite,
             )
+
+        def teardown(self, trainer, module, stage):
+            if self.train_evaluator is not None:
+                self.train_evaluator.close()
+                self.train_evaluator = None
 
         def on_fit_end(self, trainer, module):
             self.save_boundary(trainer, trainer.current_epoch)
@@ -1046,6 +1103,13 @@ def run_job(job):
         os.chdir(workspace.directory)
         torch.set_num_threads(max(1, min(8, (os.cpu_count() or 2) - 1)))
         try:
+            from .evaluation import PROTOCOL
+
+            if spec.get("evaluation_protocol") != PROTOCOL:
+                raise ValueError(
+                    "Retrain this instance to reserve the initial and final validation audio. "
+                    "Existing captures can be reused."
+                )
             if spec.get("static_captures") is not None:
                 from .static_training import run_batch
 

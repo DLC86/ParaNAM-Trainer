@@ -214,7 +214,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.steps = []
         for index, text in enumerate(
             (
-                "Projects",
+                "Project",
                 "Plan",
                 "Capture",
                 "Train",
@@ -222,7 +222,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 "Compare",
             )
         ):
-            step = button(text, lambda checked=False, i=index: self.navigate(i))
+            step = button(f" {text}", lambda checked=False, i=index: self.navigate(i))
             step.setObjectName("step")
             step.setIcon(navigation_icon(index))
             step.setIconSize(QSize(24, 24))
@@ -230,7 +230,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             rail.addWidget(step)
             self.steps.append(step)
         rail.addStretch()
-        self.settings_button = button("Settings", lambda: self.navigate(6))
+        self.settings_button = button(" Settings", lambda: self.navigate(6))
         self.settings_button.setObjectName("step")
         self.settings_button.setIcon(navigation_icon(6))
         self.settings_button.setIconSize(QSize(24, 24))
@@ -489,7 +489,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         box.addLayout(signal_form)
         box.addWidget(
             label(
-                "Custom input must be mono at 48 kHz to match the fixed validation signal. Validation is always captured through your rig separately.",
+                "Custom input must be mono at 48 kHz and retain the standard initial/final validation segments (as in TTS v11). Training excludes the first 10 and final 9 seconds. Validation is also captured separately.",
                 "muted",
             )
         )
@@ -825,7 +825,15 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         layout.addLayout(self.queue_run_row)
         self.queue_table = QTableWidget(0, 7)
         self.queue_table.setHorizontalHeaderLabels(
-            ["Order", "Project", "Created", "Model", "Status", "Epoch", "Full ESR"]
+            [
+                "Order",
+                "Project",
+                "Created",
+                "Model",
+                "Status",
+                "Epoch",
+                "Validation Full ESR",
+            ]
         )
         self.queue_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -881,7 +889,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         for index, (name, text) in enumerate(
             (
                 ("epoch", "EPOCH"),
-                ("esr", "BEST FULL ESR"),
+                ("esr", "BEST VALIDATION ESR (FULL)"),
+                ("train_esr", "BEST TRAIN ESR (FULL)"),
                 ("elapsed", "ELAPSED"),
                 ("eta", "REMAINING"),
             )
@@ -918,13 +927,13 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.details.setReadOnly(True)
         self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.details.setMinimumHeight(180)
-        from .esr_chart import ESRChart
+        from .esr_chart import ESRCharts
 
-        self.esr_chart = ESRChart()
-        self.esr_chart.setMinimumHeight(160)
-        self.esr_chart.setMaximumHeight(16777215)
-        self.training_tabs = QTabWidget()
-        self.training_tabs.addTab(self.esr_chart, "ESR chart")
+        self.esr_chart = ESRCharts()
+        for chart in self.esr_chart.charts.values():
+            chart.setMinimumHeight(160)
+            chart.setMaximumHeight(16777215)
+        self.training_tabs = self.esr_chart
         self.training_tabs.addTab(self.details, "Training log")
         layout.addWidget(self.training_tabs, 1)
 
@@ -2148,6 +2157,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.metrics["epoch"].setText(f"{epoch} / {epochs}")
         esr = progress.get("best_esr")
         self.metrics["esr"].setText("—" if esr is None else f"{esr:.5f}")
+        train_esr = progress.get("best_train_esr")
+        self.metrics["train_esr"].setText(
+            "—" if train_esr is None else f"{train_esr:.5f}"
+        )
         live = (
             max(0, time.time() - progress.get("updated_at", time.time()))
             if self.selected_job_id == self.queue_controller.active_id

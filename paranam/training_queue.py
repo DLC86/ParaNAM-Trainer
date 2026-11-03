@@ -363,6 +363,13 @@ class TrainingQueue:
                 "This instance's files are unavailable. Reconnect its project drive before resuming."
             )
         workspace = Workspace(Path(spec["project"]))
+        from .evaluation import PROTOCOL
+
+        if spec.get("evaluation_protocol") != PROTOCOL:
+            raise ValueError(
+                "Retrain this instance to reserve the initial and final validation audio. "
+                "Existing captures can be reused."
+            )
         if not spec.get("queue_snapshot"):
             if not training.job_can_resume(workspace, job):
                 raise ValueError(

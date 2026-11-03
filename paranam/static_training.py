@@ -148,7 +148,9 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             e.y_path for e in workspace.project.entries if e.capture_id == capture["id"]
         }
         data = copy.deepcopy(spec["data"])
-        for split in ("train", "validation"):
+        for split in ("train", "validation", "train_evaluation"):
+            if split not in data:
+                continue
             data[split] = [e for e in data[split] if e["y_path"] in paths]
             if len(data[split]) != 1:
                 raise ValueError(
@@ -177,7 +179,9 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             elapsed=elapsed_base + time.monotonic() - clock_start,
             message=f"Training A2 Full + Lite: {capture['name']}",
         )
-        callback = build_progress_callback(job, spec, member, shared)
+        callback = build_progress_callback(
+            job, spec, member, shared, evaluation_data=data
+        )
         train(data, spec["model"], learning, output, callback)
         model = read_json(output / "model.nam")
         model.setdefault("metadata", {}).update(metadata)

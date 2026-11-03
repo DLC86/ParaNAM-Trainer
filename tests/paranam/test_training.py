@@ -71,6 +71,7 @@ def tiny_job(workspace, monkeypatch):
         },
         "train": [{"params": {"Gain": 3.0}}],
         "validation": [{"params": {"Gain": 7.0}}],
+        "train_evaluation": [{"params": {"Gain": 3.0}, "ny": None}],
     }
     spec["model"]["net"]["config"]["hypernet"].update(
         mode="low_rank", rank=2, hidden_sizes=[4]
@@ -141,6 +142,10 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     captured = capsys.readouterr()
     assert "Validation ESR | Lite=" in captured.out
     assert "Full (checkpoint)=" in captured.out and "Mean=" in captured.out
+    assert "Train ESR | Lite=" in captured.out
+    assert progress["train_esr_full"] is not None
+    assert progress["best_train_esr"] <= progress["train_esr_full"]
+    assert progress["esr_history"][-1]["train_lite"] is not None
     assert "Epoch 1/" in captured.out
     assert progress["esr_lite"] is not None and progress["esr_full"] is not None
     assert progress["esr_mean"] == pytest.approx(
@@ -150,6 +155,7 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
         "Epoch" in captured.out + captured.err and "100%" in captured.out + captured.err
     )
     resumed = torch.load(job / "resume-0.ckpt", map_location="cpu", weights_only=False)
+    assert resumed["best_train_esr_full"] == progress["best_train_esr"]
     assert resumed["global_step"] >= checkpoint["global_step"]
     if epochs > 1:
         assert resumed["global_step"] > checkpoint["global_step"]
