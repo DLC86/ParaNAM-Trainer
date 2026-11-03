@@ -11,14 +11,16 @@ Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
 **[Download the 0.5.1 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.1-preview)**
 
-Version 0.5.1 adds a persistent **Training queue** and **Play** screen. Each Train
+Version 0.5.1 adds larger, centered **Play & Compare** controls, aligned calibration fields,
+and a **Retrain** action that opens an editable copy of a completed job before starting fresh.
+The persistent **Training queue** and **Play & Compare** screen introduced in 0.5.0 remain available. Each Train
 click creates a separate instance with frozen audio, metadata and training settings.
 Edit or capture another project while the queue runs, reorder waiting jobs, and
 pause/resume individual instances independently of the open project. Metadata
 defaults now live in Train & export. Project & routing also configures Instrument
 input and stereo Monitor outputs. Calibrate Instrument using the measured sine
 cable, then play static or parametric models and compare the real Gear / Model
-through the same monitoring route. [Workflow and playback details](docs/workflow-0.5.1.md).
+through the same monitoring route. [Workflow and playback details](docs/workflow-0.5.0.md).
 
 Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
 an intermediate **Export best PNAM/NAM** button during training, independent base and
