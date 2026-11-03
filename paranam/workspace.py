@@ -209,6 +209,12 @@ class Workspace:
     def desired_train_input(self):
         if self.preferences["input_mode"] == "standard":
             return "input_standard.wav"
+        if self.preferences["input_mode"] == "tts":
+            from .signals import install_signals
+
+            if not (self.directory / "input_tts_v11.wav").is_file():
+                install_signals(self.directory, include_tts=True)
+            return "input_tts_v11.wav"
         relative = self.preferences.get("custom_input")
         if not relative or not (self.directory / relative).is_file():
             raise ValueError(
@@ -217,6 +223,11 @@ class Workspace:
         return relative
 
     def plan_changed(self):
+        calibration = self.preferences.get("pending_calibration", {})
+        if any(
+            value != getattr(self.project, key) for key, value in calibration.items()
+        ):
+            return True
         if self.preferences["capture_level_dbfs"] != self.project.capture_level_dbfs:
             return True
         if self.preferences["capture_type"] != self.project.capture_type:

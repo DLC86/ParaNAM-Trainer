@@ -9,7 +9,7 @@ from paranam.workspace import Workspace
 
 def test_exact_offline_assets_are_in_project_and_manifest(workspace):
     assets = verify_assets()
-    assert [a["seconds"] for a in assets] == [190, 7]
+    assert [a["seconds"] for a in assets] == [190, 7, 300]
     assert all(a["sample_rate"] == 48000 and a["channels"] == 1 for a in assets)
     assert workspace.project.train_input == "input_standard.wav"
     assert workspace.validation_matches()

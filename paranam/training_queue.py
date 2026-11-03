@@ -78,7 +78,11 @@ def snapshot_workspace(workspace, root):
         (
             "input_standard.wav"
             if preferences["input_mode"] == "standard"
-            else "input_custom.wav"
+            else (
+                "input_tts_v11.wav"
+                if preferences["input_mode"] == "tts"
+                else "input_custom.wav"
+            )
         ),
     )
     preferences["custom_input"] = (
@@ -165,10 +169,12 @@ class TrainingQueue:
         return entry
 
     def retrain(self, identifier):
-        """Open an editable copy of a completed instance, with no resume pointer."""
+        """Open an editable copy of an already started instance, without resuming."""
         entry = self.get(identifier)
-        if not entry or entry["state"] != "completed":
-            raise ValueError("Select a completed training instance to retrain.")
+        if not entry or entry["state"] == "queued":
+            raise ValueError(
+                "Select an instance that has already started; queued jobs cannot be retrained."
+            )
         spec = read_json(Path(entry["job"]) / "spec.json")
         if not spec or not Path(spec.get("project", "")).is_dir():
             raise ValueError("Reconnect the drive containing this training instance.")
@@ -187,6 +193,10 @@ class TrainingQueue:
         )
         target.mkdir(parents=True)
         project = original.project.model_copy(deep=True)
+        # Suggested future active-learning captures were not part of this job.
+        project.entries = [
+            capture for capture in project.entries if capture.status == "captured"
+        ]
         preferences = copy.deepcopy(original.preferences)
 
         def copy_audio(path, relative):
@@ -200,7 +210,11 @@ class TrainingQueue:
             (
                 "input_standard.wav"
                 if preferences["input_mode"] == "standard"
-                else "input_custom.wav"
+                else (
+                    "input_tts_v11.wav"
+                    if preferences["input_mode"] == "tts"
+                    else "input_custom.wav"
+                )
             ),
         )
         project.validation_input = copy_audio(

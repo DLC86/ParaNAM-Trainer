@@ -152,7 +152,7 @@ def test_switch_coverage_recommendations_and_signal_selection(window, workspace)
     assert window.n_validation.value() == 18
     assert "6 switch" in window.recommendation.text()
     assert not window.custom_button.isEnabled()
-    window.signal_mode.setCurrentIndex(1)
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("custom"))
     assert window.custom_button.isEnabled()
     assert workspace.preferences["input_mode"] == "custom"
 
@@ -178,7 +178,7 @@ def test_sidebar_handles_missing_custom_input_without_losing_the_project(
 ):
     window._attach(workspace)
     window.navigate(1)
-    window.signal_mode.setCurrentIndex(1)
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("custom"))
     messages = []
     monkeypatch.setattr(
         window, "notify_error", lambda error: messages.append(str(error))

@@ -219,11 +219,13 @@ class QueueActions:
             directory = self.workspace.directory / "models"
         if directory:
             directory.mkdir(parents=True, exist_ok=True)
+            self.remember_directory(directory, True)
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
     def update_enabled(self, *_):
         if not hasattr(self, "queue_table"):
             return
+        self.export_status.setVisible(bool(self.export_status.text()))
         active, present = self.busy(), self.workspace is not None
         listening = getattr(self, "play_worker", None) is not None
         if hasattr(self, "play_transport_bar"):
@@ -263,7 +265,8 @@ class QueueActions:
             and self.capture_table.currentRow() >= 0
         )
         self.rig_ready.setEnabled(present and not active and not preparing_here)
-        self.capture_table.setEnabled(not active)
+        self.capture_table.setEnabled(True)
+        self.capture_table.selection_locked = self.worker is not None
         self.cancel_button.setEnabled(self.worker is not None)
         if hasattr(self, "play_start"):
             play_idle = self.play_worker is None and self.play_loader is None
@@ -273,9 +276,11 @@ class QueueActions:
             self.play_start.setEnabled(
                 present and self._play_ready and play_idle and self.worker is None
             )
-            self.play_open.setEnabled(play_idle and self.worker is None)
-            self.play_refresh.setEnabled(play_idle and self.worker is None)
-            self.play_model.setEnabled(play_idle and self.worker is None)
+            self.play_open.setEnabled(self.play_loader is None and self.worker is None)
+            self.play_refresh.setEnabled(
+                self.play_loader is None and self.worker is None
+            )
+            self.play_model.setEnabled(self.play_loader is None and self.worker is None)
         ready = present and self.workspace.training_ready()
         self.next_button.setEnabled(
             present and not active and (self.pages.currentIndex() != 2 or ready)
@@ -303,7 +308,7 @@ class QueueActions:
         resumable = state in FINISHED - {"completed", "needs_captures"} and not running
         self.resume_button.setEnabled(resumable)
         self.retrain_button.setEnabled(
-            state == "completed" and not active and not preparing
+            state is not None and state != "queued" and not active and not preparing
         )
         self.resume_batch_size.setEnabled(resumable)
         self.resume_device.setEnabled(resumable)

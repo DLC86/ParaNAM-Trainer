@@ -185,7 +185,7 @@ class PlayWorker(QThread):
         self.instrument_dbu, self.lite = instrument_dbu, lite
         self.stopping = threading.Event()
         self.settings = dict(
-            parameters=None, input_db=0.0, output_db=-18.0, source="model"
+            parameters=None, input_db=0.0, output_db=0.0, source="model"
         )
 
     def run(self):
@@ -205,7 +205,11 @@ class PlayWorker(QThread):
                 self.instrument_dbu, self.project.output_level_dbu
             )
             reamp_gain = send_gain(self.project, self.instrument_dbu)
-            last_parameters, blend, count = None, 1.0, 0
+            last_parameters, blend, count = (
+                None,
+                (1.0 if self.settings["source"] == "model" else 0.0),
+                0,
+            )
             current_input, current_output = 0.0, 0.0
             callback_error = []
 

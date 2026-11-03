@@ -9,18 +9,20 @@ with the established recording, alignment and model code retained.
 The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.5.1 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.1-preview)**
+**[Download the 0.5.2 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.2-preview)**
 
-Version 0.5.1 adds larger, centered **Play & Compare** controls, aligned calibration fields,
-and a **Retrain** action that opens an editable copy of a completed job before starting fresh.
-The persistent **Training queue** and **Play & Compare** screen introduced in 0.5.0 remain available. Each Train
-click creates a separate instance with frozen audio, metadata and training settings.
-Edit or capture another project while the queue runs, reorder waiting jobs, and
-pause/resume individual instances independently of the open project. Metadata
-defaults now live in Train & export. Project & routing also configures Instrument
-input and stereo Monitor outputs. Calibrate Instrument using the measured sine
-cable, then play static or parametric models and compare the real Gear / Model
-through the same monitoring route. [Workflow and playback details](docs/workflow-0.5.0.md).
+Version 0.5.2 remembers the latest audio/calibration setup and file-picker folder,
+adds the bundled **TTS input v11** option, simplifies static capture setup, and
+improves capture-table scrolling and progress. Exported filenames follow model
+Name metadata. **Play & Compare** supports changing model, Full/Lite and playback
+buffer while listening, with Input/Output at ±20 dB and corrected knob dragging.
+The refreshed sidebar and checkbox styling accompany expanded queue charts/logs
+and a top-row **Retrain** action for previously started jobs.
+[Complete 0.5.2 changes](docs/release-0.5.2.md).
+
+The persistent queue keeps training instances independent of project edits;
+record another project while it runs. Native static/parametric playback supports
+calibrated comparison with the real rig. [Workflow details](docs/workflow-0.5.0.md).
 
 Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
 an intermediate **Export best PNAM/NAM** button during training, independent base and

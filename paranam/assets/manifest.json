@@ -16,5 +16,14 @@
     "frames": 336000,
     "channels": 1,
     "seconds": 7.0
+  },
+  {
+    "file": "tts-input-v11.wav",
+    "source": "User-provided TTS input v11.wav",
+    "sha256": "d98ebacbc7b4baf90afa4724396772da1c646d904dc8c46c4ca271fc4a6876ca",
+    "sample_rate": 48000,
+    "frames": 14400000,
+    "channels": 1,
+    "seconds": 300.0
   }
 ]

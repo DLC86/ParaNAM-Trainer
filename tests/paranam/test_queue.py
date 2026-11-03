@@ -138,7 +138,7 @@ def test_retrain_edits_completed_instance_copy_before_creating_fresh_job(
     )
     assert (job / "spec.json").read_bytes() == spec_before
     assert queue.get(entry["id"])["state"] == "completed"
-    with pytest.raises(ValueError, match="completed"):
+    with pytest.raises(ValueError, match="queued"):
         queue.retrain(new["id"])
 
 
@@ -302,6 +302,8 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     from paranam.queue_controller import QueueController
 
     small_ready(workspace, kind)
+    workspace.project.user_metadata["name"] = "Named Capture"
+    workspace.save()
     controller = QueueController(tmp_path / "queue")
     entry = controller.store.add(workspace)
     job = Path(entry["job"])
@@ -338,3 +340,4 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     assert read_json(job / "spec.json")["preferences"]["epochs"] == 2
     exported = read_json(Path(progress["export"]))
     assert exported["metadata"].get("modeled_by") != "Changed after enqueue"
+    assert Path(progress["export"]).stem == exported["metadata"]["name"]

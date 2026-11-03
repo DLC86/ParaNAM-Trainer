@@ -4,8 +4,8 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QPainter, QPen, QColor
+from PySide6.QtCore import QThread, Signal, Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -58,6 +58,7 @@ class PlayDial(QDial):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._origin = event.position().y(), self.value()
+            self.setSliderDown(True)
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -72,6 +73,49 @@ class PlayDial(QDial):
             )
             self.setValue(round(self._origin[1] + delta))
             event.accept()
+
+    def mouseReleaseEvent(self, event):
+        # QDial's default release maps the cursor angle to a value. This control
+        # uses relative vertical dragging, so releasing must retain that value.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setSliderDown(False)
+            if hasattr(self, "_origin"):
+                del self._origin
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
+class ModelPlayDial(PlayDial):
+    """Same ring, body and pointer as the Capture your rig controls."""
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        center = QPointF(self.width() / 2, self.height() / 2)
+        fraction = (self.value() - self.minimum()) / max(
+            1, self.maximum() - self.minimum()
+        )
+        path = QPainterPath()
+        for i in range(101):
+            angle = math.radians(210 + 300 * i / 100)
+            point = center + QPointF(39 * math.sin(angle), -39 * math.cos(angle))
+            path.moveTo(point) if i == 0 else path.lineTo(point)
+        p.setPen(
+            QPen(QColor("#4c4c4c"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        )
+        p.drawPath(path)
+        p.setBrush(QColor("#2e2e2e"))
+        p.setPen(QPen(QColor("#656565"), 1))
+        p.drawEllipse(center, 30, 30)
+        angle = math.radians(210 + fraction * 300)
+        p.setPen(
+            QPen(QColor("#bf0000"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        )
+        p.drawLine(
+            center + QPointF(10 * math.sin(angle), -10 * math.cos(angle)),
+            center + QPointF(24 * math.sin(angle), -24 * math.cos(angle)),
+        )
 
 
 class ModelInfoLoader(QThread):
@@ -118,7 +162,6 @@ class PlayActions:
         self.play_size = QComboBox()
         self.play_size.addItem("Full", False)
         self.play_size.addItem("Lite", True)
-        row.addWidget(self.play_size)
         layout.addLayout(row)
         buffer_row = QHBoxLayout()
         buffer_row.addWidget(QLabel("Playback buffer"))
@@ -139,12 +182,13 @@ class PlayActions:
         panel = QVBoxLayout(self.play_action_bar)
         panel.setContentsMargins(16, 12, 16, 16)
         panel.setSpacing(14)
-        self.play_start = QPushButton("Start playing")
-        self.play_start.setObjectName("primary")
-        self.play_start.setFixedSize(220, 44)
+        self.play_start = QPushButton("Play")
+        self.play_start.setObjectName("comparePlay")
+        self.play_start.setFixedSize(160, 62)
         self.play_start.clicked.connect(self.start_playback)
         self.play_stop = QPushButton("Stop playing")
-        self.play_stop.setFixedSize(220, 44)
+        self.play_stop.setObjectName("comparePlay")
+        self.play_stop.setFixedSize(160, 62)
         self.play_stop.clicked.connect(self.stop_playback)
         self.play_start.setEnabled(False)
         self.play_stop.setEnabled(False)
@@ -178,8 +222,13 @@ class PlayActions:
         self.play_calibration.setWordWrap(True)
         layout.addWidget(self.play_calibration)
         controls = QHBoxLayout()
-        self.play_input = self._play_gain("Input", -24, 24, 0, controls)
-        self.play_output = self._play_gain("Output", -60, 12, -18, controls)
+        self.play_input = self._play_gain("Input", -20, 20, 0, controls)
+        self.play_output = self._play_gain("Output", -20, 20, 0, controls)
+        size_controls = QVBoxLayout()
+        size_controls.addWidget(QLabel("Model size"))
+        size_controls.addWidget(self.play_size)
+        size_controls.addStretch()
+        controls.addLayout(size_controls)
         controls.addStretch()
         layout.addLayout(controls)
         self.play_controls = QWidget()
@@ -189,11 +238,13 @@ class PlayActions:
         self.play_meter = QLabel("Input Peak — · Monitor Peak —")
         layout.addWidget(self.play_meter)
         self.play_status = QLabel(
-            "Select a model. Audio starts only when Start playing is pressed."
+            "Select a model. Audio starts only when Play is pressed."
         )
         self.play_status.setWordWrap(True)
         layout.addWidget(self.play_status)
         self.play_worker = self.play_loader = None
+        self._play_restart = self._pending_play_load = False
+        self.play_buffer.currentIndexChanged.connect(self._play_buffer_changed)
         self._play_ready = False
 
     def _play_gain(self, name, minimum, maximum, default, layout):
@@ -221,8 +272,8 @@ class PlayActions:
         return field
 
     def open_play_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load model", "", "NAM / PNAM models (*.nam *.pnam)"
+        path, _ = self.choose_open_file(
+            "Load model", "NAM / PNAM models (*.nam *.pnam)"
         )
         if path:
             recent = self.settings.value("play_models", []) or []
@@ -234,7 +285,7 @@ class PlayActions:
             self.refresh_play_models(path)
 
     def refresh_play_models(self, selected=None):
-        if self.play_worker or self.play_loader:
+        if self.play_loader:
             return
         previous = (
             selected if isinstance(selected, str) else self.play_model.currentData()
@@ -348,7 +399,12 @@ class PlayActions:
         return project
 
     def load_play_model(self, *_):
-        if self.play_worker or self.play_loader:
+        if self.play_worker:
+            self._play_restart = True
+            self._pending_play_load = True
+            self.stop_playback(reconfigure=True)
+            return
+        if self.play_loader:
             return
         path = self.play_model.currentData()
         self._play_ready = False
@@ -357,6 +413,11 @@ class PlayActions:
             self.clear_play_controls()
             return
         self.play_status.setText("Loading model…")
+        self._preserved_play_values = (
+            tuple(self.play_values)
+            if path == getattr(self, "_loaded_play_path", None)
+            else None
+        )
         self._loaded_play_path = path
         self.play_loader = ModelInfoLoader(path, self.play_size.currentData(), self)
         self.play_loader.loaded.connect(self._play_model_loaded)
@@ -378,8 +439,25 @@ class PlayActions:
             self._play_ready and self._play_info.get("size_selection", False)
         )
         self.play_start.setEnabled(self._play_ready)
+        if self._play_restart and not self._close_after_pause:
+            self._play_restart = False
+            if self._play_ready:
+                self.start_playback()
+        self.update_enabled()
 
     def _play_model_loaded(self, info):
+        values = getattr(self, "_preserved_play_values", None)
+        if values is not None and len(values) == len(info["controls"]):
+            info = {
+                **info,
+                "controls": [
+                    {
+                        **control,
+                        "default": min(control["max"], max(control["min"], value)),
+                    }
+                    for control, value in zip(info["controls"], values)
+                ],
+            }
         self._play_ready, self._play_info = True, info
         self.clear_play_controls()
         grid = self.play_controls_layout
@@ -399,7 +477,7 @@ class PlayActions:
                     lambda value, i=index: self._play_parameter(i, float(value))
                 )
             else:
-                dial = PlayDial()
+                dial = ModelPlayDial()
                 dial.setFixedSize(92, 92)
                 dial.setRange(0, 10000)
                 extent = control["max"] - control["min"]
@@ -475,6 +553,7 @@ class PlayActions:
             project = self.playback_project()
             self.workspace.preferences["playback_blocksize"] = project.audio.blocksize
             self.workspace.save()
+            self.remember_setup()
             self.play_worker = PlayWorker(
                 self.play_model.currentData(),
                 device,
@@ -490,11 +569,11 @@ class PlayActions:
             self.play_worker.start()
             self.play_start.setEnabled(False)
             self.play_stop.setEnabled(True)
-            self.play_model.setEnabled(False)
-            self.play_open.setEnabled(False)
-            self.play_refresh.setEnabled(False)
-            self.play_size.setEnabled(False)
-            self.play_buffer.setEnabled(False)
+            self.play_model.setEnabled(True)
+            self.play_open.setEnabled(True)
+            self.play_refresh.setEnabled(True)
+            self.play_size.setEnabled(self._play_info.get("size_selection", False))
+            self.play_buffer.setEnabled(True)
             self.play_status.setText("Listening · use Gear / Model to compare.")
             self.update_enabled()
         except Exception as error:
@@ -511,7 +590,9 @@ class PlayActions:
             text += " · Audio dropout: increase buffer size"
         self.play_meter.setText(text)
 
-    def stop_playback(self):
+    def stop_playback(self, checked=False, *, reconfigure=False):
+        if not reconfigure:
+            self._play_restart = False
         if self.play_worker:
             self.play_worker.stopping.set()
             self.play_stop.setEnabled(False)
@@ -527,3 +608,21 @@ class PlayActions:
         self.play_size.setEnabled(self._play_info.get("size_selection", False))
         self.play_buffer.setEnabled(True)
         self.update_enabled()
+        if self._close_after_pause:
+            self._play_restart = self._pending_play_load = False
+        elif self._pending_play_load:
+            self._pending_play_load = False
+            self.load_play_model()
+        elif self._play_restart:
+            self._play_restart = False
+            self.start_playback()
+
+    def _play_buffer_changed(self, *_):
+        if self.workspace:
+            self.workspace.preferences["playback_blocksize"] = (
+                self.play_buffer.currentData() or 0
+            )
+            self.workspace.save()
+        if self.play_worker:
+            self._play_restart = True
+            self.stop_playback(reconfigure=True)

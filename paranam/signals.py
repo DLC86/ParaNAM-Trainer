@@ -24,12 +24,15 @@ def verify_assets():
     return records
 
 
-def install_signals(directory):
+def install_signals(directory, include_tts=False):
     verify_assets()
-    for asset, target in (
+    signals = [
         ("standard.wav", "input_standard.wav"),
         ("validation.wav", "input_validation.wav"),
-    ):
+    ]
+    if include_tts:
+        signals.append(("tts-input-v11.wav", "input_tts_v11.wav"))
+    for asset, target in signals:
         destination = Path(directory) / target
         source = asset_path(asset)
         if (

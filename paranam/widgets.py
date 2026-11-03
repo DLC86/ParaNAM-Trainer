@@ -1,6 +1,7 @@
 """Native Qt drawing and editors for the capture wizard."""
 
 import math
+from PySide6 import QtSvg  # Include SVG image support in frozen installers.
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase
@@ -74,8 +75,11 @@ QPushButton#compareSource { font-size: 25px; font-weight: 700; border: 2px solid
 QPushButton#compareSource:hover { border-color: #bf0000; background: #353535; }
 QPushButton#compareSource:checked { border-color: #f04040; color: #ffffff; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #bf0000, stop:1 #790000); }
 QPushButton#compareSource:focus { border-color: #ffffff; }
+QPushButton#comparePlay { font-size: 18px; font-weight: 700; border: 2px solid #ee3434; border-radius: 16px; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #bf0000,stop:1 #790000); padding: 10px 18px; }
+QPushButton#comparePlay:hover { background: #cc1515; }
+QPushButton#comparePlay:disabled { color: #888888; border-color: #444444; background: #292929; }
 QPushButton#primary:disabled { background: #343434; color: #999999; border-color: #343434; }
-QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 10px; color: #969696; }
+QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 8px; color: #969696; font-family: 'Michroma'; font-size: 14px; }
 QPushButton#step:checked { color: #f0f0f0; background: #2b2b2b; border: 1px solid #bf0000; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background: #141414; border: 1px solid #414141; border-radius: 7px; padding: 8px; min-height: 20px; }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #bf0000; }
@@ -91,7 +95,7 @@ QScrollBar:vertical { background: #1c1c1c; width: 10px; }
 QScrollBar::handle:vertical { background: #494949; min-height: 25px; border-radius: 5px; }
 QCheckBox { spacing: 8px; padding: 3px; }
 QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #686868; border-radius: 4px; background: #1f1f1f; }
-QCheckBox::indicator:checked { background: #bf0000; border-color: #bf0000; }
+QCheckBox::indicator:checked { background: #1f1f1f; border-color: #686868; image: url("CHECKMARK_URL"); }
 QToolTip { background: #2d2d2d; color: #f0f0f0; border: 1px solid #686868; padding: 6px; }
 QTabWidget::pane { border: 1px solid #343434; background: #171717; }
 QTabBar::tab { background: #242424; color: #b8b8b8; padding: 8px 16px; border: 1px solid #343434; }

@@ -144,7 +144,7 @@ def test_real_static_batch_pause_resume_and_metadata(
     assert len(progress["exports"]) == 2
     for path, name in zip(progress["exports"], ("Capture 1", "Lead")):
         model = read_json(Path(path))
-        assert Path(path).suffix == ".nam"
+        assert Path(path).name == name + ".nam"
         assert model["architecture"] == "SlimmableContainer"
         children = model["config"]["submodels"]
         assert [child["max_value"] for child in children] == [0.5, 1.0]

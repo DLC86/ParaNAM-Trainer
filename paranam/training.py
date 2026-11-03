@@ -1132,7 +1132,12 @@ def run_job(job):
                 # Completed members from a job started by an older app may
                 # still use .nam. Read those without renaming the user's files.
                 source = source.with_suffix(".nam")
-            destination = export / "ParaNAM_HyperA2.pnam"
+            from .model_names import model_basename
+
+            model_metadata = read_json(source).get("metadata", {})
+            destination = export / (
+                model_basename(model_metadata.get("name"), "ParaNAM_HyperA2") + ".pnam"
+            )
             shutil.copy2(source, destination)
             shared.update(export=str(destination))
             exported_validation = (

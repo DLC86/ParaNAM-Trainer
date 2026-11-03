@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from nam.capture.project import atomic_write_json
+from .model_names import model_basename
 
 
 def model_config(project, size=None):
@@ -192,16 +193,15 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             callback.best_metrics,
             spec["model"]["optimizer"].get("class", "Adam"),
         )
-        safe_name = (
-            re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", capture["name"]).rstrip(" .")
-            or "Capture"
-        )
+        safe_name = model_basename(model["metadata"].get("name"), "Capture")
         export_root = (
             Path(spec["models_directory"])
             if spec.get("models_directory")
             else workspace.directory / "models" / job.name
         )
-        target = export_root / f"{member + 1:03d}-{safe_name}.nam"
+        target = export_root / f"{safe_name}.nam"
+        if str(target) in exports:
+            target = export_root / capture["id"] / f"{safe_name}.nam"
         atomic_write_json(target, model)
         exports.append(str(target))
         completed.append(member)

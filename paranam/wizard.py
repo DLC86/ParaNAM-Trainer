@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QStandardPaths,
     QUrl,
     QSize,
+    Signal,
 )
 from PySide6.QtGui import QDesktopServices, QColor, QTextCursor, QIcon
 from PySide6.QtWidgets import (
@@ -74,6 +75,8 @@ from .signals import asset_path
 from .queue_ui import QueueActions
 from .play_ui import PlayActions
 from .queue_controller import QueueController
+from .ui_preferences import UIPreferences
+from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
 
 
 def label(text, style=None):
@@ -110,12 +113,16 @@ def duration(seconds):
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes:02d}:{seconds:02d}"
 
 
-class WizardWindow(QueueActions, PlayActions, QMainWindow):
+class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
+    capture_stage = Signal(str)
+
     def __init__(self):
         super().__init__()
         load_font()
         self.setWindowTitle("ParaNAM Trainer")
-        self.setStyleSheet(THEME)
+        self.setStyleSheet(
+            THEME.replace("CHECKMARK_URL", asset_path("checkmark.svg").as_posix())
+        )
         self.resize(1260, 840)
         self.setMinimumSize(1000, 700)
         self.settings = QSettings("DLC86", "ParaNAM Trainer")
@@ -151,7 +158,11 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         self.queue_controller.changed.connect(self.refresh_training)
         self.queue_controller.failed.connect(self.notify_error)
         self._refresh_recent()
+        self._restoring_setup = True
         self.refresh_devices()
+        self.restore_startup_setup()
+        self._restoring_setup = False
+        self.capture_stage.connect(self.capture_status.setText)
         self.timer = QTimer(self)
         self.timer.setInterval(600)
         self.timer.timeout.connect(self.refresh_training)
@@ -184,21 +195,23 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         brand.addWidget(self.shop_button)
         brand.addWidget(label("ParaNAM\nTrainer", "brand"), 1)
         rail.addLayout(brand)
-        rail.addWidget(label("VERSION  /  0.5.1", "eyebrow"))
+        rail.addWidget(label("VERSION  /  0.5.2", "eyebrow"))
         rail.addSpacing(38)
         self.steps = []
         for index, text in enumerate(
             (
-                "01   Project & routing",
-                "02   Controls & plan",
-                "03   Capture your rig",
-                "04   Train & export",
-                "05   Training queue",
-                "06   Play & Compare",
+                "Project & routing",
+                "Controls & plan",
+                "Capture your rig",
+                "Train & export",
+                "Training queue",
+                "Play & Compare",
             )
         ):
             step = button(text, lambda checked=False, i=index: self.navigate(i))
             step.setObjectName("step")
+            step.setIcon(navigation_icon(index))
+            step.setIconSize(QSize(24, 24))
             step.setCheckable(True)
             rail.addWidget(step)
             self.steps.append(step)
@@ -241,12 +254,14 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         content.addWidget(self.pages, 1)
         footer = QHBoxLayout()
         self.back_button = button("← Back", self.back)
+        self.back_button.setFixedWidth(100)
         self.footer_note = label("Settings are saved as you work.", "muted")
         self.next_button = button("Next →", self.next, True)
         footer.addWidget(self.back_button)
         footer.addWidget(self.footer_note, 1)
         footer.addWidget(self.play_transport_bar)
         self.play_transport_bar.hide()
+        footer.addStretch(1)
         footer.addWidget(self.next_button)
         content.addLayout(footer)
         root.addWidget(right, 1)
@@ -270,6 +285,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         row.addStretch()
         box.addLayout(row)
         self.recent = QListWidget()
+        self.recent.setItemDelegate(RecentProjectDelegate(self.recent))
         self.recent.setMaximumHeight(180)
         self.recent.itemDoubleClicked.connect(
             lambda item: self.open_project(Path(item.data(Qt.ItemDataRole.UserRole)))
@@ -399,8 +415,8 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         )
         kind_card, kind_box = card("Model type")
         self.capture_kind = QComboBox()
-        self.capture_kind.addItem("Parametric — HyperA2 Full + Lite", "parametric")
-        self.capture_kind.addItem("Static batch — A2", "static")
+        self.capture_kind.addItem("Parametric", "parametric")
+        self.capture_kind.addItem("Static", "static")
         kind_box.addWidget(self.capture_kind)
         layout.addWidget(kind_card)
         self.capture_kind.currentIndexChanged.connect(self.save_preferences)
@@ -426,10 +442,11 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         row.addStretch()
         box.addLayout(row)
         layout.addWidget(self.control_card)
-        self.signal_card, box = card("Capture input signal")
+        self.signal_card, box = card("Input signal")
         signal_form = QFormLayout()
         self.signal_mode = QComboBox()
         self.signal_mode.addItem("Standard — bundled TONE3000 sweep", "standard")
+        self.signal_mode.addItem("TTS input v11 — bundled", "tts")
         self.signal_mode.addItem(
             "Custom — choose a training WAV from this computer", "custom"
         )
@@ -453,7 +470,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             )
         )
         self.signal_mode.currentIndexChanged.connect(self.save_preferences)
-        layout.addWidget(self.signal_card)
+        layout.insertWidget(layout.indexOf(self.control_card), self.signal_card)
         self.metadata_card, metadata_box = card(
             "Model metadata / defaults for static captures"
         )
@@ -559,7 +576,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             "muted",
         )
         layout.addWidget(self.capture_status)
-        self.capture_table = QTableWidget(0, 6)
+        self.capture_table = CaptureTable(0, 6)
         self.capture_table.setHorizontalHeaderLabels(
             [
                 "Split",
@@ -808,9 +825,9 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             QHeaderView.ResizeMode.Interactive
         )
         self.queue_table.horizontalHeader().setStretchLastSection(True)
-        self.queue_table.setMinimumHeight(120)
-        self.queue_table.setMaximumHeight(230)
-        for column, width in enumerate((45, 120, 110, 90, 100, 65, 85)):
+        self.queue_table.setMinimumHeight(100)
+        self.queue_table.setMaximumHeight(136)
+        for column, width in enumerate((56, 120, 110, 90, 100, 65, 85)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         layout.addWidget(self.queue_table, 1)
@@ -827,7 +844,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             actions.addWidget(widget)
         layout.addLayout(actions)
         secondary_actions = QHBoxLayout()
-        secondary_actions.addWidget(self.retrain_button)
+
         secondary_actions.addWidget(self.capture_round_button)
         layout.addLayout(secondary_actions)
         self.resume_options_widget = QWidget()
@@ -857,7 +874,8 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             )
         ):
             frame, metric_layout = card(text)
-            metric_layout.setContentsMargins(12, 10, 12, 10)
+            metric_layout.setContentsMargins(12, 6, 12, 6)
+            metric_layout.setSpacing(4)
             metric = label("—", "metric")
             metric.setStyleSheet("font-size: 22px;")
             metric_layout.addWidget(metric)
@@ -876,6 +894,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         row.addWidget(self.pause_button)
         row.addWidget(self.stop_button)
         row.addWidget(self.resume_button)
+        row.addWidget(self.retrain_button)
         self.export_best_button = button("Export best model", self.export_best_model)
         row.addWidget(self.export_best_button)
         row.addStretch()
@@ -885,11 +904,12 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.details.setMaximumHeight(180)
+        self.details.setMinimumHeight(180)
         from .esr_chart import ESRChart
 
         self.esr_chart = ESRChart()
-        self.esr_chart.setMinimumHeight(140)
+        self.esr_chart.setMinimumHeight(160)
+        self.esr_chart.setMaximumHeight(16777215)
         self.training_tabs = QTabWidget()
         self.training_tabs.addTab(self.esr_chart, "ESR chart")
         self.training_tabs.addTab(self.details, "Training log")
@@ -1039,23 +1059,19 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         documents = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DocumentsLocation
         )
-        parent = QFileDialog.getExistingDirectory(
-            self, "Choose where to save the project", documents
-        )
+        parent = self.choose_directory("Choose where to save the project", documents)
         if not parent:
             return
         safe_name = re.sub(r"[^\w .-]", "_", name).strip(" .") or "ParaNAM Project"
         try:
             directory = Path(parent) / safe_name
             workspace = Workspace.create(directory, name.strip(), self.audio_settings())
-            self._attach(workspace)
+            self._attach(workspace, use_last_setup=True)
         except Exception as error:
             self.notify_error(error)
 
     def open_project_dialog(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Open ParaNAM or NAM capture project"
-        )
+        path = self.choose_directory("Open ParaNAM or NAM capture project")
         if path:
             self.open_project(Path(path))
 
@@ -1063,12 +1079,14 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         if self.busy():
             return
         try:
-            self._attach(Workspace(directory))
+            self._attach(Workspace(directory), use_last_setup=True)
         except Exception as error:
             self.notify_error(error)
 
-    def _attach(self, workspace):
+    def _attach(self, workspace, use_last_setup=False):
         self.close_audio()
+        if use_last_setup:
+            self.adopt_setup(workspace)
         self.workspace = workspace
         self.queue_controller.store.register_legacy(workspace)
         self.project_label.setText(
@@ -1174,6 +1192,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         finally:
             self._loading = False
         self.save_preferences()
+        self.remember_setup()
         self.refresh_controls()
         self.refresh_captures()
         self._diagram()
@@ -1311,9 +1330,13 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
                 self._refresh_play_calibration()
             self.workspace.project.audio = updated
             self.workspace.save()
+        self.remember_setup()
 
     def save_calibration(self, *_):
-        if self._loading or not self.workspace or self.busy():
+        if self._loading or self.busy():
+            return
+        self.remember_setup()
+        if not self.workspace:
             return
         send = self.input_dbu.value() if self.input_calibration.isChecked() else None
         returned = (
@@ -1334,14 +1357,16 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         self.refresh_training()
 
     def save_instrument_calibration(self, *_):
-        if not self._loading and self.workspace and not self.busy():
-            self.workspace.preferences["instrument_level_dbu"] = (
-                self.instrument_dbu.value()
-                if self.instrument_calibration.isChecked()
-                else None
-            )
-            self.workspace.save()
+        if not self._loading and not self.busy():
+            if self.workspace:
+                self.workspace.preferences["instrument_level_dbu"] = (
+                    self.instrument_dbu.value()
+                    if self.instrument_calibration.isChecked()
+                    else None
+                )
+                self.workspace.save()
             self._refresh_play_calibration()
+            self.remember_setup()
 
     def apply_instrument_calibration(self, value):
         self._apply_level_calibration(
@@ -1354,6 +1379,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             return
         try:
             level = self.capture_level.level()
+            self.remember_setup()
             if (
                 self.workspace
                 and level != self.workspace.preferences["capture_level_dbfs"]
@@ -1422,14 +1448,15 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
                 dialog.frequency.value()
             )
             self.workspace.save()
+            self.remember_setup()
         except ValueError as error:
             self.notify_error(error)
 
     def import_inputs(self):
         if not self.workspace or self.busy():
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose custom training WAV (mono, 48 kHz)", "", "WAV audio (*.wav)"
+        path, _ = self.choose_open_file(
+            "Choose custom training WAV (mono, 48 kHz)", "WAV audio (*.wav)"
         )
         if not path:
             return
@@ -1684,6 +1711,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             "A2 static batch" if static else "HyperA2\nFull + Lite, together."
         )
         self.control_card.setVisible(not static)
+        self.plan_card.setVisible(not static)
         self.model_format.setText(
             "A2 Full + Lite nested · one standard .nam per named capture"
             if static
@@ -1721,7 +1749,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
                     answer = QMessageBox.question(
                         self,
                         "Update the capture plan?",
-                        "The controls or plan settings changed. Existing captures will be preserved in History, and a new plan will start. Continue?",
+                        "The controls, input signal, capture level, calibration or plan settings changed. Existing captures will be preserved in History, and a new plan will start. Continue?",
                     )
                     if answer != QMessageBox.StandardButton.Yes:
                         return False
@@ -2021,21 +2049,20 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             def capture_signals(progress, cancel):
                 results = []
                 for offset, capture in enumerate(captures):
+                    self.capture_stage.emit(
+                        f"Recording {capture.split} · signal {offset + 1} / {len(captures)}"
+                    )
+                    if progress:
+                        progress(0.0)
                     results.append(
                         session.capture_entry(
                             capture,
-                            progress=(
-                                (
-                                    lambda value, i=offset: progress(
-                                        (i + value) / len(captures)
-                                    )
-                                )
-                                if progress
-                                else None
-                            ),
+                            progress=progress,
                             cancel=cancel,
                         )
                     )
+                    if progress:
+                        progress(1.0)
                 return results if static else results[0]
 
             self.run_audio(capture_signals, self._capture_done)
@@ -2084,13 +2111,19 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
             if extension == ".pnam"
             else "NAM model (*.nam)"
         )
-        default = (
-            Path(spec.get("models_directory", str(Path(spec["project"]) / "models")))
-            / f"{self.job.name}-intermediate{extension}"
-        )
-        filename, _ = QFileDialog.getSaveFileName(
-            self, title, str(default), file_filter
-        )
+        from .model_names import model_basename
+
+        name = spec.get("model", {}).get("metadata", {}).get("name")
+        if spec.get("static_captures"):
+            member = min(
+                training.job_progress(self.job).get("member", 0),
+                len(spec["static_captures"]) - 1,
+            )
+            name = spec["static_captures"][member]["name"]
+        default = Path(
+            spec.get("models_directory", str(Path(spec["project"]) / "models"))
+        ) / (model_basename(name, "Model") + extension)
+        filename, _ = self.choose_save_file(title, default, file_filter)
         if not filename:
             return
         if Path(filename).suffix.lower() != extension:
@@ -2155,7 +2188,7 @@ class WizardWindow(QueueActions, PlayActions, QMainWindow):
         ):
             message = "Previous session interrupted. Resume from the last complete saved epoch."
         self.training_status.setText(
-            f"Round {progress.get('round', 1)} · Model {min(progress.get('member', 0) + 1, progress.get('members', 1))} / {progress.get('members', 1)}\n{message}"
+            f"Round {progress.get('round', 1)} · Model {min(progress.get('member', 0) + 1, progress.get('members', 1))} / {progress.get('members', 1)} · {message}"
             + (
                 f"\n{progress['device_name']} · batch {progress.get('batch_size')} · {progress.get('train_batches')} batches per epoch"
                 if progress.get("device_name")
