@@ -1,275 +1,254 @@
 # ParaNAM Trainer
 
-A desktop wizard for parametric **HyperA2 Full + Lite inside one nested `.pnam` model**
-and batches of independent static **A2 Full + Lite nested `.nam` models**. Based on DLC86's `Knobs+Switch` trainer branch,
-with the established recording, alignment and model code retained.
+Capture your gear, train a model, and compare it with the real rig in one desktop app.
+ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-## Install and launch
+**[Download ParaNAM Trainer 0.5.5 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.5-preview)**
 
-The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
-Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
+| Model type | Result |
+| --- | --- |
+| **Parametric** | One `.pnam` containing **HyperA2 Full + Lite**, with the controls you defined |
+| **Static** | An independent `.nam` containing **A2 Full + Lite** for each named capture |
 
-**[Download the 0.5.5 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.5-preview)**
+Both sizes are trained together. There is no Full/Lite choice at capture time;
+select the playback size later in a compatible player.
 
-Version 0.5.3 adds a dedicated global **Settings** page, clearer/taller recent
-projects, automatic navigation to **Plan**, simplified static metadata entry,
-responsive queue/log sizing and updated sidebar branding. Capture calibration
-values remain recorded in each project and training job independently of later
-global settings changes. [Complete 0.5.3 changes](docs/release-0.5.3.md).
+## Install
 
-Version 0.5.2 remembers the latest audio/calibration setup and file-picker folder,
-adds the bundled **TTS input v11** option, simplifies static capture setup, and
-improves capture-table scrolling and progress. Exported filenames follow model
-Name metadata. **Play & Compare** supports changing model, Full/Lite and playback
-buffer while listening, with Input/Output at ±20 dB and corrected knob dragging.
-The refreshed sidebar and checkbox styling accompany expanded queue charts/logs
-and a top-row **Retrain** action for previously started jobs.
-[Complete 0.5.2 changes](docs/release-0.5.2.md).
+Choose the package for your computer from the linked release:
 
-The persistent queue keeps training instances independent of project edits;
-record another project while it runs. Native static/parametric playback supports
-calibrated comparison with the real rig. [Workflow details](docs/workflow-0.5.0.md).
-
-Version 0.4.4 adds compact per-epoch logs with full history, Full/Lite ESR curves,
-an intermediate **Export best PNAM/NAM** button during training, independent base and
-hypernetwork learning rates, optional gradient clipping/NaN/Inf checks, and
-HyperA2 / HyperWaveNet (Phillip Self) recipe presets. See
-[training controls and presets](docs/training-controls.md).
-Weight-delta mode (Full/Low rank), rank, conditioning of dilated convolutions,
-and Full/Lite training-loss reduction (Sum/Mean) are independently editable;
-presets only initialize the visible settings.
-
-Version 0.5.4 makes static and parametric training reserve the standard input's first 10 and final
-9 seconds, matching the official NAM v3 training interval (also supported by TTS
-v11). Each epoch reports Validation ESR on validation captures and Train ESR on
-the embedded held-out audio in training captures, separately for Full and Lite.
-Queue has independent best Full scores and Full/Lite chart tabs. Older jobs
-require a new training run to adopt this split; existing captures are reusable.
-[Complete 0.5.4 changes](docs/release-0.5.4.md).
-
-Version 0.5.5 adds an optional A2 learning-rate cadence preset with dataset-aware
-update counts and a final-rate preview. Compare has a grey amp-control panel,
-double-click knob resets and live Raw/Calibrated/Normalized output modes.
-Best Full/Lite models can also be exported from paused or stopped jobs. New
-capture plans reserve the default control settings inside their requested count.
-[Complete 0.5.5 changes](docs/release-0.5.5.md).
-
-Download the package for your computer from this repository's installer artifacts
-or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,
-or a terminal. Python, Qt, PyTorch, audio libraries and both capture signals are
-included. A normal audio-interface driver is still required.
-
-| Computer | Package | Training acceleration |
+| System | Package | Training options |
 | --- | --- | --- |
-| Windows 10/11 x64 | Setup `.exe` | CPU included; optional NVIDIA download |
-| macOS Apple Silicon | `.dmg`, drag the app to Applications | Apple Metal / CPU |
-| macOS Intel | `.dmg`, drag the app to Applications | CPU |
-| Ubuntu/Debian-compatible Linux x64 | `.deb`, open in the graphical package installer | CPU included; optional NVIDIA download |
-| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU included; optional NVIDIA download |
+| Windows 10/11 x64 | Setup `.exe` | CPU; optional NVIDIA GPU support |
+| macOS Apple Silicon | `.dmg` | Apple Metal or CPU |
+| macOS Intel | `.dmg` | CPU |
+| Ubuntu/Debian-compatible Linux x64 | `.deb` | CPU; optional NVIDIA GPU support |
+| Other compatible Linux x64 desktops | Portable `.tar.gz` | CPU; optional NVIDIA GPU support |
 
-Linux packages target Ubuntu 22.04 or newer and the corresponding system ABI.
-The desktop package installer resolves standard OS audio/display libraries. There is
-one installer per OS/architecture. Windows offers an unchecked NVIDIA option during
-setup; Linux offers the same choice on first launch. Both can manage it later from
-Training settings, using **Add NVIDIA GPU support**, shown only while the component
-is missing. Windows setup shows GPU preparation in an additional progress bar in the
-installer itself, with no separate setup dialog or second confirmation.
-CPU training and offline capture work without downloading anything.
-The optional engine downloads compatible, checksum-verified PyTorch/NVIDIA wheels
-from official sources into a per-user folder, retaining all their runtime dependencies
-and license files. Matching installed components are reused and interrupted downloads
-can resume. No CUDA toolkit, Python installation or terminal is required. A compatible
-NVIDIA graphics driver is still required for GPU execution; otherwise Auto uses CPU.
-macOS uses Apple Metal where supported and does not offer CUDA. Builds are unsigned until signing credentials are
-configured; macOS may require allowing the app through its normal security UI.
+The installers include Python, Qt, PyTorch, the audio libraries and the bundled
+capture signals. End users do not need Anaconda, a CUDA toolkit, build tools or a
+terminal. Install your audio interface's normal driver.
 
-From 0.2.0 onward the downloaded GPU engine lives outside the application folder
-and survives app updates. Future builds reuse its verified wheel checksums even
-when download URLs or size metadata change, checking the installed engine without
-downloading or extracting it again. A genuinely different required engine needs
-its matching GPU component. The old bundled 0.1.0 CUDA edition is not migrated.
+Windows setup offers optional NVIDIA support, with its progress shown inside the
+installer. Linux offers it on first launch. You can also use **Add NVIDIA GPU
+support** on the **Train** page; the button is hidden when the component is already
+installed. The GPU engine is downloaded from official sources, stored outside the
+app and reused across updates. A compatible NVIDIA driver is required. CPU
+training and the bundled capture signals work offline.
 
-The **ParaNAM native installers** workflow builds on each target OS, tests the
-application, freezes it, smoke-tests the frozen bundle, and uploads native packages.
-Apple Silicon and Intel builds are separate because PyTorch's supported binaries
-are different. Intel uses the last official Intel-compatible PyTorch 2.2.2.
+macOS uses Metal where supported, with separate Apple Silicon and Intel packages.
+Builds are unsigned, so macOS may require allowing the app through its normal
+security interface. Linux packages target Ubuntu 22.04 or newer and compatible
+system libraries.
 
-## Guided workflow
+## The workflow
 
-1. **Project & routing.** Create/open a project or pick a recent one. Choose your
-   interface and channels. Clean timing loopback is enabled by default.
-   Test the connection and optionally enter
-   send/return dBu calibration. Channel selectors use driver labels, and buffer
-   choices come from the driver: 2048 samples is selected when available, otherwise
-   its highest supported value. When an API exposes no names or sizes, the UI says
-   so and uses its driver-managed buffer instead of offering invented choices.
-2. **Controls & plan.** Choose Parametric or Static batch; both always train Full
-   and Lite together. Enter model metadata: name, author, gear type, manufacturer, model,
-   tone type and notes. Existing custom metadata is preserved. In Parametric, add/edit knobs and named multi-position switches, choose
-   Normal or Active learning, and select Standard or Custom training input. Capture
-   counts include all switch combinations; corners are repeated for every state.
-3. **Capture your rig.** Follow the graphic knob/switch settings, confirm the rig
-   matches, and record each entry. The list tracks completed/pending captures and
-   quality warnings in separate resizable **Latency**, **Peak (dBFS)** and **Warnings**
-   columns. Latency includes subsample correction. Static mode instead shows named
-   batch items with editable per-model metadata; each records training and fixed
-   validation automatically without changing the rig between them. Training unlocks after the entire plan is captured.
-   Pending captures are automatically ordered to reduce manual changes: first the
-   number of controls to move, then the total knob rotation. Identical settings
-   stay together, including separate training/validation recordings. On resuming,
-   the route starts from the last recorded setting; active-learning suggestions
-   follow the same rule. A deterministic nearest-neighbour route plus bounded
-   2-opt improves the route without changing capture IDs or training data order.
-4. **Train & export.** Set metadata, epochs, batch size and automatic/CPU execution.
-   Train creates a separate instance in the queue. Static batch size defaults to
-   16, matching the official NAM trainer;
-   both static and parametric modes default to batch 16. Optimizer (Adam by default,
-   or AdamW), Batch Size, Learning Rate, LR Decay, NY, Fit MRSTFT, MRSTFT Weight and
-   Weight Decay are inside **Advanced training settings**, initially collapsed.
-   Both modes follow the A2 recipe: LR 0.004, decay 0.994, NY 8192, MRSTFT enabled
-   with weight 0.0005, and weight decay 3.17e-7. Existing saved custom values are
-   retained. New HyperA2 runs use 0.1 times the selected LR for the hypernetwork
-   (0.0004 at the default audio-weight LR of 0.004), gradient norm clipping at 1.0
-   and nonfinite-gradient protection. This fixes the unstable all-weight updates
-   introduced in 0.4.2; see [the diagnosis](docs/a2-training-comparison.md#hypernetwork-stability-fix).
-   Start a new run to use this recipe; resuming an old run retains its saved recipe.
-   Validation uses each full recording with batch 1. RMS normalization
-   is disabled, preserving capture output levels across control settings.
-   Changing the recipe requires a new run; batch size and device can be changed
-   when resuming.
-   Parametric export is `models/<instance>/round-N/ParaNAM_HyperA2.pnam`, containing both
-   Full and Lite with Full as the playback default. Static batches export one standard
-   A2 Full + Lite `SlimmableContainer` `.nam` per named item under `models/<run>/`, with its metadata and
-   send/return dBu calibration. Channel selectors use driver labels, and buffer
-   choices come from the driver: 2048 samples is selected when available, otherwise
-   its highest supported value. When an API exposes no names or sizes, the UI says
-   so and uses its driver-managed buffer instead of offering invented choices.
+The sidebar contains **Projects → Plan → Capture → Train → Queue → Compare**.
+**Settings** stays at the bottom of the sidebar. You can return to earlier pages
+to edit the setup; changes that require new captures preserve the old recordings
+in the project's History.
 
-5. **Training queue.** Start waiting instances, pause/stop/resume a selected job,
-   reorder waiting jobs or remove rows. Completed jobs remain visible. The queue
-   owns epoch progress, Full ESR, elapsed/remaining time, the ESR chart, training
-   log and intermediate best-model export. Resume uses the instance's own saved
-   data/settings; edit its resume batch size/device here after a recoverable error.
-   Other projects can be edited and captured while training continues.
-6. **Play.** Load an exported or imported static/parametric model, select Full/Lite
-   and adjust its controls. Instrument input feeds the model and real reamp path;
-   Gear/Model switches the stereo monitoring source. Instrument calibration is
-   applied alongside model and send/return calibration. Playback uses a separate
-   driver-reported buffer and explicit Start/Stop.
+The screenshots below show the current interface with a demonstration project
+and example audio-interface labels. The Queue chart uses illustrative history,
+not a model-quality or training-speed benchmark.
 
-**Back** and the step sidebar let you revisit settings. Drafts are saved. A changed
-capture plan is confirmed before recordings are archived into `history/`; they are
-preserved, not deleted or silently relabelled. A saved training checkpoint may only
-resume against the same captured data, control definitions and model settings.
-Batch size and execution device may be changed before resuming, for example after
-a GPU-memory error.
+### Projects
 
-## Included input signals
+Create a project with **+ New project**, use **Open project…**, or double-click a
+recent project. Opening a project takes you directly to **Plan**. Projects are
+saved locally as you work, and file dialogs remember the last folder you opened.
 
-* Standard: original [TONE3000 T3K-sweep-v3.wav](https://www.tone3000.com/T3K-sweep-v3.wav),
-  mono, 48 kHz, **190 seconds**. It is included in the installer, with no runtime download.
-* Validation: unmodified [validation.wav from the upstream training-inputs-v1 release](https://github.com/phillipmself/neural-amp-modeler-parametric/releases/tag/training-inputs-v1),
-  mono, 48 kHz, **7 seconds**, always included and always used for validation.
-* Custom: choose one local mono 48 kHz WAV for **training only**. The validation file
-  remains fixed. Applying a different signal requires a new capture plan.
+![Projects — create, open and return to recent projects](docs/screenshots/projects.png)
 
-The files' sources, sample counts and SHA-256 hashes are in
-[paranam/assets/manifest.json](paranam/assets/manifest.json). Recordings are still
-made separately for training and validation through the actual rig. Switch-only
-projects validate the same categorical states with the independent validation audio.
+### Settings — routing and level calibration
 
-## Guided level calibration and capture output
+Choose the audio interface and its driver-reported channels:
 
-Open **Calibrate send and return** in Level calibration. The tone starts only when
-**Start sine** is pressed; **Stop sine** and closing the dialog stop the output.
-Its default is 1000 Hz at 0 dBFS peak. Frequency is adjustable from 20 to 20000 Hz;
-output level accepts negative dBFS values or `-inf` for silence.
+- **Output → reamp / rig** and **Input ← load box / microphone** form the capture path.
+- A separate loopback output/input pair provides the clean timing reference;
+  loopback is enabled by default.
+- **Instrument input** receives the guitar for comparison playback.
+- **Monitor out L/R** feed speakers or headphones.
 
-1. Disconnect the gear and speakers. Drive the cable that will feed the gear,
-   including any reamp box, and measure its RMS voltage with a suitable meter.
-   Enter the voltage and apply send calibration: `send_dBu = 20 log10(V_RMS / 0.775)`.
-2. Stop the tone, then connect that same measured cable directly to the selected
-   return input, bypassing the gear. Restart the tone and confirm the direct patch.
-   The app measures digital RMS, expresses it as sine-equivalent peak dBFS, and
-   calculates `return_dBu = send_dBu - measured_dBFS`. Clipping blocks calibration
-   and prompts the user to lower input gain. Silence/noise is not accepted as a sine.
-3. Apply return calibration. Send and return values support three decimal places.
+Disable direct monitoring on the channels used for comparison. Capture buffer
+choices come from the driver: **2048 samples** is the default when available,
+otherwise the highest reported value is used. If the driver does not expose a
+buffer size, the app shows **Driver managed**.
 
-The selected sine level is also the playback attenuation for **both training and
-validation captures**, including the main send's timing marks. Original training
-reference WAVs stay unchanged: the model learns the attenuated physical rig, and
-its input dBu metadata describes that effective send setting. Do not extrapolate
-send calibration back to the unattenuated DAC level. The separate timing loopback
-retains its normal reference level for reliable timing; raw audio stores both
-playback references and the applied attenuation. Muted capture playback is refused.
+Audio routing is global. Calibration values used for captures are also retained
+in the project and each training instance, so later global changes do not rewrite
+the calibration of an existing dataset or queued job.
 
-Changing attenuation invalidates send calibration and requires a new capture plan;
-previous recordings and their calibration are archived, preventing mixed levels
-in one model. Return calibration remains valid while the input gain is unchanged.
+**Calibrate send and return…** provides a sine generator, initially 1 kHz at
+0 dBFS peak. Its frequency and level are adjustable. Enter the measured RMS
+voltage to calculate send dBu, then connect that measured signal directly to the
+return or instrument input to calculate its calibration from the recorded dBFS
+level. Level fields support three decimal places.
 
-## Capture timing
+The selected capture output level also attenuates the training and validation
+signals during recording. Instrument calibration is used in **Compare**.
+See the [level-calibration guide](docs/level_calibration.md) for the procedure.
 
-Each recording is aligned independently using the clean loopback when enabled.
-The **Latency** column shows one fractional sample value, recovering the delay as
-the stored integer label minus the correction already applied to the recording.
-NAM's one-sample safety factor is already included by the latency calibrator.
-Loopback alignment retains a conservative onset margin (initially four samples
-before the response peak, widened for the interface when needed). Static and
-parametric training use these prepared labels without subtracting the margin again.
-Amp-return versus loopback differences and changes in latency between recordings
-do not generate discrepancy errors. Timing marks before and after the entire input
-verify clock stability. A change of **0.1 sample or more**, including fractional
-changes below one sample, or unreliable timing detection rejects the recording.
-The item stays pending, is excluded from training, and must be recorded again; the
-app suggests increasing the audio-interface buffer. Diagnostic raw audio remains
-available. Replaced accepted audio is archived rather than silently reused.
+![Settings — audio routing, loopback, buffer and send/return/instrument calibration](docs/screenshots/settings.png)
 
-## Pause, stop and resume
+### Plan — model type, input signal and controls
 
-**Pause & save** stops at the next train/validation batch boundary, without
-waiting for the epoch to finish. The incomplete epoch is discarded. Resume reloads
-the optimizer, scheduler, loop counters and RNG from the last complete epoch and
-restarts the interrupted epoch. If paused before completing the first epoch, it
-restarts from the saved initial state. A running GPU operation must reach the
-batch boundary; it is not interrupted inside a CUDA kernel.
+Select **Parametric** or **Static** under **Model type**. **Input signal** offers:
 
-An atomic rolling checkpoint is saved initially and after every complete epoch,
-so unexpected training errors and process interruption also leave a recovery point.
-Fix the error and choose **Resume** on that instance in Training queue; batch size may be lowered after OOM,
-or the execution device changed. Older jobs with a complete native Lightning
-checkpoint can be recovered even if they have no ParaNAM resume file. Corrupt or
-partial-epoch checkpoints are not used. The window can close safely after Pause.
+- **Standard — bundled TONE3000 sweep**.
+- **TTS input v11 — bundled**.
+- **Custom** — a training WAV from your computer.
 
-**Stop** cancels at the next batch boundary, retaining captured WAVs and previous
-saved runs. It does not publish an incomplete current model. Details remain in the
-training log. ETA covers the current round's training, not future manual captures.
+The separate validation signal is always the original bundled `validation.wav`.
+Custom inputs must be mono at 48 kHz and preserve the standard initial/final
+validation segments, as TTS v11 does. Training excludes the first 10 and final
+9 seconds of each input/recording pair.
 
-## GPU training throughput
+For parametric models, **+ Add control** lets you choose a knob or switch. Knobs
+have ranges, steps and defaults; switches have a position count, a name for each
+position and a default position. Multiple switches are supported, and the plan
+covers every combination of their positions.
 
-The HyperA2 preset defaults to batch **16**; the reference HyperWaveNet preset uses **32**;
-existing projects keep their chosen batch. The log and training status show the
-actual device, batch size and batches per epoch. CUDA data transfers use pinned
-host memory. Both Full and Lite are still trained and exported together.
+**Capture plan & learning method** offers **Normal** and **Active learning**,
+training/validation capture counts, a reproducible seed and optional range-extreme
+captures. Recommendations account for the controls and switch combinations.
+New plans include the default control setting within the requested count, and
+capture order is arranged to reduce knob movement.
 
-A controlled RTX 3070 Laptop microbenchmark found HyperA2 at batch 32 processed
-about **5 times** as many windows per second as batch 4. At the same batch 32,
-Full+Lite cost about **1.5 times** HyperWaveNet. These are isolated GPU measurements,
-not a promised epoch time on other GPUs. See [measurement details](docs/paranam-performance.md).
+In **Static** mode, control and parametric-plan settings are hidden. Add and name
+the independent captures on the next page instead.
 
-## Active learning
+![Plan — Parametric/Static, bundled input signals, knobs, switches and capture planning](docs/screenshots/plan.png)
 
-Active learning uses independently seeded **HyperA2** ensemble members, evaluates
-prediction disagreement in **both Full and Lite**, and recommends high-uncertainty
-settings from a reproducible candidate pool. Suggestions exclude every existing
-training/validation setting and respect knob steps and switch labels. After a round,
-choose **Capture suggested settings**, record the new batch, then train the next
-round. Every published model remains nested HyperA2; no ConcatLSTM surrogate is
-published. Capture-count recommendations and uncertainty selection are heuristics,
-not guarantees of accuracy.
+### Capture — set the gear and record
+
+For a parametric project, the diagram shows the knob and switch positions for the
+selected capture. Set the real gear to match, confirm the checkbox, then choose
+**Record this setting**. Static projects show a named capture batch instead of
+control positions.
+
+The table keeps **Latency**, **Peak (dBFS)** and **Warnings** separate. Latency is
+displayed as one fractional sample value. Columns can be resized, and the table
+can still be scrolled during recording; selecting a different capture is locked
+until recording finishes.
+
+Each recording is aligned independently. Initial/final timing checks reject a
+capture when drift reaches 0.1 sample, including fractional-sample drift, or timing
+detection is unreliable. Rejected captures must be repeated; the app suggests a
+larger interface buffer. Differences between reamp and loopback latency, or
+latency changes between recordings, do not produce discrepancy errors. NAM's
+one-sample safety factor is already included in prepared alignment.
+
+Once every required capture is accepted, continue to **Train**.
+See [capture timing](docs/capture_timing_margin.md) for the alignment details.
+
+![Capture — control positions, ordered capture list and separate quality columns](docs/screenshots/capture.png)
+
+### Train — metadata and training setup
+
+Set the epochs and training device, then enter the model metadata: **Name**,
+**Author**, **Manufacturer**, **Gear model**, **Gear type**, **Tone type** and notes.
+For a static batch, each model's name comes from **Capture**, so the Name field is
+hidden here. Exported filenames follow the model Name, with filesystem-safe
+characters.
+
+**Advanced training settings** is collapsed by default. It contains Batch Size,
+Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, LR Decay, NY, Fit MRSTFT,
+MRSTFT Weight, Weight Decay and the parametric hypernetwork options. New training
+defaults to **Adam**. HyperA2 and static A2 use batch 16 by default; selecting the
+reference HyperWaveNet recipe initializes its batch and settings separately.
+
+The optional **A2 — same cadence per optimizer update** learning-rate preset uses
+dataset/window counts and batch size to match the reference A2 decay cadence.
+Its preview shows update counts and the resulting final learning rates.
+The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
+exports remain **HyperA2 Full + Lite** in either case.
+
+**Train · add to queue** creates a new independent training instance. It does not
+replace an earlier run. See [training controls and presets](docs/training-controls.md)
+and the [A2 training comparison](docs/a2-training-comparison.md) for more detail.
+
+![Train — epochs, device, expandable advanced settings and model metadata](docs/screenshots/train.png)
+
+### Queue — manage jobs, progress and exports
+
+The queue accepts static batches and parametric jobs and retains completed jobs.
+Every instance keeps its own snapshot of recordings, settings and calibration.
+You can edit the open project, open another project, or make new captures while
+the training queue is processed.
+
+Use **Start queue**, **Pause & save**, **Stop** and **Resume** here. Waiting jobs
+can be reordered or removed; removing a row keeps its files on disk. **Retrain**
+opens an editable copy of a previously started job's setup on **Train**, allowing
+changes before a new instance is queued.
+
+The queue shows the epoch, best Validation Full ESR, best Train Full ESR, elapsed
+time and ETA. **Full ESR chart**, **Lite ESR chart** and **Training log** show both
+sizes separately. Checkpoint selection uses **Validation Full ESR**; both sizes'
+scores are retained in exported metadata. Train ESR uses held-out audio from
+training captures, while Validation ESR uses the separate validation captures.
+
+**Export best PNAM/NAM** is available once a suitable checkpoint exists, including
+paused or stopped jobs. The button caption follows the selected job's model type.
+
+![Queue — independent jobs, Full/Lite ESR charts and training controls; illustrative history](docs/screenshots/queue.png)
+
+Pause takes effect at the next train/validation batch boundary. Resume restores
+the last complete checkpoint and restarts the incomplete epoch; it is tied to the
+queue instance, not whichever project is open. Recovery is also available after
+an interrupted or failed run when a valid checkpoint exists. You can lower batch
+size or change the execution device before resuming, but changing optimizer
+requires a new training run.
+
+With **Active learning**, the ensemble recommends additional settings between
+rounds. Use **Capture next active-learning round**, record them, then continue
+training. Suggestions consider both Full and Lite and avoid already recorded
+settings. Capture-count recommendations are starting guidelines, not accuracy
+guarantees.
+
+### Compare — play the model and the real gear
+
+The **Compare** sidebar page opens **Play & Compare**. Load a `.nam` or `.pnam`,
+select **Full** or **Lite** where supported, then choose **Play**. **Gear** and
+**Model** switch the monitored source using the routing from Settings.
+
+Input and Output both span **−20 to +20 dB**, with **0 dB** at the center. Parametric
+controls appear on the grey amp-style panel. Click a value to type it; double-click
+a knob to restore its default.
+
+You can change the model, model size and playback buffer while playback is active.
+The playback buffer is independent of the capture buffer. **Output mode** offers
+**Raw**, **Calibrated** and **Normalized**; Calibrated is the default. Calibrated
+and Normalized fall back to Raw when the required calibration or loudness data
+is unavailable.
+
+![Compare — Gear/Model switching, Full/Lite, output modes and parametric controls](docs/screenshots/compare.png)
+
+## Use exported models
+
+Parametric `.pnam` files require a PNAM-compatible player, such as the
+[NAM Parametric Plugin](https://github.com/DLC86/NamParametricPlugin/releases).
+Static `.nam` files use the nested A2 Full/Lite format and need a player that
+supports that format. Developers integrating PNAM into hardware can use the
+[NeuralAudio PNAM fork](https://github.com/DLC86/NeuralAudio).
+
+Models retain gear metadata, level calibration and Full/Lite ESR information.
+Parametric training preserves level differences across control settings; it does
+not apply per-setting RMS normalization.
+
+## More information
+
+- [0.5.5 changes](docs/release-0.5.5.md)
+- [Training controls and presets](docs/training-controls.md)
+- [A2 architecture and training audit](docs/a2-training-comparison.md)
+- [Level calibration](docs/level_calibration.md)
+- [Capture timing and safety margin](docs/capture_timing_margin.md)
+- [Earlier queue and comparison workflow details](docs/workflow-0.5.0.md)
+- [Training performance measurements](docs/paranam-performance.md)
 
 ## Development
 
-For contributors only (end users use the installer):
+These commands are for contributors; end users use the installer.
 
 ```sh
 python -m pip install -e '.[test]'
@@ -279,25 +258,14 @@ python -m pip install pyinstaller Pillow
 python packaging/build.py --flavor CPU
 ```
 
-Run the build on its target OS. Windows builds additionally use Inno Setup 6+;
-macOS uses hdiutil; Linux uses dpkg-deb. GitHub Actions provisions these tools.
-Windows/Linux bundles must be built from CPU PyTorch. The build resolves and pins
-the optional GPU download manifest against the official CPU/CUDA wheel closures.
-Native CI verifies the frozen CPU application and optional external GPU engine;
-macOS builds use `--flavor Metal`. AVX2 nam-cpu-trainer integration is deferred.
+Build on the target OS. Windows packaging uses Inno Setup, macOS uses `hdiutil`,
+and Linux uses `dpkg-deb`; the native installer workflow provisions these tools.
+Windows/Linux bundles use CPU PyTorch with an optional managed NVIDIA engine.
+macOS builds use `--flavor Metal`; Intel uses the last official Intel-compatible
+PyTorch 2.2.2. AVX2 nam-cpu-trainer integration remains deferred.
 
-The original trainer documentation is preserved in
-[README_UPSTREAM.md](README_UPSTREAM.md). See [LICENSE](LICENSE) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for credits and bundled components.
-
-## Full/Lite validation and training audit
-
-Every epoch logs Lite ESR, Full ESR and their mean. The best checkpoint and UI
-use **Full ESR**. Export metadata `training.validation_esr` refers to Full;
-`validation_esr_full` and `validation_esr_lite` record both values at the exported
-branches, alongside their respective epochs and optimizer. Static nested children also carry
-their own ESR. Changing optimizer requires a new training run.
-
-HyperA2 evaluates both audio branches together in a differentiable packed layout.
-The [training audit](docs/a2-training-comparison.md) documents the official A2
-comparison, remaining differences and the measured scope of the optimization.
+ParaNAM is based on DLC86's `Knobs+Switch` trainer branch. The original
+documentation is retained in [README_UPSTREAM.md](README_UPSTREAM.md).
+See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for
+credits and bundled components. The interface uses the TTS logo and title font
+from NAM On Steroids; the logo links to [The Tone Scientist](https://shop.thetonescientist.com).

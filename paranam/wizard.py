@@ -69,6 +69,7 @@ from .widgets import (
     load_font,
 )
 from . import training
+from . import __version__
 from .audio_devices import capabilities
 from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 from .signals import asset_path
@@ -191,7 +192,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl("https://shop.thetonescientist.com"))
         )
         self.brand_title = label("ParaNAM\nTrainer", "brand")
-        self.version_label = label("VERSION 0.5.4", "eyebrow")
+        self.version_label = label(f"VERSION {__version__}", "eyebrow")
         self.brand_title.setParent(sidebar)
         self.version_label.setParent(sidebar)
         brand_text = QVBoxLayout()
@@ -214,7 +215,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.steps = []
         for index, text in enumerate(
             (
-                "Project",
+                "Projects",
                 "Plan",
                 "Capture",
                 "Train",
