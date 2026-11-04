@@ -145,6 +145,9 @@ def main():
         from .signals import verify_assets
 
         verify_assets()
+        from .ir import verify_bundled_irs
+
+        ir_count = verify_bundled_irs()
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         import json
         import torch
@@ -169,6 +172,7 @@ def main():
                     "cuda": torch.cuda.is_available(),
                     "mps": torch.backends.mps.is_available(),
                     "architecture": "HyperA2",
+                    "bundled_irs": ir_count,
                     "default_optimizer": window.advanced_fields[
                         "optimizer"
                     ].currentData(),

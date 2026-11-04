@@ -169,68 +169,29 @@ class TrainingQueue:
         return entry
 
     def retrain(self, identifier):
-        """Open an editable copy of an already started instance, without resuming."""
+        """Restore instance settings in its source project without starting a job."""
         entry = self.get(identifier)
-        if not entry or entry["state"] == "queued":
+        if not entry or entry["state"] not in FINISHED:
             raise ValueError(
-                "Select an instance that has already started; queued jobs cannot be retrained."
+                "Select a stopped, paused or finished training instance; queued or active jobs cannot be retrained."
             )
         spec = read_json(Path(entry["job"]) / "spec.json")
-        if not spec or not Path(spec.get("project", "")).is_dir():
-            raise ValueError("Reconnect the drive containing this training instance.")
-        original = Workspace(Path(spec["project"]))
-        if (
-            not spec.get("queue_snapshot")
-            and original.fingerprint() != spec["fingerprint"]
-        ):
-            raise ValueError(
-                "This older job's project has changed; its original settings and recordings are no longer available together."
-            )
-        target = (
-            Path(entry["project"])
-            / "retraining"
-            / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
-        )
-        target.mkdir(parents=True)
-        project = original.project.model_copy(deep=True)
-        # Suggested future active-learning captures were not part of this job.
-        project.entries = [
-            capture for capture in project.entries if capture.status == "captured"
-        ]
-        preferences = copy.deepcopy(original.preferences)
-
-        def copy_audio(path, relative):
-            destination = target / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(original.directory / path, destination)
-            return relative
-
-        project.train_input = copy_audio(
-            project.train_input,
-            (
-                "input_standard.wav"
-                if preferences["input_mode"] == "standard"
-                else (
-                    "input_tts_v11.wav"
-                    if preferences["input_mode"] == "tts"
-                    else "input_custom.wav"
-                )
-            ),
-        )
-        project.validation_input = copy_audio(
-            project.validation_input, "input_validation.wav"
-        )
-        if preferences["input_mode"] != "standard":
-            preferences["custom_input"] = project.train_input
-        for index, capture in enumerate(project.entries):
-            if capture.y_path:
-                capture.y_path = copy_audio(
-                    capture.y_path, f"captures/entry-{index:05d}-{capture.split}.wav"
-                )
-        preferences["_queue_source_project"] = entry["project"]
-        save_project(project, target)
-        atomic_write_json(target / "paranam.json", preferences)
-        return Workspace(target)
+        if not spec or not (Path(entry["project"]) / "capture_project.json").is_file():
+            raise ValueError("Reconnect the drive containing the original project.")
+        workspace = Workspace(Path(entry["project"]))
+        # Keep the source recordings/paths and hardware configuration. Frozen job
+        # paths must never become editable capture destinations.
+        source_input = workspace.preferences.get("custom_input", "")
+        saved = copy.deepcopy(spec.get("preferences", {}))
+        for key in ("rate_schedule", "_queue_source_project"):
+            saved.pop(key, None)
+        workspace.preferences.update(saved)
+        workspace.preferences["custom_input"] = source_input
+        snapshot = Workspace(Path(spec["project"]))
+        workspace.draft_controls = copy.deepcopy(snapshot.draft_controls)
+        workspace.project.user_metadata = copy.deepcopy(snapshot.project.user_metadata)
+        workspace.save()
+        return workspace
 
     def capture_round(self, identifier):
         """Editable active-learning branch; never record over frozen hardlinks."""

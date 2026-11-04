@@ -10,6 +10,21 @@ from nam.capture.project import AudioSettingsModel
 
 
 class UIPreferences:
+    def audio_device_routes(self):
+        try:
+            routes = json.loads(self.settings.value("audio_device_routes", "{}"))
+            return routes if isinstance(routes, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    @staticmethod
+    def audio_device_identity(info):
+        # PortAudio indices can change after reconnecting or refreshing devices.
+        return json.dumps([info.host_api, info.name], ensure_ascii=False)
+
+    def remembered_audio_route(self, info):
+        return self.audio_device_routes().get(self.audio_device_identity(info), {})
+
     def dialog_directory(self, fallback=""):
         previous = self.settings.value("last_directory", "")
         if previous and Path(previous).is_dir():
@@ -76,6 +91,27 @@ class UIPreferences:
         setup["calibration_frequency"] = getattr(self, "_calibration_frequency", 1000.0)
         setup["playback_blocksize"] = getattr(self, "_playback_blocksize", 128)
         self.settings.setValue("last_audio_setup", json.dumps(setup))
+        info = self.device.currentData()
+        if info is not None:
+            routes = self.audio_device_routes()
+            routes[self.audio_device_identity(info)] = {
+                key: field.currentData()
+                for key, field in (
+                    ("input_channel", self.input_channel),
+                    ("output_channel", self.output_channel),
+                    ("loopback_input_channel", self.loop_input),
+                    ("loopback_output_channel", self.loop_output),
+                    ("instrument_input_channel", self.instrument_input),
+                    ("monitor_output_left", self.monitor_left),
+                    ("monitor_output_right", self.monitor_right),
+                    ("blocksize", self.buffer),
+                )
+            }
+            routes[self.audio_device_identity(info)].update(
+                loopback_enabled=self.loop_enabled.isChecked(),
+                playback_blocksize=setup["playback_blocksize"],
+            )
+            self.settings.setValue("audio_device_routes", json.dumps(routes))
 
     def last_setup(self):
         value = self.settings.value("last_audio_setup", "")

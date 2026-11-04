@@ -378,7 +378,7 @@ def make_job(workspace, resume=False, job_directory=None):
             "a2_updates",
             "a2_controls",
         ):
-            from .recipes import a2_update_schedule
+            from .recipes import a2_update_schedule, control_cadence_multiplier
 
             schedule = a2_update_schedule(
                 data,
@@ -390,7 +390,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 options["hypernetwork_learning_rate"],
                 options["lr_decay"],
                 cadence_multiplier=(
-                    len(workspace.project.knobs)
+                    control_cadence_multiplier(workspace.project)
                     if options["rate_preset"] == "a2_controls"
                     else 1
                 ),

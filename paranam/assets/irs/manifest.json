@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/tone-3000/neural-amp-modeler-wasm",
+  "revision": "ea8dc285462d6cedd982691b9f090cd03dac04a2",
+  "license": "MIT",
+  "files": {
+    "ampeg.wav": {
+      "sha256": "6f5a8ae7c26708219aa3d37f4f3b862453c285984b374f56b93107b051e1a580",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/ampeg.wav"
+    },
+    "celestion.wav": {
+      "sha256": "804a74b176a1c4239767a0acda0447e5a8396f84a9a9de9b56db327c7bd4439e",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/celestion.wav"
+    },
+    "eminence.wav": {
+      "sha256": "74c0ed71cd788b252a4b77a7717b304f65cf1bc874277b1bf2995aa2689770de",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/eminence.wav"
+    },
+    "mesa.wav": {
+      "sha256": "50656f74a3f67aed28ff01912d0eb8bb66f3b8b769f7b56f6fbce04dd2096182",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/mesa.wav"
+    },
+    "plate.wav": {
+      "sha256": "8d031c292e6af0ad878927cce7f5f00db5aef1e1bf740f20bb65eccf247d3f9f",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/plate.wav"
+    },
+    "spring.wav": {
+      "sha256": "f976fe55f8b08413568896378de64739d440fdc71dea1a8be44f46b52afa492e",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs/spring.wav"
+    }
+  }
+}

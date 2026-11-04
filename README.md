@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.5.5 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.5-preview)**
+**[Download ParaNAM Trainer 0.5.6 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.6-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -154,18 +154,20 @@ characters.
 
 **Advanced training settings** is collapsed by default. It contains Batch Size,
 Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, LR Decay, NY, Fit MRSTFT,
-MRSTFT Weight, Weight Decay and the parametric hypernetwork options. New training
-defaults to **Adam**. HyperA2 and static A2 use batch 16 by default; selecting the
+MRSTFT Weight, Weight Decay and the parametric hypernetwork options. The HyperWaveNet preset uses **AdamW**. HyperA2 and static A2 use batch 16 by default; selecting the
 reference HyperWaveNet recipe initializes its batch and settings separately.
 
 The optional **A2 — same cadence per optimizer update** learning-rate preset uses
 dataset/window counts and batch size to match the reference A2 decay cadence.
 Its preview shows update counts and the resulting final learning rates.
-The current source also provides **A2 — n× slower (knobs + switches)**: it keeps
-the same reduction factor but spaces reductions by the model's control count
-(two controls: every 124 rather than 62 optimizer updates). Switch positions and
-the number of captured combinations do not multiply this factor. Both initial
-rates remain editable; the preview shows the resulting schedule and final rates.
+The **A2 — slower (knobs × 2^switches)** variant keeps the same reduction
+factor, with `n = knobs × 2^switches`: two knobs and no switches give 2×;
+two knobs and one switch give 4×; two knobs and two switches give 8×.
+Switch position counts do not enter the formula. For switch-only models,
+the knob multiplier is one. Both initial rates remain editable.
+New projects default to **HyperWaveNet**, this scaled LR preset, **100 epochs**,
+and batch 32. The LR preset initializes audio/hypernetwork LR to 0.004/0.0004.
+Saved projects and existing training instances keep their settings.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 
@@ -184,8 +186,10 @@ the training queue is processed.
 
 Use **Start queue**, **Pause & save**, **Stop** and **Resume** here. Waiting jobs
 can be reordered or removed; removing a row keeps its files on disk. **Retrain**
-opens an editable copy of a previously started job's setup on **Train**, allowing
-changes before a new instance is queued.
+reopens the original project on **Train** with the selected stopped, paused or
+finished instance’s configuration, allowing changes before a new instance is queued.
+Other training instances continue running independently. The **Name** column uses
+the model metadata name (the first member’s name for a static batch).
 
 The queue shows the epoch, best Validation Full ESR, best Train Full ESR, elapsed
 time and ETA. **Full ESR chart**, **Lite ESR chart** and **Training log** show both
@@ -218,11 +222,23 @@ select **Full** or **Lite** where supported, then choose **Play**. **Gear** and
 **Model** switch the monitored source using the routing from Settings.
 
 Input and Output both span **−20 to +20 dB**, with **0 dB** at the center. Parametric
-controls appear on the grey amp-style panel. Click a value to type it; double-click
-a knob to restore its default.
+controls appear on the black amp-style panel. Switches use discrete sliders,
+with names aligned to knob labels and position labels aligned to knob values. Click a value to type it; double-click
+a knob to restore its default. Typed values apply only after Enter or focus loss.
+The model controls appear above **Input → Model size → Output mode → Output**.
+The Instrument meter measures input before gain; stereo Monitor meters measure
+outputs after gain and IR. Peak dBFS readings sit below the meters.
+
+**Monitor IR** offers the six official Tone3000 preview IRs (Ampeg, Celestion,
+Eminence, Mesa, Plate and Spring), plus custom mono/stereo WAV loading. IR defaults
+to Off. Loading and resampling run in the background; changes crossfade during
+playback. IR processing adds 256 samples (5.33 ms at 48 kHz), affects both Gear
+and Model monitoring, and leaves the reamp send unchanged.
 
 You can change the model, model size and playback buffer while playback is active.
-The playback buffer is independent of the capture buffer. **Output mode** offers
+The playback buffer is independent of the capture buffer. Channel routing and
+buffer choices are remembered per interface and driver API, including after
+disconnecting/reconnecting the device or restarting the app. **Output mode** offers
 **Raw**, **Calibrated** and **Normalized**; Calibrated is the default. Calibrated
 and Normalized fall back to Raw when the required calibration or loudness data
 is unavailable.
@@ -243,6 +259,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.5.6 changes](docs/release-0.5.6.md)
 - [0.5.5 changes](docs/release-0.5.5.md)
 - [Training controls and presets](docs/training-controls.md)
 - [A2 architecture and training audit](docs/a2-training-comparison.md)

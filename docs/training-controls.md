@@ -56,18 +56,23 @@ updates. Its counter is stored in checkpoints and restored on resume; it is not
 reset at parametric epoch boundaries. Changing Batch Size or NY changes how many
 updates a project epoch contains, without changing that reference cadence.
 
-The **A2 — n× slower (knobs + switches)** variant retains the same reference,
+The **A2 — slower (knobs × 2^switches)** variant retains the reference,
 initial rates and 0.994 reduction factor, but applies a reduction every
-`62 × n` optimizer updates, where `n` is the number of model knobs plus switches.
-A switch counts as one control regardless of how many positions it has. With
-two controls this is one reduction every 124 updates; one control gives the
-original cadence. It does not use the number of captured combinations.
+`62 × n` optimizer updates, where `n = knobs × 2^switches`. Each switch doubles
+the factor, regardless of its number of positions. Thus two knobs and zero,
+one or two switches yield 2×, 4× or 8×; three knobs and one or two switches yield
+6× or 12×. Switch-only models use one as their knob multiplier.
+New projects use this LR preset with HyperWaveNet and 100 epochs; the initial
+LRs are 0.004 (audio) and 0.0004 (hypernetwork), as when selecting the LR preset
+manually. Batch defaults to the HyperWaveNet recipe’s 32. Previously saved
+projects retain their settings. Already-created jobs retain their frozen update
+interval and scheduler state, including the older control-count formula.
 Both the audio and hypernetwork LR follow the slower schedule. The preview and
 saved job specification show the multiplier, actual update interval, reduction
 count and final rates. Resume restores the scheduler counter; changing the
 preset requires a new training instance.
 
-Control-count scaling is an optional heuristic for optimization, not a guarantee
+Control-based scaling is an optional heuristic for optimization, not a guarantee
 of better validation or generalization. A large capture set and a long epoch
 budget can still make the final rates very small; inspect the preview before
 starting a run. Manual and the original A2 cadence remain selectable.

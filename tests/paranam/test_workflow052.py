@@ -182,8 +182,10 @@ def test_retrain_accepts_started_states_and_omits_unrecorded_suggestions(
         )
     )
     original.save()
+    queue.update(entry["id"], state="running")
+    with pytest.raises(ValueError, match="active"):
+        queue.retrain(entry["id"])
     for state in (
-        "running",
         "paused",
         "stopped",
         "failed",

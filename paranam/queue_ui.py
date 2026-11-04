@@ -126,8 +126,16 @@ class QueueActions:
             if state == "queued":
                 pending += 1
             esr = progress.get("best_esr")
+            spec = read_json(Path(entry["job"]) / "spec.json", {})
+            captures = spec.get("static_captures") or []
+            model_name = (
+                captures[0].get("name", "")
+                if captures
+                else spec.get("model", {}).get("metadata", {}).get("name", "")
+            )
             values = (
                 str(pending) if state == "queued" else "—",
+                model_name or "—",
                 entry["name"],
                 time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
                 "Static A2" if entry["kind"] == "static" else "HyperA2",
@@ -196,6 +204,7 @@ class QueueActions:
             and not self.worker
             and not getattr(self, "play_worker", None)
             and not getattr(self, "play_loader", None)
+            and not getattr(self, "ir_loader", None)
             and not getattr(self, "export_worker", None)
         ):
             self.close()
@@ -320,7 +329,7 @@ class QueueActions:
         )
         self.resume_button.setEnabled(resumable)
         self.retrain_button.setEnabled(
-            state is not None and state != "queued" and not active and not preparing
+            state in FINISHED and not running and not active and not preparing
         )
         self.resume_batch_size.setEnabled(resumable)
         self.resume_device.setEnabled(resumable)
@@ -366,6 +375,7 @@ class QueueActions:
             or self.queue_controller.preparing
             or getattr(self, "play_worker", None)
             or getattr(self, "play_loader", None)
+            or getattr(self, "ir_loader", None)
             or getattr(self, "export_worker", None)
         ):
             self._close_after_pause = True

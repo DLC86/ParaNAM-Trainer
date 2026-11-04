@@ -93,7 +93,7 @@ def test_reorder_remove_and_resume_belong_to_instances(workspace, tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["static", "parametric"])
-def test_retrain_edits_completed_instance_copy_before_creating_fresh_job(
+def test_retrain_restores_source_project_before_creating_fresh_job(
     window, workspace, tmp_path, kind
 ):
     small_ready(workspace, kind)
@@ -121,7 +121,8 @@ def test_retrain_edits_completed_instance_copy_before_creating_fresh_job(
     assert window.epochs.value() == 2
     assert editable.project.user_metadata == {"modeled_by": "Original job"}
     assert editable.training_ready() and not editable.plan_changed()
-    assert editable.directory not in (workspace.directory, frozen.directory)
+    assert editable.directory == workspace.directory
+    assert editable.directory != frozen.directory
     assert training.current_job(editable.directory) is None
     assert len(queue.entries()) == 1
     window.epochs.setValue(5)

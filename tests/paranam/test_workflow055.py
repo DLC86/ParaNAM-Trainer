@@ -191,10 +191,11 @@ def test_compare_reset_plain_values_alignment_and_original_defaults(
     assert window.play_input.value() == window.play_output.value() == 0
     grid = window.play_gain_layout
     assert (
-        len({grid.itemAtPosition(0, i).widget().geometry().y() for i in range(4)}) == 1
+        len({grid.itemAtPosition(0, i).widget().geometry().y() for i in range(1, 5)})
+        == 1
     )
     centers = [
-        grid.itemAtPosition(1, i).widget().geometry().center().y() for i in range(4)
+        grid.itemAtPosition(1, i).widget().geometry().center().y() for i in range(1, 5)
     ]
     assert max(centers) - min(centers) <= 1
 

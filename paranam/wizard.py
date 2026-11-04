@@ -638,7 +638,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         form = QFormLayout()
         self.epochs = QSpinBox()
         self.epochs.setRange(1, 100000)
-        self.epochs.setValue(200)
+        self.epochs.setValue(100)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 128)
         self.batch_size.setValue(16)
@@ -718,10 +718,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         rate_preset = QComboBox()
         rate_preset.addItem("Manual / per-epoch decay", "manual")
         rate_preset.addItem("A2 — same cadence per optimizer update", "a2_updates")
-        rate_preset.addItem("A2 — n× slower (knobs + switches)", "a2_controls")
+        rate_preset.addItem("A2 — slower (knobs × 2^switches)", "a2_controls")
         rate_preset.setToolTip(
             "The controls-scaled preset keeps the A2 reduction factor but multiplies "
-            "the number of updates between reductions by the model's knob/switch count."
+            "the number of updates between reductions by knobs × 2^switches."
         )
         self.advanced_fields["rate_preset"] = rate_preset
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
@@ -838,10 +838,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         )
         self.queue_run_row = QHBoxLayout()
         layout.addLayout(self.queue_run_row)
-        self.queue_table = QTableWidget(0, 7)
+        self.queue_table = QTableWidget(0, 8)
         self.queue_table.setHorizontalHeaderLabels(
             [
                 "Order",
+                "Name",
                 "Project",
                 "Created",
                 "Model",
@@ -863,7 +864,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.queue_table.horizontalHeader().setStretchLastSection(True)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
-        for column, width in enumerate((56, 120, 110, 90, 100, 65, 85)):
+        for column, width in enumerate((56, 140, 120, 110, 90, 100, 65, 85)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         layout.addWidget(self.queue_table, 1)
@@ -1020,7 +1021,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "
                 f"This plan: {schedule['steps_per_epoch']} updates/epoch, {schedule['training_seconds']:.1f} s of training audio.\n"
                 f"Cadence multiplier: {schedule['cadence_multiplier']}× "
-                f"({'knob/switch count' if self.advanced_fields['rate_preset'].currentData() == 'a2_controls' else 'original A2 cadence'}). "
+                f"({'knobs × 2^switches' if self.advanced_fields['rate_preset'].currentData() == 'a2_controls' else 'original A2 cadence'}). "
                 f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['decay_steps']} optimizer updates; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
                 f"After {self.workspace.preferences['epochs']} epochs: LR {schedule['final_learning_rate']:.3e}, "
                 f"hypernetwork LR {schedule['final_hypernetwork_learning_rate']:.3e} "
@@ -1244,6 +1245,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
     def refresh_devices(self):
         if self.busy():
             return
+        self.remember_setup()
         self.close_audio()
         selected = self.device.currentData()
         self._loading = True
@@ -1284,17 +1286,27 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 info.name,
             )
             self._audio_device_key = (info.host_api, info.name)
-            previous_buffer = self.buffer.currentData() if same_device else None
-            for combo, names, default in (
-                (self.input_channel, result.inputs, 1),
-                (self.loop_input, result.inputs, 2),
-                (self.output_channel, result.outputs, 1),
-                (self.loop_output, result.outputs, 2),
-                (self.instrument_input, result.inputs, None),
-                (self.monitor_left, result.outputs, None),
-                (self.monitor_right, result.outputs, None),
+            remembered = self.remembered_audio_route(info)
+            previous_buffer = remembered.get(
+                "blocksize", self.buffer.currentData() if same_device else None
+            )
+            for key, combo, names, default in (
+                ("input_channel", self.input_channel, result.inputs, 1),
+                ("loopback_input_channel", self.loop_input, result.inputs, 2),
+                ("output_channel", self.output_channel, result.outputs, 1),
+                ("loopback_output_channel", self.loop_output, result.outputs, 2),
+                (
+                    "instrument_input_channel",
+                    self.instrument_input,
+                    result.inputs,
+                    None,
+                ),
+                ("monitor_output_left", self.monitor_left, result.outputs, None),
+                ("monitor_output_right", self.monitor_right, result.outputs, None),
             ):
-                previous = combo.currentData() or default
+                previous = remembered.get(
+                    key, combo.currentData() if same_device else default
+                )
                 combo.blockSignals(True)
                 combo.clear()
                 if default is None:
@@ -1317,6 +1329,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             self.buffer.setCurrentIndex(max(0, self.buffer.findData(wanted)))
             self.buffer.setToolTip(result.note)
             self.buffer.blockSignals(False)
+            if "loopback_enabled" in remembered:
+                self.loop_enabled.blockSignals(True)
+                self.loop_enabled.setChecked(remembered["loopback_enabled"])
+                self.loop_enabled.blockSignals(False)
+            if "playback_blocksize" in remembered:
+                self._playback_blocksize = remembered["playback_blocksize"]
             if min(info.max_input_channels, info.max_output_channels) < 2:
                 self.loop_enabled.setToolTip(
                     "Clean loopback needs a second input and output. Choose a driver with both channels or disable loopback."

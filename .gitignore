@@ -146,6 +146,7 @@ AGENTS.md
 # ParaNAM application build outputs
 .build-tools/
 .test-temp/
+.test-temp056/
 .test-tools/
 installers/
 packaging/icon.ico
@@ -154,6 +155,7 @@ packaging/icon.png
 !nam/_version.py
 
 !paranam/assets/*.wav
+!paranam/assets/irs/*.wav
 !packaging/ParaNAM.spec
 paranam/assets/gpu-*.json
 paranam/native/

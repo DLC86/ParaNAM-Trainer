@@ -232,10 +232,17 @@ class PlayWorker(QThread):
             current_model_output = gains[
                 self.settings.get("output_mode", "calibrated")
             ][1]
+            from .ir import MonitorIR
+
+            monitor_ir = MonitorIR(rate, self.settings.get("ir_processor"))
+            input_peak = 0.0
+            output_peaks = np.zeros(2)
+            meter_clipping = meter_adc = meter_dropout = False
             callback_error = []
 
             def callback(incoming, outgoing, frames, _time, status):
                 nonlocal last_parameters, blend, count, current_input, current_output, current_model_output
+                nonlocal input_peak, output_peaks, meter_clipping, meter_adc, meter_dropout
                 outgoing.fill(0)
                 if frames <= 0:
                     return
@@ -283,29 +290,47 @@ class PlayWorker(QThread):
                         target_output + (current_output - target_output) * decay
                     )
                     current_output = float(output_ramp[-1])
-                    monitor = ((1 - ramp) * returned + ramp * rendered) * output_ramp
+                    monitor = (
+                        monitor_ir.process(
+                            (1 - ramp) * returned + ramp * rendered,
+                            settings.get("ir_processor"),
+                        )
+                        * output_ramp[:, None]
+                    )
                     if not np.isfinite(monitor).all():
                         raise ValueError("The model produced non-finite audio")
-                    monitor_peak = float(np.max(np.abs(monitor)))
-                    for channel in (
-                        audio.monitor_output_left,
-                        audio.monitor_output_right,
+                    peaks = np.max(np.abs(monitor), axis=0)
+                    clipped = np.clip(monitor, -1, 1)
+                    for index, channel in enumerate(
+                        (audio.monitor_output_left, audio.monitor_output_right)
                     ):
-                        outgoing[:, channel - 1] = np.clip(monitor, -1, 1)
+                        outgoing[:, channel - 1] = clipped[:, index]
+                    raw_peak = float(np.max(np.abs(raw_instrument)))
+                    input_peak = max(input_peak, raw_peak)
+                    output_peaks = np.maximum(
+                        output_peaks, np.max(np.abs(clipped), axis=0)
+                    )
+                    meter_clipping |= (
+                        float(np.max(peaks)) >= 1 or float(np.max(np.abs(send))) >= 1
+                    )
+                    meter_adc |= raw_peak >= 0.999
+                    meter_dropout |= bool(status)
                     count += frames
                     if count >= rate // 10:
                         self.metered.emit(
                             dict(
-                                input_peak=float(np.max(np.abs(instrument))),
-                                output_peak=monitor_peak,
-                                clipping=monitor_peak >= 1
-                                or float(np.max(np.abs(send))) >= 1,
-                                adc_clipping=float(np.max(np.abs(raw_instrument)))
-                                >= 0.999,
-                                dropout=bool(status),
+                                input_peak=input_peak,
+                                output_peak=float(np.max(output_peaks)),
+                                output_peaks=output_peaks.tolist(),
+                                clipping=meter_clipping,
+                                adc_clipping=meter_adc,
+                                dropout=meter_dropout,
                             )
                         )
                         count = 0
+                        input_peak = 0.0
+                        output_peaks.fill(0)
+                        meter_clipping = meter_adc = meter_dropout = False
                 except Exception as error:
                     outgoing.fill(0)
                     callback_error.append(str(error))

@@ -4,8 +4,8 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QPainter, QPen, QColor
+from PySide6.QtCore import QThread, Signal, Qt, QTimer, QRectF
+from PySide6.QtGui import QPainter, QPen, QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -20,10 +20,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QAbstractSpinBox,
     QFrame,
+    QSlider,
 )
 
 from .playback import NativeModel, PlayWorker, validate_route
 from .workspace import read_json
+from .ir import BUNDLED, prepare_ir, IRProcessor
 
 
 class PlayDial(QDial):
@@ -106,6 +108,125 @@ class ModelPlayDial(PlayDial):
     """The original Compare dial, enlarged slightly for the amp panel."""
 
 
+class SlideSwitch(QSlider):
+    """Discrete amp-style slide switch; click, drag and arrow-key operable."""
+
+    def __init__(self, positions, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.positions = positions
+        font = self.font()
+        font.setPointSize(11)
+        font.setBold(True)
+        label_width = max(
+            QFontMetrics(font).horizontalAdvance(label) for label in positions
+        )
+        self.label_padding = max(16, label_width / 2 + 4)
+        self.setRange(0, len(positions) - 1)
+        self.setFixedHeight(108)
+        self.setFixedWidth(
+            round(
+                max(
+                    84,
+                    (len(positions) - 1) * max(36, label_width + 8)
+                    + 2 * self.label_padding,
+                )
+            )
+        )
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.valueChanged.connect(
+            lambda value: self.setAccessibleDescription(positions[value])
+        )
+
+    def position_x(self, index):
+        return self.label_padding + index * (
+            self.width() - 2 * self.label_padding
+        ) / max(1, self.maximum())
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        middle = self.height() / 2
+        painter.setPen(QPen(QColor("#606060"), 1))
+        painter.setBrush(QColor("#202020"))
+        painter.drawRoundedRect(QRectF(6, middle - 10, self.width() - 12, 20), 5, 5)
+        for index in range(self.maximum() + 1):
+            x = self.position_x(index)
+            painter.drawLine(round(x), round(middle - 5), round(x), round(middle + 5))
+        painter.setPen(QPen(QColor("#bf0000" if self.hasFocus() else "#a0a0a0"), 2))
+        painter.setBrush(QColor("#454545"))
+        x = self.position_x(self.value())
+        painter.drawRoundedRect(QRectF(x - 11, middle - 17, 22, 34), 3, 3)
+        painter.setPen(QPen(QColor("#b8b8b8"), 1))
+        for offset in (-4, 0, 4):
+            painter.drawLine(
+                round(x + offset),
+                round(middle - 8),
+                round(x + offset),
+                round(middle + 8),
+            )
+
+    def choose_position(self, event):
+        fraction = (event.position().x() - self.label_padding) / max(
+            1, self.width() - 2 * self.label_padding
+        )
+        self.setValue(round(min(1, max(0, fraction)) * self.maximum()))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setFocus()
+            self.choose_position(event)
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.choose_position(event)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.choose_position(event)
+            event.accept()
+
+
+class SwitchPositions(QWidget):
+    def __init__(self, slider, parent=None):
+        super().__init__(parent)
+        self.slider = slider
+        self.setFixedHeight(30)
+        self.setFixedWidth(slider.width())
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        font = painter.font()
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        step = (self.width() - 2 * self.slider.label_padding) / max(
+            1, self.slider.maximum()
+        )
+        for index, label in enumerate(self.slider.positions):
+            center = self.slider.label_padding + index * step
+            painter.setPen(
+                QColor("#ffffff" if index == self.slider.value() else "#aaaaaa")
+            )
+            painter.drawText(
+                QRectF(center - step / 2, 0, step, self.height()),
+                Qt.AlignmentFlag.AlignCenter,
+                label,
+            )
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            fraction = (event.position().x() - self.slider.label_padding) / max(
+                1, self.width() - 2 * self.slider.label_padding
+            )
+            self.slider.setValue(
+                round(min(1, max(0, fraction)) * self.slider.maximum())
+            )
+            self.slider.setFocus()
+            event.accept()
+
+
 class ControlValue(QDoubleSpinBox):
     """A plain clickable value which still supports typing and keyboard edits."""
 
@@ -113,10 +234,13 @@ class ControlValue(QDoubleSpinBox):
         super().__init__(parent)
         self.setObjectName("controlValue")
         self.setFrame(False)
+        self.setKeyboardTracking(False)
         self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumWidth(110)
-        self.setToolTip("Click to type a value. Double-click the knob to reset it.")
+        self.setToolTip(
+            "Press Enter or click elsewhere to apply a typed value. Double-click the knob to reset it."
+        )
 
     def textFromValue(self, value):
         return self.locale().toString(value, "g", 12)
@@ -139,6 +263,62 @@ class ModelInfoLoader(QThread):
                 model.close()
         except Exception as error:
             self.failed.emit(str(error))
+
+
+class IRLoader(QThread):
+    loaded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path, rate, parent=None):
+        super().__init__(parent)
+        self.path, self.rate = path, rate
+
+    def run(self):
+        try:
+            kernel = prepare_ir(self.path, self.rate)
+            self.loaded.emit((kernel, IRProcessor(kernel)))
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
+class LevelMeter(QWidget):
+    """Two monitor channels or one instrument channel, with a decaying peak bar."""
+
+    def __init__(self, channels, parent=None):
+        super().__init__(parent)
+        self.channels = channels
+        self.levels = [-60.0] * channels
+        self.setFixedSize(44, 92)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.decay)
+        self.timer.start(50)
+
+    def decay(self):
+        self.levels = [max(-60.0, level - 1.5) for level in self.levels]
+        self.update()
+
+    def set_levels(self, values):
+        self.levels = [
+            max(old, 20 * math.log10(max(float(value), 1e-6)))
+            for old, value in zip(self.levels, values)
+        ]
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        width = (self.width() - 6) // self.channels
+        for channel, level in enumerate(self.levels):
+            left = channel * width + 3
+            painter.fillRect(left, 2, width - 4, 88, QColor("#242424"))
+            for step in range(22):
+                threshold = -60 + step * 60 / 22
+                if level >= threshold:
+                    color = (
+                        "#bf0000"
+                        if threshold >= -3
+                        else "#c4a03b" if threshold >= -12 else "#54a87b"
+                    )
+                    painter.fillRect(left, 86 - step * 4, width - 4, 3, QColor(color))
 
 
 class PlayActions:
@@ -200,10 +380,12 @@ class PlayActions:
         panel.setSpacing(14)
         self.play_start = QPushButton("Play")
         self.play_start.setObjectName("comparePlay")
+        self.play_start.setProperty("playing", False)
         self.play_start.setFixedSize(160, 62)
         self.play_start.clicked.connect(self.start_playback)
         self.play_stop = QPushButton("Stop playing")
         self.play_stop.setObjectName("comparePlay")
+        self.play_stop.setProperty("playing", True)
         self.play_stop.setFixedSize(160, 62)
         self.play_stop.clicked.connect(self.stop_playback)
         self.play_start.setEnabled(False)
@@ -237,23 +419,6 @@ class PlayActions:
         self.play_calibration = QLabel("")
         self.play_calibration.setWordWrap(True)
         layout.addWidget(self.play_calibration)
-        controls = QGridLayout()
-        controls.setHorizontalSpacing(28)
-        self.play_gain_layout = controls
-        self.play_input = self._play_gain("Input", -20, 20, 0, controls)
-        self.play_output = self._play_gain("Output", -20, 20, 0, controls)
-        for column, (caption, selector) in enumerate(
-            (("Model size", self.play_size), ("Output mode", self.play_output_mode)), 2
-        ):
-            title = QLabel(caption)
-            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            controls.addWidget(title, 0, column)
-            selector.setMinimumWidth(140)
-            controls.addWidget(
-                selector, 1, column, alignment=Qt.AlignmentFlag.AlignCenter
-            )
-        controls.setColumnStretch(4, 1)
-        layout.addLayout(controls)
         self.play_controls = QFrame()
         self.play_controls.setObjectName("ampPanel")
         self.play_controls_layout = QGridLayout(self.play_controls)
@@ -262,7 +427,72 @@ class PlayActions:
         self.play_controls.hide()
         self.play_values = []
         layout.addWidget(self.play_controls)
-        self.play_meter = QLabel("Input Peak — · Monitor Peak —")
+        controls = QGridLayout()
+        controls.setHorizontalSpacing(18)
+        self.play_gain_layout = controls
+        self.play_input_meter = LevelMeter(1)
+        self.play_output_meter = LevelMeter(2)
+        self.play_input_peak = QLabel("−∞ dBFS")
+        self.play_output_peak = QLabel("−∞ dBFS")
+        for column, title, meter, peak in (
+            (0, "Instrument", self.play_input_meter, self.play_input_peak),
+            (5, "Monitor L/R", self.play_output_meter, self.play_output_peak),
+        ):
+            peak.setMinimumSize(120, 30)
+            peak.setMargin(4)
+            peak.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            controls.addWidget(
+                QLabel(title), 0, column, alignment=Qt.AlignmentFlag.AlignCenter
+            )
+            controls.addWidget(meter, 1, column, alignment=Qt.AlignmentFlag.AlignCenter)
+            controls.addWidget(peak, 2, column, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.play_input = self._play_gain("Input", -20, 20, 0, controls, 1)
+        self.play_output = self._play_gain("Output", -20, 20, 0, controls, 4)
+        for column, (caption, selector) in enumerate(
+            (("Model size", self.play_size), ("Output mode", self.play_output_mode)), 2
+        ):
+            title = QLabel(caption)
+            title.setObjectName("compareControlLabel")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            controls.addWidget(title, 0, column)
+            selector.setMinimumWidth(140)
+            controls.addWidget(
+                selector, 1, column, alignment=Qt.AlignmentFlag.AlignCenter
+            )
+        layout.addLayout(controls)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Monitor IR"))
+        self.play_ir = QComboBox()
+        self.play_ir.addItem("Off", None)
+        for name in ("Ampeg", "Celestion", "Eminence", "Mesa", "Plate", "Spring"):
+            self.play_ir.addItem(
+                name + " · Tone3000", str(BUNDLED / (name.lower() + ".wav"))
+            )
+        row.addWidget(self.play_ir, 1)
+        self.play_ir_open = QPushButton("Load IR…")
+        self.play_ir_open.clicked.connect(self.open_play_ir)
+        row.addWidget(self.play_ir_open)
+        layout.addLayout(row)
+        self.play_ir_status = QLabel(
+            "IR affects the monitor signal; reamp send is independent."
+        )
+        self.play_ir_status.setWordWrap(True)
+        self.play_ir_status.setObjectName("muted")
+        layout.addWidget(self.play_ir_status)
+        self.ir_loader = None
+        self._ir_kernel = self._ir_processor = None
+        self._ir_path = None
+        self.play_ir.currentIndexChanged.connect(self.load_play_ir)
+        saved_ir = self.settings.value("play_ir", "")
+        if saved_ir and Path(saved_ir).is_file():
+            index = self.play_ir.findData(saved_ir)
+            if index < 0:
+                self.play_ir.addItem(Path(saved_ir).name, saved_ir)
+                index = self.play_ir.count() - 1
+            self.play_ir.setCurrentIndex(index)
+        self.play_meter = QLabel("")
+        self.play_meter.setWordWrap(True)
+        self.play_meter.hide()
         layout.addWidget(self.play_meter)
         self.play_status = QLabel(
             "Select a model. Audio starts only when Play is pressed."
@@ -274,9 +504,11 @@ class PlayActions:
         self.play_buffer.currentIndexChanged.connect(self._play_buffer_changed)
         self._play_ready = False
 
-    def _play_gain(self, name, minimum, maximum, default, layout):
-        column = layout.count() // 3
+    def _play_gain(self, name, minimum, maximum, default, layout, column=None):
+        if column is None:
+            column = layout.count() // 3
         title = QLabel(name)
+        title.setObjectName("compareControlLabel")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title, 0, column)
         dial = PlayDial()
@@ -296,6 +528,58 @@ class PlayActions:
         field.valueChanged.connect(lambda v: dial.setValue(round(v * 10)))
         field.valueChanged.connect(self.update_play_settings)
         return field
+
+    def open_play_ir(self):
+        path, _ = self.choose_open_file("Load impulse response", "IR WAV (*.wav)")
+        if path:
+            index = self.play_ir.findData(path)
+            if index < 0:
+                self.play_ir.addItem(Path(path).name, path)
+                index = self.play_ir.count() - 1
+            self.play_ir.setCurrentIndex(index)
+
+    def load_play_ir(self, *_):
+        if self.ir_loader:
+            return
+        path = self.play_ir.currentData()
+        if not path:
+            self._ir_kernel = self._ir_processor = self._ir_path = None
+            self.settings.setValue("play_ir", "")
+            self.play_ir_status.setText("IR off")
+            self.update_play_settings()
+            return
+        rate = (
+            (self.workspace.project.sample_rate or 48000) if self.workspace else 48000
+        )
+        self.ir_loader = IRLoader(path, rate, self)
+        self.play_ir.setEnabled(False)
+        self.play_ir_open.setEnabled(False)
+        self.play_ir_status.setText("Loading IR…")
+        self.ir_loader.loaded.connect(self._play_ir_loaded)
+        self.ir_loader.failed.connect(self._play_ir_failed)
+        self.ir_loader.finished.connect(self._play_ir_finished)
+        self.ir_loader.start()
+
+    def _play_ir_loaded(self, prepared):
+        self._ir_kernel, self._ir_processor = prepared
+        self._ir_path = self.play_ir.currentData()
+        self.settings.setValue("play_ir", self._ir_path)
+        self.play_ir_status.setText(
+            f"{self._ir_kernel.name} · {self._ir_kernel.rate} Hz · monitor IR enabled"
+        )
+        self.update_play_settings()
+
+    def _play_ir_failed(self, error):
+        self.play_ir_status.setText(f"IR could not be loaded: {error}")
+        self.play_ir.blockSignals(True)
+        self.play_ir.setCurrentIndex(max(0, self.play_ir.findData(self._ir_path)))
+        self.play_ir.blockSignals(False)
+
+    def _play_ir_finished(self):
+        self.ir_loader.deleteLater()
+        self.ir_loader = None
+        self.play_ir.setEnabled(True)
+        self.play_ir_open.setEnabled(True)
 
     def open_play_model(self):
         path, _ = self.choose_open_file(
@@ -471,15 +755,20 @@ class PlayActions:
             frame = QWidget()
             column = QVBoxLayout(frame)
             name = QLabel(control["name"])
+            name.setObjectName("compareControlLabel")
             name.setTextFormat(Qt.TextFormat.PlainText)
             name.setWordWrap(True)
+            name.setFixedHeight(36)
             name.setAlignment(Qt.AlignmentFlag.AlignCenter)
             column.addWidget(name)
             if control["positions"]:
-                widget = QComboBox()
-                widget.addItems(control["positions"])
-                widget.setCurrentIndex(int(self.play_values[index]))
-                widget.currentIndexChanged.connect(
+                slider = SlideSwitch(control["positions"])
+                slider.setAccessibleName(control["name"])
+                slider.setValue(int(self.play_values[index]))
+                column.addWidget(slider, alignment=Qt.AlignmentFlag.AlignCenter)
+                widget = SwitchPositions(slider)
+                slider.valueChanged.connect(widget.update)
+                slider.valueChanged.connect(
                     lambda value, i=index: self._play_parameter(i, float(value))
                 )
             else:
@@ -498,6 +787,7 @@ class PlayActions:
                 widget = ControlValue()
                 widget.setRange(control["min"], control["max"])
                 widget.setDecimals(3)
+                widget.setFixedHeight(30)
                 widget.setSingleStep((control["max"] - control["min"]) / 100)
                 widget.setValue(self.play_values[index])
                 dial.setValue(
@@ -520,7 +810,7 @@ class PlayActions:
                         round((value - minimum) / max(extent, 1e-12) * 10000)
                     )
                 )
-            column.addWidget(widget)
+            column.addWidget(widget, alignment=Qt.AlignmentFlag.AlignCenter)
             grid.addWidget(frame, index // 5, index % 5)
         self.play_status.setText(
             "Ready. Gear and Model switch the monitored source; the real gear and model stay warm in parallel."
@@ -547,6 +837,7 @@ class PlayActions:
                 output_db=self.play_output.value(),
                 source="gear" if self.gear_button.isChecked() else "model",
                 output_mode=self.play_output_mode.currentData(),
+                ir_processor=self._ir_processor,
             )
 
     def start_playback(self):
@@ -564,6 +855,17 @@ class PlayActions:
             validate_route(device, self.audio_settings())
             self.close_audio()
             project = self.playback_project()
+            if self.ir_loader:
+                self.play_status.setText("Wait for the IR to finish loading.")
+                return
+            if self._ir_kernel is not None:
+                if self._ir_kernel.rate != (project.sample_rate or 48000):
+                    self.load_play_ir()
+                    self.play_status.setText(
+                        "Preparing the IR at this project’s sample rate. Press Play when ready."
+                    )
+                    return
+                self._ir_processor = IRProcessor(self._ir_kernel)
             self._playback_blocksize = project.audio.blocksize
             self.remember_setup()
             self.play_worker = PlayWorker(
@@ -593,14 +895,21 @@ class PlayActions:
 
     def _play_metered(self, values):
         db = lambda value: 20 * math.log10(max(value, 1e-12))
-        text = f"Input Peak {db(values['input_peak']):.1f} dBFS · Monitor Peak {db(values['output_peak']):.1f} dBFS"
+        self.play_input_meter.set_levels([values["input_peak"]])
+        self.play_output_meter.set_levels(
+            values.get("output_peaks", [values["output_peak"]] * 2)
+        )
+        self.play_input_peak.setText(f"{db(values['input_peak']):.1f} dBFS")
+        self.play_output_peak.setText(f"{db(values['output_peak']):.1f} dBFS")
+        warnings = []
         if values["clipping"]:
-            text += " · Clipping: lower Input / Output"
+            warnings.append("Clipping: lower Input / Output")
         if values.get("adc_clipping"):
-            text += " · ADC clipping: lower the interface input gain"
+            warnings.append("ADC clipping: lower the interface input gain")
         if values["dropout"]:
-            text += " · Audio dropout: increase buffer size"
-        self.play_meter.setText(text)
+            warnings.append("Audio dropout: increase buffer size")
+        self.play_meter.setText(" · ".join(warnings))
+        self.play_meter.setVisible(bool(warnings))
 
     def stop_playback(self, checked=False, *, reconfigure=False):
         if not reconfigure:
@@ -612,6 +921,10 @@ class PlayActions:
     def _play_finished(self):
         self.play_worker.deleteLater()
         self.play_worker = None
+        self.play_input_meter.levels = [-60.0]
+        self.play_output_meter.levels = [-60.0, -60.0]
+        self.play_input_peak.setText("−∞ dBFS")
+        self.play_output_peak.setText("−∞ dBFS")
         self.play_start.setEnabled(self._play_ready)
         self.play_stop.setEnabled(False)
         self.play_model.setEnabled(True)

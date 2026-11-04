@@ -130,6 +130,21 @@ class Workspace:
         project.train_input = "input_standard.wav"
         save_project(project, directory)
         workspace = cls(directory)
+        from .recipes import training_preset, preset_batch_size
+
+        options = training_preset("HyperWaveNet")
+        # Same result as selecting HyperWaveNet, then the scaled A2 LR preset.
+        options.update(
+            rate_preset="a2_controls",
+            learning_rate=0.004,
+            hypernetwork_learning_rate=0.0004,
+            lr_decay=0.994,
+        )
+        workspace.preferences.update(
+            epochs=100,
+            batch_size=preset_batch_size("HyperWaveNet"),
+            advanced_parametric=options,
+        )
         workspace.save()
         return workspace
 

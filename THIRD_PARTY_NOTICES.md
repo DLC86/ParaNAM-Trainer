@@ -39,3 +39,16 @@ at commit 03b423f336dbfb4f86308e65445f468e2e00ad46, its pinned parametric NAM Co
 AudioDSPTools and Eigen dependencies. Their license files are included in the
 application's licenses/playback-* folders. The library does not link JUCE; the
 desktop interface and audio streaming use Qt and PortAudio as before.
+
+
+## Tone3000 preview impulse responses
+
+The six WAV files in `paranam/assets/irs/` (Ampeg, Celestion, Eminence,
+Mesa, Plate and Spring) are reproduced unchanged from the official TONE3000
+web player, revision `ea8dc285462d6cedd982691b9f090cd03dac04a2`:
+https://github.com/tone-3000/neural-amp-modeler-wasm/tree/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/irs
+
+Copyright (c) 2026 TONE3000. MIT license; the complete upstream UI license
+is included as `paranam/assets/irs/LICENSE.txt`. `manifest.json` records
+source URLs and SHA-256 digests. IR normalization follows the upstream
+`ui/src/audio/irGain.ts` left-channel, 64-frequency mean-power method.

@@ -6,6 +6,13 @@ from pathlib import Path
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
 
+def control_cadence_multiplier(project):
+    """Each switch doubles the knob-based cadence; switch positions are irrelevant."""
+    switches = sum(control.type == "switch" for control in project.knobs)
+    knobs = len(project.knobs) - switches
+    return max(1, knobs) * 2**switches
+
+
 def training_preset(name):
     if name not in ("HyperA2", "HyperWaveNet"):
         raise ValueError(f"Unknown training preset: {name}")
@@ -165,6 +172,8 @@ def workspace_update_schedule(workspace):
         options["hypernetwork_learning_rate"],
         options["lr_decay"],
         cadence_multiplier=(
-            len(project.knobs) if options.get("rate_preset") == "a2_controls" else 1
+            control_cadence_multiplier(project)
+            if options.get("rate_preset") == "a2_controls"
+            else 1
         ),
     )

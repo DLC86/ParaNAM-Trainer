@@ -2,7 +2,11 @@ import pytest
 
 from nam.capture.params import KnobSpec, SwitchSpec
 from paranam import training
-from paranam.recipes import a2_update_schedule, workspace_update_schedule
+from paranam.recipes import (
+    a2_update_schedule,
+    workspace_update_schedule,
+    control_cadence_multiplier,
+)
 from paranam.workspace import Workspace, read_json
 from tests.paranam.test_workflow055 import ready_audio
 
@@ -34,7 +38,7 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     job = training.make_job(workspace)
     spec = read_json(job / "spec.json")
     schedule = spec["preferences"]["rate_schedule"]
-    count = len(controls)
+    count = control_cadence_multiplier(workspace.project)
     assert schedule["cadence_multiplier"] == count
     assert schedule["decay_steps"] == schedule["reference_steps"] * count
     assert (

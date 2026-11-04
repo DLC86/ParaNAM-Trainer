@@ -15,7 +15,13 @@ def workspace(tmp_path):
     ws = Workspace.create(tmp_path / "My rig", "My rig")
     ws.draft_controls = [KnobSpec("Gain", 0, 10).to_dict()]
     ws.preferences.update(
-        n_train=2, n_validation=1, corners=False, epochs=2, batch_size=1, device="cpu"
+        n_train=2,
+        n_validation=1,
+        corners=False,
+        epochs=2,
+        batch_size=1,
+        device="cpu",
+        advanced_parametric={},
     )
     ws.generate_plan()
     return ws

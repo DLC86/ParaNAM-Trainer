@@ -70,8 +70,9 @@ QToolButton:hover { background: #3a3a3a; border-color: #797979; }
 QToolButton#brandLink { background: transparent; border: 1px solid transparent; padding: 0; border-radius: 4px; }
 QToolButton#brandLink:hover, QToolButton#brandLink:focus { border-color: #bf0000; }
 QWidget#advancedTraining { background: transparent; }
-QFrame#ampPanel { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #414141,stop:0.12 #363636,stop:0.88 #303030,stop:1 #454545); border: 2px solid #606060; border-radius: 12px; }
+QFrame#ampPanel { background: #000000; border: 2px solid #404040; border-radius: 12px; }
 QFrame#ampPanel QWidget { background: transparent; }
+QLabel#compareControlLabel { font-size: 11pt; }
 QDoubleSpinBox#controlValue, QDoubleSpinBox#controlValue QLineEdit { background: transparent; border: none; border-radius: 0; padding: 2px; font-size: 16px; font-weight: 600; }
 QDoubleSpinBox#controlValue:focus { color: #ffffff; }
 QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2c; }
@@ -82,8 +83,10 @@ QPushButton#compareSource { font-size: 25px; font-weight: 700; border: 2px solid
 QPushButton#compareSource:hover { border-color: #bf0000; background: #353535; }
 QPushButton#compareSource:checked { border-color: #f04040; color: #ffffff; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #bf0000, stop:1 #790000); }
 QPushButton#compareSource:focus { border-color: #ffffff; }
-QPushButton#comparePlay { font-size: 18px; font-weight: 700; border: 2px solid #ee3434; border-radius: 16px; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #bf0000,stop:1 #790000); padding: 10px 18px; }
-QPushButton#comparePlay:hover { background: #cc1515; }
+QPushButton#comparePlay { font-size: 18px; font-weight: 700; border: 2px solid #4a4a4a; border-radius: 16px; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #333333,stop:1 #202020); padding: 10px 18px; }
+QPushButton#comparePlay:hover { background: #3a3a3a; border-color: #797979; }
+QPushButton#comparePlay[playing="true"] { border-color: #ee3434; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #bf0000,stop:1 #790000); }
+QPushButton#comparePlay[playing="true"]:hover { background: #cc1515; }
 QPushButton#comparePlay:disabled { color: #888888; border-color: #444444; background: #292929; }
 QPushButton#primary:disabled { background: #343434; color: #999999; border-color: #343434; }
 QPushButton#step { background: transparent; border: 0; text-align: left; padding: 15px 8px; color: #969696; font-family: 'Michroma'; font-size: 14px; }
