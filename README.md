@@ -161,6 +161,11 @@ reference HyperWaveNet recipe initializes its batch and settings separately.
 The optional **A2 — same cadence per optimizer update** learning-rate preset uses
 dataset/window counts and batch size to match the reference A2 decay cadence.
 Its preview shows update counts and the resulting final learning rates.
+The current source also provides **A2 — n× slower (knobs + switches)**: it keeps
+the same reduction factor but spaces reductions by the model's control count
+(two controls: every 124 rather than 62 optimizer updates). Switch positions and
+the number of captured combinations do not multiply this factor. Both initial
+rates remain editable; the preview shows the resulting schedule and final rates.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 

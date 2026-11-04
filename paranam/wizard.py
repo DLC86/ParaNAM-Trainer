@@ -718,6 +718,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         rate_preset = QComboBox()
         rate_preset.addItem("Manual / per-epoch decay", "manual")
         rate_preset.addItem("A2 — same cadence per optimizer update", "a2_updates")
+        rate_preset.addItem("A2 — n× slower (knobs + switches)", "a2_controls")
+        rate_preset.setToolTip(
+            "The controls-scaled preset keeps the A2 reduction factor but multiplies "
+            "the number of updates between reductions by the model's knob/switch count."
+        )
         self.advanced_fields["rate_preset"] = rate_preset
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
         rate_preset.activated.connect(self.apply_rate_preset)
@@ -973,7 +978,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
     def apply_rate_preset(self, *_):
         if not self.workspace or self._loading:
             return
-        if self.advanced_fields["rate_preset"].currentData() == "a2_updates":
+        if self.advanced_fields["rate_preset"].currentData() in (
+            "a2_updates",
+            "a2_controls",
+        ):
             for key, value in (
                 ("learning_rate", 0.004),
                 ("hypernetwork_learning_rate", 0.0004),
@@ -991,9 +999,9 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         self.advanced_fields["rate_preset"].setEnabled(parametric)
-        matched = (
-            parametric
-            and self.advanced_fields["rate_preset"].currentData() == "a2_updates"
+        matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
+            "a2_updates",
+            "a2_controls",
         )
         self.advanced_fields["lr_decay"].setEnabled(not matched)
         self.advanced_fields["lr_decay"].setToolTip(
@@ -1011,10 +1019,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             self.rate_preview.setText(
                 f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "
                 f"This plan: {schedule['steps_per_epoch']} updates/epoch, {schedule['training_seconds']:.1f} s of training audio.\n"
-                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['reference_steps']} optimizer updates; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
+                f"Cadence multiplier: {schedule['cadence_multiplier']}× "
+                f"({'knob/switch count' if self.advanced_fields['rate_preset'].currentData() == 'a2_controls' else 'original A2 cadence'}). "
+                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['decay_steps']} optimizer updates; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
                 f"After {self.workspace.preferences['epochs']} epochs: LR {schedule['final_learning_rate']:.3e}, "
                 f"hypernetwork LR {schedule['final_hypernetwork_learning_rate']:.3e} "
-                f"({schedule['equivalent_a2_epochs']:.1f} reference A2 epochs). "
+                f"({schedule['reductions']} LR reductions; {schedule['equivalent_a2_epochs']:.1f} reference A2 epochs of updates). "
                 "Initial rates remain editable. Matching cadence does not select the training duration or guarantee convergence."
             )
         except (ValueError, OSError, RuntimeError) as error:

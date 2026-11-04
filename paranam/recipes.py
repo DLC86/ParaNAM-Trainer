@@ -44,12 +44,15 @@ def a2_update_schedule(
     learning_rate,
     hypernetwork_learning_rate,
     reference_gamma=0.994,
+    *,
+    cadence_multiplier=1,
 ):
     """Match the official single-standard-capture A2 decay per optimizer update.
 
     Header-only accounting mirrors Dataset cropping/context and the capture-grouped
     drop-last sampler. The reference always uses bundled standard audio, NY=8192,
     batch=16 and the official 10s / final-9s split, independent of custom inputs.
+    cadence_multiplier spaces the same discrete reductions farther apart.
     """
     import soundfile as sf
     from nam.capture.export import (
@@ -63,6 +66,12 @@ def a2_update_schedule(
         raise ValueError(
             "The A2 cadence preset requires positive batch, NY and epochs, and 0 < decay <= 1"
         )
+    if (
+        isinstance(cadence_multiplier, bool)
+        or not isinstance(cadence_multiplier, int)
+        or cadence_multiplier < 1
+    ):
+        raise ValueError("The A2 cadence multiplier must be a positive integer")
     receptive_field = (
         1
         + sum((k - 1) * d for k, d in zip(_WAVENET_KERNEL_SIZES, _WAVENET_DILATIONS))
@@ -109,20 +118,28 @@ def a2_update_schedule(
         total_seconds += count / x.samplerate
     if steps < 1:
         raise ValueError("Apply a capture plan before calculating the A2 cadence")
-    reductions = steps * epochs // reference_steps
+    decay_steps = reference_steps * cadence_multiplier
+    reductions = steps * epochs // decay_steps
     factor = reference_gamma**reductions
     return dict(
-        protocol="a2-standard-update-cadence-v1",
+        protocol=(
+            "a2-standard-update-cadence-v1"
+            if cadence_multiplier == 1
+            else "a2-standard-update-cadence-scaled-v1"
+        ),
         reference_steps=reference_steps,
+        cadence_multiplier=cadence_multiplier,
+        decay_steps=decay_steps,
         reference_batch_size=16,
         reference_ny=8192,
         reference_gamma=reference_gamma,
         steps_per_epoch=steps,
         training_seconds=total_seconds,
-        gamma_epoch=math.exp(math.log(reference_gamma) * steps / reference_steps),
+        gamma_epoch=math.exp(math.log(reference_gamma) * steps / decay_steps),
         final_learning_rate=learning_rate * factor,
         final_hypernetwork_learning_rate=hypernetwork_learning_rate * factor,
         equivalent_a2_epochs=steps * epochs / reference_steps,
+        equivalent_decay_epochs=steps * epochs / decay_steps,
         reductions=reductions,
     )
 
@@ -147,4 +164,7 @@ def workspace_update_schedule(workspace):
         options["learning_rate"],
         options["hypernetwork_learning_rate"],
         options["lr_decay"],
+        cadence_multiplier=(
+            len(project.knobs) if options.get("rate_preset") == "a2_controls" else 1
+        ),
     )

@@ -285,8 +285,14 @@ def make_job(workspace, resume=False, job_directory=None):
         options = workspace.training_options()
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
-        if options.get("rate_preset", "manual") not in ("manual", "a2_updates"):
-            raise ValueError("Choose Manual or A2 cadence as the learning-rate preset")
+        if options.get("rate_preset", "manual") not in (
+            "manual",
+            "a2_updates",
+            "a2_controls",
+        ):
+            raise ValueError(
+                "Choose Manual, A2 cadence or A2 controls-scaled cadence as the learning-rate preset"
+            )
         if not math.isfinite(options["learning_rate"]) or options["learning_rate"] <= 0:
             raise ValueError("Learning rate must be finite and positive")
         if options["gradient_clipping"] and (
@@ -368,7 +374,10 @@ def make_job(workspace, resume=False, job_directory=None):
         from .evaluation import PROTOCOL, reserve_validation_audio
 
         reserve_validation_audio(data)
-        if not is_static and options.get("rate_preset", "manual") == "a2_updates":
+        if not is_static and options.get("rate_preset", "manual") in (
+            "a2_updates",
+            "a2_controls",
+        ):
             from .recipes import a2_update_schedule
 
             schedule = a2_update_schedule(
@@ -380,12 +389,17 @@ def make_job(workspace, resume=False, job_directory=None):
                 options["learning_rate"],
                 options["hypernetwork_learning_rate"],
                 options["lr_decay"],
+                cadence_multiplier=(
+                    len(workspace.project.knobs)
+                    if options["rate_preset"] == "a2_controls"
+                    else 1
+                ),
             )
             model["lr_scheduler"] = {
                 "class": "StepLR",
                 "kwargs": {
                     "gamma": schedule["reference_gamma"],
-                    "step_size": schedule["reference_steps"],
+                    "step_size": schedule["decay_steps"],
                 },
                 "interval": "step",
                 "frequency": 1,
