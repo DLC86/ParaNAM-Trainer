@@ -995,6 +995,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             and self.advanced_fields["rate_preset"].currentData() == "a2_updates"
         )
         self.advanced_fields["lr_decay"].setEnabled(not matched)
+        self.advanced_fields["lr_decay"].setToolTip(
+            "Reference A2-epoch multiplier. The preview shows its cadence in optimizer updates and the equivalent multiplier per project epoch."
+            if matched
+            else "Exponential learning-rate multiplier after each epoch."
+        )
         self.rate_preview.setVisible(matched)
         if not matched:
             return
