@@ -121,6 +121,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     from nam.data import np_to_wav, wav_to_np
     from paranam.workspace import Workspace, read_json
     from paranam.training import make_job, job_progress, command
+    from paranam.recipes import training_preset
 
     directory = Path(build_directory).resolve() / (
         "bundle-training-" + uuid.uuid4().hex[:8]
@@ -137,6 +138,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
         corners=False,
         epochs=2,
         batch_size=1,
+        # This short diagnostic deliberately tests the Full HyperA2 recipe,
+        # independently of the user-facing new-project defaults.
+        advanced_parametric=training_preset("HyperA2"),
         device=device,
     )
     workspace.generate_plan()
