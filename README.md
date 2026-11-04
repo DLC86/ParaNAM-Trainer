@@ -43,7 +43,7 @@ system libraries.
 
 ## The workflow
 
-The sidebar contains **Projects → Plan → Capture → Train → Queue → Compare**.
+The sidebar contains **Project → Plan → Capture → Train → Queue → Compare**.
 **Settings** stays at the bottom of the sidebar. You can return to earlier pages
 to edit the setup; changes that require new captures preserve the old recordings
 in the project's History.
@@ -52,13 +52,13 @@ The screenshots below show the current interface with a demonstration project
 and example audio-interface labels. The Queue chart uses illustrative history,
 not a model-quality or training-speed benchmark.
 
-### Projects
+### Project
 
 Create a project with **+ New project**, use **Open project…**, or double-click a
 recent project. Opening a project takes you directly to **Plan**. Projects are
 saved locally as you work, and file dialogs remember the last folder you opened.
 
-![Projects — create, open and return to recent projects](docs/screenshots/projects.png)
+![Project — create, open and return to recent projects](docs/screenshots/projects.png)
 
 ### Settings — routing and level calibration
 

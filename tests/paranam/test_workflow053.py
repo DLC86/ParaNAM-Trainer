@@ -64,7 +64,8 @@ def test_navigation_brand_recent_rows_and_responsive_queue(window, workspace, qa
         "ONE CAPTURE SET" in label.text() or "Full + Lite, together." in label.text()
         for label in window.findChildren(QLabel)
     )
-    assert window.version_label.text() == "VERSION 0.5.4"
+    from paranam import __version__
+    assert window.version_label.text() == f"VERSION {__version__}"
     assert (
         window.version_label.mapTo(
             window.centralWidget(), window.version_label.rect().topLeft()

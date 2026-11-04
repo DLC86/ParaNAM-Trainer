@@ -215,7 +215,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.steps = []
         for index, text in enumerate(
             (
-                "Projects",
+                "Project",
                 "Plan",
                 "Capture",
                 "Train",
