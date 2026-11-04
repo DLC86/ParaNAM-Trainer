@@ -285,6 +285,8 @@ def make_job(workspace, resume=False, job_directory=None):
         options = workspace.training_options()
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
+        if options.get("rate_preset", "manual") not in ("manual", "a2_updates"):
+            raise ValueError("Choose Manual or A2 cadence as the learning-rate preset")
         if not math.isfinite(options["learning_rate"]) or options["learning_rate"] <= 0:
             raise ValueError("Learning rate must be finite and positive")
         if options["gradient_clipping"] and (
@@ -366,6 +368,29 @@ def make_job(workspace, resume=False, job_directory=None):
         from .evaluation import PROTOCOL, reserve_validation_audio
 
         reserve_validation_audio(data)
+        if not is_static and options.get("rate_preset", "manual") == "a2_updates":
+            from .recipes import a2_update_schedule
+
+            schedule = a2_update_schedule(
+                data,
+                workspace.directory,
+                prefs["batch_size"],
+                options["ny"],
+                prefs["epochs"],
+                options["learning_rate"],
+                options["hypernetwork_learning_rate"],
+                options["lr_decay"],
+            )
+            model["lr_scheduler"] = {
+                "class": "StepLR",
+                "kwargs": {
+                    "gamma": schedule["reference_gamma"],
+                    "step_size": schedule["reference_steps"],
+                },
+                "interval": "step",
+                "frequency": 1,
+            }
+            prefs["rate_schedule"] = schedule
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
         learning["checkpoint_metric"] = "ESR_full"
@@ -480,7 +505,7 @@ def intermediate_export_extension(spec):
     return ".nam" if spec.get("static_captures") else ".pnam"
 
 
-def export_best_model(trainer, spec, member, target):
+def export_best_model(trainer, spec, member, target, selection=None):
     """Build one independent Full/Lite snapshot at a safe training boundary."""
     import torch
     import tempfile
@@ -490,7 +515,9 @@ def export_best_model(trainer, spec, member, target):
 
     static = bool(spec.get("static_captures"))
     checkpoint_class = PackedLightningModule if static else _ParametricLightningModule
-    if static:
+    if selection is not None:
+        paths, scores = selection
+    elif static:
         packed = next(
             c for c in trainer.callbacks if isinstance(c, PackedBestCheckpoint)
         )
@@ -550,7 +577,19 @@ def export_best_model(trainer, spec, member, target):
             else:
                 export_parametric(export_net, Path(directory), basename="snapshot")
             exported = read_json(Path(directory) / ("snapshot" + extension))
-        metadata = dict(spec["model"].get("metadata", {}))
+        source = (
+            read_json(Path(spec["project"]) / "capture_project.json", {})
+            if static
+            else {}
+        )
+        metadata = {
+            **source.get("user_metadata", {}),
+            **spec["model"].get("metadata", {}),
+        }
+        for key in ("input_level_dbu", "output_level_dbu"):
+            value = spec.get("capture_calibration", source).get(key)
+            if value is not None:
+                metadata[key] = value
         if static:
             capture = spec["static_captures"][member]
             metadata.update(capture.get("metadata", {}), name=capture["name"])
@@ -581,6 +620,54 @@ def export_best_model(trainer, spec, member, target):
         exported["metadata"].setdefault(training_key, {})["intermediate"] = True
         atomic_write_json(Path(target), exported)
     return str(target)
+
+
+def export_saved_best(job, target):
+    """Export a paused/stopped job without fitting or altering its checkpoints."""
+    import torch
+
+    job = Path(job)
+    spec = read_json(job / "spec.json")
+    progress = job_progress(job)
+    member = min(progress.get("member", 0), max(0, spec.get("members", 1) - 1))
+    if spec.get("static_captures"):
+        entries = read_json(
+            job / f"member-{member}" / "size-checkpoints" / "packed_best.json", {}
+        ).get("submodels", [])
+        indexed = {entry["submodel_index"]: entry for entry in entries}
+        paths = {
+            size: indexed.get(i, {}).get("checkpoint_path")
+            for size, i in (("full", 1), ("lite", 0))
+        }
+        scores = {
+            size: indexed.get(i, {}).get("best_metric", float("inf"))
+            for size, i in (("full", 1), ("lite", 0))
+        }
+    else:
+        checkpoint = job / f"resume-{member}.ckpt"
+        if not checkpoint.is_file():
+            raise ValueError("No completed validation epoch is available to export yet")
+        saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        callbacks = {
+            state.get("monitor"): state
+            for state in saved.get("callbacks", {}).values()
+            if isinstance(state, dict) and state.get("monitor")
+        }
+        paths = {
+            size: callbacks.get(f"ESR_{size}", {}).get("best_model_path")
+            for size in ("full", "lite")
+        }
+        scores = {
+            size: callbacks.get(f"ESR_{size}", {}).get("best_model_score")
+            for size in ("full", "lite")
+        }
+        del saved
+    if not all(path and Path(path).is_file() for path in paths.values()) or any(
+        value is None or not math.isfinite(float(value)) for value in scores.values()
+    ):
+        raise ValueError("A validated Full and Lite checkpoint is not available yet")
+    scores = {size: float(value) for size, value in scores.items()}
+    return export_best_model(None, spec, member, target, selection=(paths, scores))
 
 
 def build_progress_callback(job, spec, member, shared, evaluation_data=None):
@@ -1001,14 +1088,20 @@ def _propose_captures(workspace, job, spec, shared):
         _settings_key,
         sample_unique_settings,
         _planned_from_params,
+        settings_on_capture_grid,
     )
     from nam.capture.project import CaptureEntryModel
     from nam.data import wav_to_np
     from nam.train.parametric import _ParametricLightningModule, _get_parametric_net
 
     specs = tuple(c.to_param_spec() for c in workspace.project.control_specs())
-    excluded = {_settings_key(e.params, specs) for e in workspace.project.entries}
-    available = _grid_capacity(specs, default_step=0.5) - len(excluded)
+    existing = {
+        _settings_key(e.params, specs): e.params for e in workspace.project.entries
+    }
+    excluded = set(existing)
+    available = _grid_capacity(specs, default_step=0.5) - sum(
+        settings_on_capture_grid(params, specs) for params in existing.values()
+    )
     count = min(max(128, spec["preferences"]["additions"] * 16), available)
     if count <= 0:
         return []

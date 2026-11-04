@@ -284,6 +284,18 @@ def test_mid_epoch_pause_restarts_only_the_incomplete_epoch(
         job / "resume-0.ckpt", map_location="cpu", weights_only=False
     )
     assert checkpoint["global_step"] == 1
+    if not legacy:
+        import hashlib
+
+        before = hashlib.sha256((job / "resume-0.ckpt").read_bytes()).digest()
+        snapshot = read_json(
+            Path(training.export_saved_best(job, workspace.directory / "Paused.pnam"))
+        )
+        assert snapshot["architecture"] == "HyperA2"
+        assert snapshot["metadata"]["input_level_dbu"] == 18
+        assert snapshot["metadata"]["training"]["validation_esr_full"] is not None
+        assert snapshot["metadata"]["training"]["validation_esr_lite"] is not None
+        assert hashlib.sha256((job / "resume-0.ckpt").read_bytes()).digest() == before
     if legacy:
         (job / "resume-0.ckpt").unlink()
         (job / "resume-0.json").unlink()

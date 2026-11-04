@@ -50,6 +50,11 @@ API double pn_input_gain_db(void* ptr, double level, int calibrated) {
 API double pn_output_gain_db(void* ptr, double level, int calibrated) {
   return static_cast<Playback*>(ptr)->engine.GetOutputCalibrationGainDb(level, calibrated ? OutputMode::Calibrated : OutputMode::Raw);
 }
+API double pn_output_mode_gain_db(void* ptr, double level, int calibrated, int mode) {
+  const auto outputMode = mode == 2 ? OutputMode::Normalized :
+      mode == 1 && calibrated ? OutputMode::Calibrated : OutputMode::Raw;
+  return static_cast<Playback*>(ptr)->engine.GetOutputCalibrationGainDb(level, outputMode);
+}
 API int pn_process(void* ptr, float* input, float* output, int frames) {
   try {
     static_cast<Playback*>(ptr)->engine.Process(input, output, frames);

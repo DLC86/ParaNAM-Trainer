@@ -196,6 +196,7 @@ class QueueActions:
             and not self.worker
             and not getattr(self, "play_worker", None)
             and not getattr(self, "play_loader", None)
+            and not getattr(self, "export_worker", None)
         ):
             self.close()
 
@@ -311,7 +312,12 @@ class QueueActions:
         self.stop_button.setEnabled(
             state == "queued" or running and state != "stopping"
         )
-        resumable = state in FINISHED - {"completed", "needs_captures"} and not running
+        exporting = getattr(self, "export_worker", None) is not None
+        resumable = (
+            state in FINISHED - {"completed", "needs_captures"}
+            and not running
+            and not exporting
+        )
         self.resume_button.setEnabled(resumable)
         self.retrain_button.setEnabled(
             state is not None and state != "queued" and not active and not preparing
@@ -333,9 +339,10 @@ class QueueActions:
         request = read_json(self.job / "export-request.json", {}) if self.job else {}
         result = read_json(self.job / "export-result.json", {}) if self.job else {}
         self.export_best_button.setEnabled(
-            running
+            (running or state in FINISHED)
             and training.job_progress(self.job).get("best_esr") is not None
-            and (not request or request.get("id") == result.get("id"))
+            and not exporting
+            and (not running or not request or request.get("id") == result.get("id"))
         )
         self.custom_button.setEnabled(
             present and not active and self.signal_mode.currentData() == "custom"
@@ -359,6 +366,7 @@ class QueueActions:
             or self.queue_controller.preparing
             or getattr(self, "play_worker", None)
             or getattr(self, "play_loader", None)
+            or getattr(self, "export_worker", None)
         ):
             self._close_after_pause = True
             if self.queue_controller.active_id:

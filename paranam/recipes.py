@@ -1,5 +1,8 @@
 """Named starting recipes; user edits remain separately persisted per capture type."""
 
+import math
+from pathlib import Path
+
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
 
@@ -8,6 +11,7 @@ def training_preset(name):
         raise ValueError(f"Unknown training preset: {name}")
     hyper_a2 = name == "HyperA2"
     return dict(
+        rate_preset="manual",
         hypernetwork_recipe=name,
         hypernetwork_mode="full" if hyper_a2 else "low_rank",
         hypernetwork_rank=2,
@@ -29,3 +33,118 @@ def training_preset(name):
 
 def preset_batch_size(name):
     return 16 if name == "HyperA2" else 32
+
+
+def a2_update_schedule(
+    data,
+    directory,
+    batch_size,
+    ny,
+    epochs,
+    learning_rate,
+    hypernetwork_learning_rate,
+    reference_gamma=0.994,
+):
+    """Match the official single-standard-capture A2 decay per optimizer update.
+
+    Header-only accounting mirrors Dataset cropping/context and the capture-grouped
+    drop-last sampler. The reference always uses bundled standard audio, NY=8192,
+    batch=16 and the official 10s / final-9s split, independent of custom inputs.
+    """
+    import soundfile as sf
+    from nam.capture.export import (
+        _WAVENET_DILATIONS,
+        _WAVENET_KERNEL_SIZES,
+        _WAVENET_HEAD,
+    )
+    from .signals import asset_path
+
+    if batch_size < 1 or ny < 1 or epochs < 1 or not 0 < reference_gamma <= 1:
+        raise ValueError(
+            "The A2 cadence preset requires positive batch, NY and epochs, and 0 < decay <= 1"
+        )
+    receptive_field = (
+        1
+        + sum((k - 1) * d for k, d in zip(_WAVENET_KERNEL_SIZES, _WAVENET_DILATIONS))
+        + _WAVENET_HEAD["kernel_size"]
+        - 1
+    )
+    reference = sf.info(asset_path("standard.wav"))
+    reference_samples = reference.frames - 19 * reference.samplerate - 1
+    reference_steps = ((reference_samples - receptive_field + 1) // 8192) // 16
+    if reference_steps < 1:
+        raise ValueError("The bundled A2 reference signal is too short")
+    steps, total_seconds = 0, 0
+    for item in data["train"]:
+        row = {**data.get("common", {}), **item}
+        x = sf.info(Path(directory) / row["x_path"])
+        y_path = Path(directory) / row["y_path"]
+        if y_path.is_file():
+            y = sf.info(y_path)
+            if (x.frames, x.samplerate) != (y.frames, y.samplerate):
+                raise ValueError(
+                    "Training input and capture must have matching lengths and sample rates"
+                )
+
+        def endpoint(which):
+            for suffix in ("_samples", "", "_seconds"):
+                value = row.get(which + suffix)
+                if value is not None:
+                    return (
+                        int(value * x.samplerate)
+                        if suffix == "_seconds"
+                        else int(value)
+                    )
+            return None
+
+        start, stop, _ = slice(endpoint("start"), endpoint("stop")).indices(x.frames)
+        count = stop - start - abs(int(row.get("delay", 0)))
+        windows = max(0, (count - receptive_field + 1) // ny)
+        capture_steps = windows // batch_size
+        if capture_steps < 1:
+            raise ValueError(
+                "A training capture has no complete batch: reduce Batch Size or NY, or use a longer input signal"
+            )
+        steps += capture_steps
+        total_seconds += count / x.samplerate
+    if steps < 1:
+        raise ValueError("Apply a capture plan before calculating the A2 cadence")
+    reductions = steps * epochs // reference_steps
+    factor = reference_gamma**reductions
+    return dict(
+        protocol="a2-standard-update-cadence-v1",
+        reference_steps=reference_steps,
+        reference_batch_size=16,
+        reference_ny=8192,
+        reference_gamma=reference_gamma,
+        steps_per_epoch=steps,
+        training_seconds=total_seconds,
+        gamma_epoch=math.exp(math.log(reference_gamma) * steps / reference_steps),
+        final_learning_rate=learning_rate * factor,
+        final_hypernetwork_learning_rate=hypernetwork_learning_rate * factor,
+        equivalent_a2_epochs=steps * epochs / reference_steps,
+        reductions=reductions,
+    )
+
+
+def workspace_update_schedule(workspace):
+    """Preview pending/captured rows using the same processing as a new job."""
+    from nam.capture.export import build_data_config
+    from .evaluation import reserve_validation_audio
+
+    project = workspace.project.model_copy(deep=True)
+    for entry in project.entries:
+        entry.status = "captured"
+    data = build_data_config(project)
+    reserve_validation_audio(data)
+    options = workspace.training_options()
+    return a2_update_schedule(
+        data,
+        workspace.directory,
+        workspace.training_batch_size(),
+        options["ny"],
+        workspace.preferences["epochs"],
+        options["learning_rate"],
+        options["hypernetwork_learning_rate"],
+        options["lr_decay"],
+    )

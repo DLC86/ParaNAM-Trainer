@@ -1,4 +1,5 @@
 import itertools
+import json
 import shutil
 import threading
 from types import SimpleNamespace
@@ -136,6 +137,21 @@ def test_native_full_lite_multiple_switch_combinations_and_calibration(tmp_path)
     ).eval()
     metadata = dict(input_level_dbu=18, output_level_dbu=12)
     export_parametric(model, tmp_path, other_metadata=metadata)
+    exported_path = tmp_path / "model.pnam"
+    exported = json.loads(exported_path.read_text())
+
+    def loudness(node, remove=False):
+        metadata = node.setdefault("metadata", {})
+        if remove:
+            for key in ("loudness", "output_level_dbu", "output_dbu"):
+                metadata.pop(key, None)
+        else:
+            metadata["loudness"] = -24
+        for child in node.get("config", {}).get("submodels", []):
+            loudness(child.get("model", child), remove)
+
+    loudness(exported)
+    exported_path.write_text(json.dumps(exported), encoding="utf8")
     unicode_path = tmp_path / "modèle-音.pnam"
     shutil.copy2(tmp_path / "model.pnam", unicode_path)
     unicode_model = NativeModel(unicode_path)
@@ -164,8 +180,23 @@ def test_native_full_lite_multiple_switch_combinations_and_calibration(tmp_path)
             assert native.calibration(24, 18) == pytest.approx(
                 (10 ** (0.3), 10 ** (-0.3))
             )
+            assert native.calibration(24, 18, "raw") == pytest.approx((10**0.3, 1))
+            assert native.calibration(24, None, "calibrated") == pytest.approx(
+                (10**0.3, 1)
+            )
+            assert native.calibration(24, None, "normalized") == pytest.approx(
+                (10**0.3, 10**0.3)
+            )
         finally:
             native.close()
+    loudness(exported, remove=True)
+    exported_path.write_text(json.dumps(exported), encoding="utf8")
+    native = NativeModel(exported_path)
+    try:
+        assert native.calibration(24, 18, "calibrated") == pytest.approx((10**0.3, 1))
+        assert native.calibration(24, 18, "normalized") == pytest.approx((10**0.3, 1))
+    finally:
+        native.close()
 
 
 def test_play_callback_routes_only_send_and_stereo_monitors(qapp, monkeypatch):

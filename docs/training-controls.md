@@ -44,8 +44,27 @@ capture or ensemble member has its own displayed history.
 ## Advanced training settings
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** can be set
-independently. Both use the selected exponential LR decay. Hypernetwork controls
+independently. Both use the same selected LR schedule. Hypernetwork controls
 apply only to parametric training.
+
+The optional **A2 — same cadence per optimizer update** learning-rate preset
+starts at audio LR 0.004 and hypernetwork LR 0.0004. Both rates remain editable.
+It uses one bundled standard capture as reference, with the official 10-second /
+final-nine-second split, NY 8192 and batch 16: 62 complete updates per reference
+epoch. A step-based scheduler multiplies both rates by 0.994 every 62 optimizer
+updates. Its counter is stored in checkpoints and restored on resume; it is not
+reset at parametric epoch boundaries. Changing Batch Size or NY changes how many
+updates a project epoch contains, without changing that reference cadence.
+
+The preview reads WAV headers and counts actual complete batches separately for
+each capture, including context, trimming and alignment. It shows audio duration,
+updates per epoch, the average equivalent per-epoch multiplier and final rates for
+the chosen epoch budget. A large parametric dataset can undergo many reference
+epochs inside one project epoch, so keeping 200 project epochs can produce a very
+small final LR. This preset matches a cadence; it does not automatically choose
+an optimal duration or guarantee equal accuracy. Manual per-epoch decay is the
+default and remains available. Rate preferences and the calculated schedule are
+frozen into each independent job.
 
 **Hypernetwork weight mode** selects Full or Low rank independently of
 **Condition dilated convolution kernels on knobs**. All four combinations are supported.

@@ -138,6 +138,16 @@ def test_real_static_batch_pause_resume_and_metadata(
     assert training.job_progress(job)["status"] == "paused"
     assert training.job_progress(job)["completed_epoch"] == (0 if size == "lite" else 1)
     assert not (ws.directory / "models").exists()
+    if size == "full":
+        snapshot = read_json(
+            Path(training.export_saved_best(job, ws.directory / "Paused.nam"))
+        )
+        assert snapshot["architecture"] == "SlimmableContainer"
+        assert snapshot["metadata"]["name"] == "Capture 1"
+        assert snapshot["metadata"]["input_level_dbu"] == 18
+        assert snapshot["metadata"]["custom"] == {"keep": True}
+        assert snapshot["metadata"]["modeled_by"] == "Tester"
+        assert snapshot["metadata"]["training"]["validation_esr_lite"] is not None
     assert training.make_job(ws, resume=True) == job
     training.run_job(job)
     progress = training.job_progress(job)

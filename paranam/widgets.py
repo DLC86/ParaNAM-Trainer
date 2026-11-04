@@ -70,6 +70,10 @@ QToolButton:hover { background: #3a3a3a; border-color: #797979; }
 QToolButton#brandLink { background: transparent; border: 1px solid transparent; padding: 0; border-radius: 4px; }
 QToolButton#brandLink:hover, QToolButton#brandLink:focus { border-color: #bf0000; }
 QWidget#advancedTraining { background: transparent; }
+QFrame#ampPanel { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #414141,stop:0.12 #363636,stop:0.88 #303030,stop:1 #454545); border: 2px solid #606060; border-radius: 12px; }
+QFrame#ampPanel QWidget { background: transparent; }
+QDoubleSpinBox#controlValue, QDoubleSpinBox#controlValue QLineEdit { background: transparent; border: none; border-radius: 0; padding: 2px; font-size: 16px; font-weight: 600; }
+QDoubleSpinBox#controlValue:focus { color: #ffffff; }
 QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2c; }
 QPushButton#primary { background: #bf0000; color: #ffffff; border: 1px solid #bf0000; }
 QPushButton#primary:hover { background: #d51919; }

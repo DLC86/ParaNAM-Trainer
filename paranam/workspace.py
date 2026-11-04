@@ -454,6 +454,7 @@ class Workspace:
     def training_options(self, kind=None):
         kind = kind or self.preferences["capture_type"]
         defaults = dict(
+            rate_preset="manual",
             optimizer="Adam",
             learning_rate=0.004,
             lr_decay=0.994,
@@ -539,6 +540,8 @@ class Workspace:
         data["settings"]["batch_size"] = self.training_batch_size()
         if include_advanced:
             data["settings"]["advanced_training"] = self.training_options()
+            if data["settings"]["advanced_training"].get("rate_preset") == "manual":
+                data["settings"]["advanced_training"].pop("rate_preset")
             if not include_optimizer:
                 data["settings"]["advanced_training"].pop("optimizer")
             if not include_gradient_safety:

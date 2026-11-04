@@ -9,7 +9,7 @@ with the established recording, alignment and model code retained.
 The interface uses a #bf0000 red accent, neutral gray surfaces, the bundled
 Michroma title font from NAM On Steroids, and a TTS logo linking to the shop.
 
-**[Download the 0.5.4 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.4-preview)**
+**[Download the 0.5.5 development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.5-preview)**
 
 Version 0.5.3 adds a dedicated global **Settings** page, clearer/taller recent
 projects, automatic navigation to **Plan**, simplified static metadata entry,
@@ -46,6 +46,13 @@ the embedded held-out audio in training captures, separately for Full and Lite.
 Queue has independent best Full scores and Full/Lite chart tabs. Older jobs
 require a new training run to adopt this split; existing captures are reusable.
 [Complete 0.5.4 changes](docs/release-0.5.4.md).
+
+Version 0.5.5 adds an optional A2 learning-rate cadence preset with dataset-aware
+update counts and a final-rate preview. Compare has a grey amp-control panel,
+double-click knob resets and live Raw/Calibrated/Normalized output modes.
+Best Full/Lite models can also be exported from paused or stopped jobs. New
+capture plans reserve the default control settings inside their requested count.
+[Complete 0.5.5 changes](docs/release-0.5.5.md).
 
 Download the package for your computer from this repository's installer artifacts
 or releases. End users do not need Python, Anaconda, a CUDA toolkit, build tools,

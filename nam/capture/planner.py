@@ -138,6 +138,25 @@ def _settings_key(
     return tuple(params[spec.name] for spec in specs)
 
 
+def settings_on_capture_grid(params, specs, default_step=_DEFAULT_KNOB_STEP):
+    """An off-grid default is captured but does not consume a grid candidate."""
+    raw = _np.asarray(
+        [
+            (
+                spec.enum_names.index(params[spec.name])
+                if spec.type == "switch"
+                else params[spec.name]
+            )
+            for spec in specs
+        ],
+        dtype=float,
+    )
+    snapped = _decode_named_params(
+        _quantize_to_capture_grid(raw, specs, default_step=default_step), specs
+    )
+    return _settings_key(params, specs) == _settings_key(snapped, specs)
+
+
 def settings_sort_key(
     params: dict[str, _Any], names: _Sequence[str]
 ) -> tuple[tuple[int, _Any], ...]:
@@ -175,6 +194,7 @@ def sample_unique_settings(
     seed: int,
     default_step: float,
     exclude: _Optional[set[tuple[_Any, ...]]] = None,
+    anchor: _Optional[dict[str, _Any]] = None,
 ) -> list[dict[str, _Any]]:
     """
     Draw ``n`` distinct on-grid settings as decoded params dicts, none of them in
@@ -191,6 +211,16 @@ def sample_unique_settings(
     ordered: list[dict[str, _Any]] = []
     if n == 0:
         return ordered
+    if anchor is not None:
+        key = _settings_key(anchor, specs)
+        if key in seen:
+            raise ValueError(
+                "The default setting must belong to training, not validation"
+            )
+        ordered.append(dict(anchor))
+        seen.add(key)
+        if n == 1:
+            return ordered
 
     def _consume(raw_settings: list[_np.ndarray]) -> bool:
         for raw in raw_settings:
@@ -207,7 +237,23 @@ def sample_unique_settings(
 
     # The first batch reproduces the historical LHS stream exactly, so a plan with no grid
     # collisions is byte-for-byte identical to the pre-deduplication behavior.
-    if _consume(sample_raw_settings(specs, n, seed=seed)):
+    raw = sample_raw_settings(specs, n, seed=seed)
+    if anchor is not None:
+        # Keep the default row's stratum occupied in every dimension. Swapping
+        # coordinates preserves the other Latin strata before grid quantization.
+        raw = _np.asarray(raw).copy()
+        for column, spec in enumerate(specs):
+            value = float(anchor[spec.name])
+            width = spec.max - spec.min
+            strata = _np.minimum(
+                n - 1, ((raw[:, column] - spec.min) / width * n).astype(int)
+            )
+            target = min(n - 1, int((value - spec.min) / width * n))
+            row = int(_np.flatnonzero(strata == target)[0])
+            raw[0, column], raw[row, column] = raw[row, column], raw[0, column]
+            raw[0, column] = value
+        raw = raw[1:]
+    if _consume(raw):
         return ordered
 
     # Collisions dropped us short. Oversample with fresh, seed-derived LHS batches to fill
@@ -254,6 +300,7 @@ def plan_unique_splits(
     seed: int,
     default_step: float,
     validation_exclude: _Optional[set[tuple[_Any, ...]]] = None,
+    anchor: _Optional[dict[str, _Any]] = None,
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
     """
     Draw ``n_train`` + ``n_validation`` distinct on-grid settings, with the validation
@@ -280,12 +327,19 @@ def plan_unique_splits(
         if validation_exclude is None or n_validation == 0
         else set(validation_exclude)
     )
+    if anchor is not None:
+        if n_train < 1:
+            raise ValueError("The default setting requires a training capture")
+        reserved.add(_settings_key(anchor, specs))
 
     # Every train and validation setting must be distinct, and validation must be held out
     # from train. That is only possible if the knob grid has at least that many distinct
     # settings; fail loudly up front rather than after sampling work.
     required = n_train + n_validation
     capacity = _grid_capacity(specs, default_step)
+    if anchor is not None and not settings_on_capture_grid(anchor, specs, default_step):
+        # Explicit defaults may fall between the ordinary capture-grid positions.
+        capacity += 1
     if required > capacity:
         raise ValueError(
             f"Cannot plan {n_train} train + {n_validation} validation unique settings: the "
@@ -330,6 +384,7 @@ def plan_unique_splits(
         seed=seed,
         default_step=default_step,
         exclude={_settings_key(params, specs) for params in validation},
+        anchor=anchor,
     )
     return train, validation
 
@@ -533,6 +588,13 @@ def plan_captures(
     if n_validation < 0:
         raise ValueError(f"n_validation must be non-negative; got {n_validation}")
     specs = tuple(knob.to_param_spec() for knob in knobs)
+    if any(
+        spec.type != "switch" and spec.avoid_zero and spec.default == 0
+        for spec in specs
+    ):
+        raise ValueError(
+            "Choose a non-zero default for controls with Avoid zero enabled: every new plan includes the default setting"
+        )
 
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
@@ -596,6 +658,7 @@ def plan_captures(
         seed=seed,
         default_step=_DEFAULT_KNOB_STEP,
         validation_exclude=corner_keys,
+        anchor={spec.name: spec.default for spec in specs},
     )
     names = [spec.name for spec in specs]
     train = _planned_from_params(

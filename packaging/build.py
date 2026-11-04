@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.5.4"
+VERSION = "0.5.5"
 
 
 def run(*args):
@@ -31,7 +31,9 @@ def main():
     )
     if sys.platform == "darwin":
         image.save(ROOT / "packaging" / "icon.icns")
-    image.resize((256, 256), Image.Resampling.LANCZOS).save(ROOT / "packaging" / "icon.png")
+    image.resize((256, 256), Image.Resampling.LANCZOS).save(
+        ROOT / "packaging" / "icon.png"
+    )
     installers = ROOT / "installers"
     installers.mkdir(exist_ok=True)
     if not args.skip_freeze:

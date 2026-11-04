@@ -61,7 +61,9 @@ def test_plan_captures_avoids_zero_on_flagged_knob():
 
 def test_plan_captures_is_reproducible_and_held_out():
     first_train, first_val = _plan_captures(_knobs(), n_train=6, n_validation=2, seed=7)
-    second_train, second_val = _plan_captures(_knobs(), n_train=6, n_validation=2, seed=7)
+    second_train, second_val = _plan_captures(
+        _knobs(), n_train=6, n_validation=2, seed=7
+    )
 
     assert first_train == second_train
     assert first_val == second_val
@@ -157,10 +159,9 @@ def test_settings_sort_key_orders_by_later_knobs_first():
     ]
 
 
-def test_plan_captures_matches_starter_script_stream():
-    # The starter script and the app planner must draw from the same LHS streams so a
-    # plan generated either way selects the same settings for the same seed. The planner
-    # emits each split sorted, so the settings are compared as sets, not element-wise.
+def test_capture_plan_anchors_defaults_without_changing_generic_starter_draws():
+    # Capture plans now reserve the defaults; the generic raw starter CLI retains
+    # its historical unanchored sampling behavior.
     import importlib.util as _importlib_util
     from pathlib import Path as _Path
 
@@ -194,13 +195,12 @@ def test_plan_captures_matches_starter_script_stream():
             keys.add(tuple(params[spec.name] for spec in param_specs))
         return keys
 
-    for script_entries, planned in (
-        (starter["train"], train),
-        (starter["validation"], validation),
-    ):
-        assert quantized_keys(script_entries) == _keys(
-            [capture.params for capture in planned], param_specs
-        )
+    defaults = tuple(spec.default for spec in param_specs)
+    assert defaults not in quantized_keys(starter["train"])
+    assert defaults in _keys([capture.params for capture in train], param_specs)
+    assert defaults not in _keys(
+        [capture.params for capture in validation], param_specs
+    )
 
 
 def _one(name):

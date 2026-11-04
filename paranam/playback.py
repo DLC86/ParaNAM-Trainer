@@ -57,6 +57,11 @@ class NativeModel:
                 [ctypes.c_void_p, ctypes.c_double, ctypes.c_int],
             ),
             (
+                "pn_output_mode_gain_db",
+                ctypes.c_double,
+                [ctypes.c_void_p, ctypes.c_double, ctypes.c_int, ctypes.c_int],
+            ),
+            (
                 "pn_process",
                 ctypes.c_int,
                 [ctypes.c_void_p, pointer, pointer, ctypes.c_int],
@@ -89,7 +94,9 @@ class NativeModel:
         ):
             raise ValueError("Invalid model control positions")
 
-    def calibration(self, instrument, returned):
+    def calibration(self, instrument, returned, output_mode="calibrated"):
+        modes = {"raw": 0, "calibrated": 1, "normalized": 2}
+        mode = modes[output_mode]
         return (
             10
             ** (
@@ -100,8 +107,8 @@ class NativeModel:
             ),
             10
             ** (
-                self.library.pn_output_gain_db(
-                    self.handle, returned or 0, returned is not None
+                self.library.pn_output_mode_gain_db(
+                    self.handle, returned or 0, returned is not None, mode
                 )
                 / 20
             ),
@@ -140,7 +147,7 @@ def validate_route(device, audio):
     )
     if any(c is None for c in (*incoming, *outgoing)):
         raise ValueError(
-            "Select Instrument input and both Monitor outputs in Project & routing."
+            "Select Instrument input and both Monitor outputs in Settings."
         )
     if len(set(incoming)) != 2:
         raise ValueError(
@@ -185,7 +192,11 @@ class PlayWorker(QThread):
         self.instrument_dbu, self.lite = instrument_dbu, lite
         self.stopping = threading.Event()
         self.settings = dict(
-            parameters=None, input_db=0.0, output_db=0.0, source="model"
+            parameters=None,
+            input_db=0.0,
+            output_db=0.0,
+            source="model",
+            output_mode="calibrated",
         )
 
     def run(self):
@@ -201,9 +212,16 @@ class PlayWorker(QThread):
             )
             model = NativeModel(self.path, rate, block, self.lite)
             self.loaded.emit(model.info)
-            input_gain, output_gain = model.calibration(
-                self.instrument_dbu, self.project.output_level_dbu
-            )
+            gains = {}
+            for mode in ("raw", "calibrated", "normalized"):
+                if mode == "calibrated":
+                    gains[mode] = model.calibration(
+                        self.instrument_dbu, self.project.output_level_dbu
+                    )
+                else:
+                    gains[mode] = model.calibration(
+                        self.instrument_dbu, self.project.output_level_dbu, mode
+                    )
             reamp_gain = send_gain(self.project, self.instrument_dbu)
             last_parameters, blend, count = (
                 None,
@@ -211,10 +229,13 @@ class PlayWorker(QThread):
                 0,
             )
             current_input, current_output = 0.0, 0.0
+            current_model_output = gains[
+                self.settings.get("output_mode", "calibrated")
+            ][1]
             callback_error = []
 
             def callback(incoming, outgoing, frames, _time, status):
-                nonlocal last_parameters, blend, count, current_input, current_output
+                nonlocal last_parameters, blend, count, current_input, current_output, current_model_output
                 outgoing.fill(0)
                 if frames <= 0:
                     return
@@ -237,7 +258,14 @@ class PlayWorker(QThread):
                     instrument = raw_instrument * input_ramp
                     send = instrument * reamp_gain
                     outgoing[:, audio.output_channel - 1] = np.clip(send, -1, 1)
-                    rendered = model.process(instrument * input_gain) * output_gain
+                    input_gain, output_gain = gains[
+                        settings.get("output_mode", "calibrated")
+                    ]
+                    model_ramp = (
+                        output_gain + (current_model_output - output_gain) * decay
+                    )
+                    current_model_output = float(model_ramp[-1])
+                    rendered = model.process(instrument * input_gain) * model_ramp
                     returned = incoming[:, audio.input_channel - 1]
                     target = 1.0 if settings["source"] == "model" else 0.0
                     ramp = blend + np.clip(

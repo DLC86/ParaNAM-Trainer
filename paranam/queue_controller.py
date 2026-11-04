@@ -33,6 +33,21 @@ class PrepareTraining(QThread):
             self.failed.emit(str(error))
 
 
+class ExportSavedBest(QThread):
+    def __init__(self, job, parent=None):
+        super().__init__(parent)
+        self.job = Path(job)
+
+    def run(self):
+        request = read_json(self.job / "export-request.json", {})
+        try:
+            path = training.export_saved_best(self.job, request["path"])
+            result = dict(id=request["id"], ok=True, path=path)
+        except Exception as error:
+            result = dict(id=request.get("id"), ok=False, error=str(error))
+        atomic_write_json(self.job / "export-result.json", result)
+
+
 class QueueController(QObject):
     changed = Signal()
     failed = Signal(str)

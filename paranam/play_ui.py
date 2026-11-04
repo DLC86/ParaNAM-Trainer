@@ -4,8 +4,8 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal, Qt, QPointF
-from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtGui import QPainter, QPen, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QDial,
     QButtonGroup,
     QFileDialog,
+    QAbstractSpinBox,
+    QFrame,
 )
 
 from .playback import NativeModel, PlayWorker, validate_route
@@ -25,6 +27,19 @@ from .workspace import read_json
 
 
 class PlayDial(QDial):
+    def setDefaultValue(self, value):
+        self.default_value = value
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setValue(getattr(self, "default_value", 0))
+            self.setSliderDown(False)
+            if hasattr(self, "_origin"):
+                del self._origin
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -45,14 +60,15 @@ class PlayDial(QDial):
         painter.drawEllipse(bounds.adjusted(9, 9, -9, -9))
         center = bounds.center()
         angle = math.radians(240 - fraction * 300)
+        scale = self.width() / 92
         painter.setPen(
             QPen(QColor("#bf0000"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         )
         painter.drawLine(
-            round(center.x() + 9 * math.cos(angle)),
-            round(center.y() - 9 * math.sin(angle)),
-            round(center.x() + 23 * math.cos(angle)),
-            round(center.y() - 23 * math.sin(angle)),
+            round(center.x() + 9 * scale * math.cos(angle)),
+            round(center.y() - 9 * scale * math.sin(angle)),
+            round(center.x() + 23 * scale * math.cos(angle)),
+            round(center.y() - 23 * scale * math.sin(angle)),
         )
 
     def mousePressEvent(self, event):
@@ -87,35 +103,23 @@ class PlayDial(QDial):
 
 
 class ModelPlayDial(PlayDial):
-    """Same ring, body and pointer as the Capture your rig controls."""
+    """The original Compare dial, enlarged slightly for the amp panel."""
 
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        center = QPointF(self.width() / 2, self.height() / 2)
-        fraction = (self.value() - self.minimum()) / max(
-            1, self.maximum() - self.minimum()
-        )
-        path = QPainterPath()
-        for i in range(101):
-            angle = math.radians(210 + 300 * i / 100)
-            point = center + QPointF(39 * math.sin(angle), -39 * math.cos(angle))
-            path.moveTo(point) if i == 0 else path.lineTo(point)
-        p.setPen(
-            QPen(QColor("#4c4c4c"), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        )
-        p.drawPath(path)
-        p.setBrush(QColor("#2e2e2e"))
-        p.setPen(QPen(QColor("#656565"), 1))
-        p.drawEllipse(center, 30, 30)
-        angle = math.radians(210 + fraction * 300)
-        p.setPen(
-            QPen(QColor("#bf0000"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        )
-        p.drawLine(
-            center + QPointF(10 * math.sin(angle), -10 * math.cos(angle)),
-            center + QPointF(24 * math.sin(angle), -24 * math.cos(angle)),
-        )
+
+class ControlValue(QDoubleSpinBox):
+    """A plain clickable value which still supports typing and keyboard edits."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("controlValue")
+        self.setFrame(False)
+        self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumWidth(110)
+        self.setToolTip("Click to type a value. Double-click the knob to reset it.")
+
+    def textFromValue(self, value):
+        return self.locale().toString(value, "g", 12)
 
 
 class ModelInfoLoader(QThread):
@@ -162,6 +166,18 @@ class PlayActions:
         self.play_size = QComboBox()
         self.play_size.addItem("Full", False)
         self.play_size.addItem("Lite", True)
+        self.play_output_mode = QComboBox()
+        for caption, value in (
+            ("Raw", "raw"),
+            ("Calibrated", "calibrated"),
+            ("Normalized", "normalized"),
+        ):
+            self.play_output_mode.addItem(caption, value)
+        self.play_output_mode.setCurrentIndex(1)
+        self.play_output_mode.setToolTip(
+            "Calibrated falls back to Raw when model or interface output calibration is unavailable. Normalized uses the model loudness metadata, with Raw fallback."
+        )
+        self.play_output_mode.currentIndexChanged.connect(self.update_play_settings)
         layout.addLayout(row)
         buffer_row = QHBoxLayout()
         buffer_row.addWidget(QLabel("Playback buffer"))
@@ -221,18 +237,29 @@ class PlayActions:
         self.play_calibration = QLabel("")
         self.play_calibration.setWordWrap(True)
         layout.addWidget(self.play_calibration)
-        controls = QHBoxLayout()
+        controls = QGridLayout()
+        controls.setHorizontalSpacing(28)
+        self.play_gain_layout = controls
         self.play_input = self._play_gain("Input", -20, 20, 0, controls)
         self.play_output = self._play_gain("Output", -20, 20, 0, controls)
-        size_controls = QVBoxLayout()
-        size_controls.addWidget(QLabel("Model size"))
-        size_controls.addWidget(self.play_size)
-        size_controls.addStretch()
-        controls.addLayout(size_controls)
-        controls.addStretch()
+        for column, (caption, selector) in enumerate(
+            (("Model size", self.play_size), ("Output mode", self.play_output_mode)), 2
+        ):
+            title = QLabel(caption)
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            controls.addWidget(title, 0, column)
+            selector.setMinimumWidth(140)
+            controls.addWidget(
+                selector, 1, column, alignment=Qt.AlignmentFlag.AlignCenter
+            )
+        controls.setColumnStretch(4, 1)
         layout.addLayout(controls)
-        self.play_controls = QWidget()
+        self.play_controls = QFrame()
+        self.play_controls.setObjectName("ampPanel")
         self.play_controls_layout = QGridLayout(self.play_controls)
+        self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
+        self.play_controls_layout.setHorizontalSpacing(24)
+        self.play_controls.hide()
         self.play_values = []
         layout.addWidget(self.play_controls)
         self.play_meter = QLabel("Input Peak — · Monitor Peak —")
@@ -248,27 +275,26 @@ class PlayActions:
         self._play_ready = False
 
     def _play_gain(self, name, minimum, maximum, default, layout):
-        box = QWidget()
-        column = QVBoxLayout(box)
+        column = layout.count() // 3
         title = QLabel(name)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        column.addWidget(title)
+        layout.addWidget(title, 0, column)
         dial = PlayDial()
         dial.setRange(int(minimum * 10), int(maximum * 10))
         dial.setValue(int(default * 10))
+        dial.setDefaultValue(int(default * 10))
         dial.setFixedSize(92, 92)
-        column.addWidget(dial, alignment=Qt.AlignmentFlag.AlignCenter)
-        field = QDoubleSpinBox()
+        layout.addWidget(dial, 1, column, alignment=Qt.AlignmentFlag.AlignCenter)
+        field = ControlValue()
         field.setRange(minimum, maximum)
         field.setDecimals(1)
         field.setValue(default)
         field.setSuffix(" dB")
         field.setFixedWidth(120)
-        column.addWidget(field)
+        layout.addWidget(field, 2, column, alignment=Qt.AlignmentFlag.AlignCenter)
         dial.valueChanged.connect(lambda v: field.setValue(v / 10))
         field.valueChanged.connect(lambda v: dial.setValue(round(v * 10)))
         field.valueChanged.connect(self.update_play_settings)
-        layout.addWidget(box)
         return field
 
     def open_play_model(self):
@@ -359,7 +385,7 @@ class PlayActions:
         self.play_calibration.setText(
             f"Instrument input calibration: {value:.3f} dBu at 0 dBFS. Model input and real reamp send use this reference."
             if value is not None
-            else "Instrument calibration is not set. Calibrate it in Project & routing for matched physical input levels."
+            else "Instrument calibration is not set. Calibrate it in Settings for matched physical input levels."
         )
         if value is not None and not (
             self.input_calibration.isChecked() and self.output_calibration.isChecked()
@@ -431,41 +457,37 @@ class PlayActions:
 
     def _play_model_loaded(self, info):
         values = getattr(self, "_preserved_play_values", None)
-        if values is not None and len(values) == len(info["controls"]):
-            info = {
-                **info,
-                "controls": [
-                    {
-                        **control,
-                        "default": min(control["max"], max(control["min"], value)),
-                    }
-                    for control, value in zip(info["controls"], values)
-                ],
-            }
         self._play_ready, self._play_info = True, info
         self.clear_play_controls()
         grid = self.play_controls_layout
         self.play_values = [p["default"] for p in info["controls"]]
+        if values is not None and len(values) == len(info["controls"]):
+            self.play_values = [
+                min(p["max"], max(p["min"], value))
+                for p, value in zip(info["controls"], values)
+            ]
+        self.play_controls.setVisible(bool(info["controls"]))
         for index, control in enumerate(info["controls"]):
             frame = QWidget()
             column = QVBoxLayout(frame)
             name = QLabel(control["name"])
             name.setTextFormat(Qt.TextFormat.PlainText)
+            name.setWordWrap(True)
             name.setAlignment(Qt.AlignmentFlag.AlignCenter)
             column.addWidget(name)
             if control["positions"]:
                 widget = QComboBox()
                 widget.addItems(control["positions"])
-                widget.setCurrentIndex(int(control["default"]))
+                widget.setCurrentIndex(int(self.play_values[index]))
                 widget.currentIndexChanged.connect(
                     lambda value, i=index: self._play_parameter(i, float(value))
                 )
             else:
                 dial = ModelPlayDial()
-                dial.setFixedSize(92, 92)
+                dial.setFixedSize(108, 108)
                 dial.setRange(0, 10000)
                 extent = control["max"] - control["min"]
-                dial.setValue(
+                dial.setDefaultValue(
                     round(
                         (control["default"] - control["min"])
                         / max(extent, 1e-12)
@@ -473,11 +495,16 @@ class PlayActions:
                     )
                 )
                 column.addWidget(dial, alignment=Qt.AlignmentFlag.AlignCenter)
-                widget = QDoubleSpinBox()
+                widget = ControlValue()
                 widget.setRange(control["min"], control["max"])
                 widget.setDecimals(3)
                 widget.setSingleStep((control["max"] - control["min"]) / 100)
-                widget.setValue(control["default"])
+                widget.setValue(self.play_values[index])
+                dial.setValue(
+                    round(
+                        (widget.value() - control["min"]) / max(extent, 1e-12) * 10000
+                    )
+                )
                 widget.valueChanged.connect(
                     lambda value, i=index: self._play_parameter(i, value)
                 )
@@ -494,12 +521,13 @@ class PlayActions:
                     )
                 )
             column.addWidget(widget)
-            grid.addWidget(frame, index // 4, index % 4)
+            grid.addWidget(frame, index // 5, index % 5)
         self.play_status.setText(
             "Ready. Gear and Model switch the monitored source; the real gear and model stay warm in parallel."
         )
 
     def clear_play_controls(self):
+        self.play_controls.hide()
         grid = self.play_controls_layout
         while grid.count():
             item = grid.takeAt(0)
@@ -518,6 +546,7 @@ class PlayActions:
                 input_db=self.play_input.value(),
                 output_db=self.play_output.value(),
                 source="gear" if self.gear_button.isChecked() else "model",
+                output_mode=self.play_output_mode.currentData(),
             )
 
     def start_playback(self):
@@ -531,7 +560,7 @@ class PlayActions:
         try:
             device = self.device.currentData()
             if not device:
-                raise ValueError("Select your audio interface in Project & routing.")
+                raise ValueError("Select your audio interface in Settings.")
             validate_route(device, self.audio_settings())
             self.close_audio()
             project = self.playback_project()

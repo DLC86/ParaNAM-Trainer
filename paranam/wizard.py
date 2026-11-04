@@ -714,6 +714,15 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.advanced_fields["hypernetwork_recipe"] = preset
         advanced_form.insertRow(0, "Preset", preset)
         preset.activated.connect(self.apply_training_preset)
+        rate_preset = QComboBox()
+        rate_preset.addItem("Manual / per-epoch decay", "manual")
+        rate_preset.addItem("A2 — same cadence per optimizer update", "a2_updates")
+        self.advanced_fields["rate_preset"] = rate_preset
+        advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
+        rate_preset.activated.connect(self.apply_rate_preset)
+        self.rate_preview = label("", "muted")
+        self.rate_preview.setWordWrap(True)
+        advanced_form.addRow(self.rate_preview)
         self.preset_description = label("", "muted")
         advanced_form.addRow(self.preset_description)
         self.advanced_fields["hypernetwork_learning_rate"].setToolTip(
@@ -958,6 +967,52 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.refresh_hypernetwork_controls(kind)
+        self.refresh_rate_preview(kind)
+
+    def apply_rate_preset(self, *_):
+        if not self.workspace or self._loading:
+            return
+        if self.advanced_fields["rate_preset"].currentData() == "a2_updates":
+            for key, value in (
+                ("learning_rate", 0.004),
+                ("hypernetwork_learning_rate", 0.0004),
+                ("lr_decay", 0.994),
+            ):
+                self.advanced_fields[key].blockSignals(True)
+                self.advanced_fields[key].setValue(value)
+                self.advanced_fields[key].blockSignals(False)
+        self.save_preferences()
+
+    def refresh_rate_preview(self, kind=None):
+        if not self.workspace:
+            return
+        parametric = (
+            kind or self.workspace.preferences["capture_type"]
+        ) == "parametric"
+        self.advanced_fields["rate_preset"].setEnabled(parametric)
+        matched = (
+            parametric
+            and self.advanced_fields["rate_preset"].currentData() == "a2_updates"
+        )
+        self.advanced_fields["lr_decay"].setEnabled(not matched)
+        self.rate_preview.setVisible(matched)
+        if not matched:
+            return
+        try:
+            from .recipes import workspace_update_schedule
+
+            schedule = workspace_update_schedule(self.workspace)
+            self.rate_preview.setText(
+                f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "
+                f"This plan: {schedule['steps_per_epoch']} updates/epoch, {schedule['training_seconds']:.1f} s of training audio.\n"
+                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['reference_steps']} optimizer updates; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
+                f"After {self.workspace.preferences['epochs']} epochs: LR {schedule['final_learning_rate']:.3e}, "
+                f"hypernetwork LR {schedule['final_hypernetwork_learning_rate']:.3e} "
+                f"({schedule['equivalent_a2_epochs']:.1f} reference A2 epochs). "
+                "Initial rates remain editable. Matching cadence does not select the training duration or guarantee convergence."
+            )
+        except (ValueError, OSError, RuntimeError) as error:
+            self.rate_preview.setText(f"A2 cadence preview unavailable: {error}")
 
     def refresh_hypernetwork_controls(self, kind=None):
         if not self.workspace:
@@ -1035,6 +1090,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.footer_note.setVisible(index != 5 and not listening)
         if index == 3:
             self.refresh_gpu_button()
+            self.refresh_rate_preview()
         if index == 5:
             self.refresh_play_models()
         for i, step in enumerate(self.steps):
@@ -1664,6 +1720,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.additions.setEnabled(prefs["mode"] == "active_learning")
         self.workspace.save()
         self.refresh_recommendation()
+        self.refresh_rate_preview()
         self.custom_button.setEnabled(prefs["input_mode"] == "custom")
 
     def apply_plan(self):
@@ -2058,7 +2115,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         if (
             not self.job
             or not self.selected_job_id
-            or self.selected_job_id != self.queue_controller.active_id
+            or getattr(self, "export_worker", None)
         ):
             return
         spec = read_json(self.job / "spec.json")
@@ -2090,10 +2147,25 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             self.job / "export-request.json",
             {"id": str(time.time_ns()), "path": filename},
         )
-        self.export_status.setText(
-            "Export requested; waiting for the next training batch boundary."
-        )
+        if self.selected_job_id == self.queue_controller.active_id:
+            self.export_status.setText(
+                "Export requested; waiting for the next training batch boundary."
+            )
+        else:
+            from .queue_controller import ExportSavedBest
+
+            self.export_status.setText(
+                "Exporting the best saved Full and Lite checkpoints…"
+            )
+            self.export_worker = ExportSavedBest(self.job, self)
+            self.export_worker.finished.connect(self._saved_export_finished)
+            self.export_worker.start()
         self.export_best_button.setEnabled(False)
+
+    def _saved_export_finished(self):
+        self.export_worker.deleteLater()
+        self.export_worker = None
+        self.refresh_training()
 
     def _render_job_progress(self):
         progress = training.job_progress(self.job)
