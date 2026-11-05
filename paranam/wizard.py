@@ -75,6 +75,7 @@ from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 from .signals import asset_path
 from .queue_ui import QueueActions
 from .play_ui import PlayActions, HorizontalLevelMeter
+from .settings_audio import SettingsAudioActions, AudioDeviceEvents
 from .queue_controller import QueueController
 from .ui_preferences import UIPreferences
 from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
@@ -114,7 +115,9 @@ def duration(seconds):
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes:02d}:{seconds:02d}"
 
 
-class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
+class WizardWindow(
+    UIPreferences, QueueActions, PlayActions, SettingsAudioActions, QMainWindow
+):
     capture_stage = Signal(str)
     route_levels = Signal(float, float, float, float)
 
@@ -155,6 +158,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self._close_after_pause = False
         self._log_content = ""
         self._devices = []
+        self.settings_audio_worker = None
+        self._audio_devices_dirty = False
         self._capture_entries = []
         self._static_edit_id = None
         self._capture_table_kind = None
@@ -172,6 +177,13 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.timer.setInterval(600)
         self.timer.timeout.connect(self.refresh_training)
         self.timer.start()
+        if sys.platform == "win32":
+            from PySide6.QtWidgets import QApplication
+
+            self._audio_device_events = AudioDeviceEvents(
+                self._settings_device_changed, self.winId()
+            )
+            QApplication.instance().installNativeEventFilter(self._audio_device_events)
         self.device_timer = QTimer(self)
         self.device_timer.setInterval(3000)
         self.device_timer.timeout.connect(
@@ -382,7 +394,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         row = QHBoxLayout()
         self.route_button = button("Test connection", self.test_route)
         self.route_status = label(
-            "Connect the selected send and return channels, then test the return signal.",
+            "Live input meters. Test connection sends white noise to Send and Loopback output.",
             "muted",
         )
         row.addWidget(self.route_button)
@@ -1254,7 +1266,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 return
         if index == 6 and self.pages.currentIndex() != 6:
             self._settings_return_page = self.pages.currentIndex()
+        if index != 6:
+            self._stop_settings_audio()
         self.pages.setCurrentIndex(index)
+        if index == 6:
+            self._sync_settings_audio(retry=True)
         self.project_label.setVisible(index != 6)
         listening = getattr(self, "play_worker", None) is not None
         self.play_transport_bar.setVisible(index != 5 and listening)
@@ -1399,6 +1415,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
     def refresh_devices(self):
         if self.busy():
             return
+        self._audio_devices_dirty = False
+        self._settings_audio_error_key = None
         self.remember_setup()
         self.close_audio()
         selected = self.device.currentData()
@@ -1442,20 +1460,19 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
 
         if self.busy() or self.session or QApplication.activeModalWidget():
             return
-        if self.pages.currentIndex() != 6 and self.device.currentData() is not None:
-            return
+        # Refresh only after a hardware notification or an explicit click.
+        # Reinitializing PortAudio on a timer repeatedly unloads ASIO drivers.
+        if not self._audio_devices_dirty:
+            if sys.platform == "win32" or self.device.currentData() is not None:
+                return
         try:
-            devices = [
-                d
-                for d in list_devices(refresh=True)
-                if d.max_input_channels > 0 and d.max_output_channels > 0
-            ]
-            if devices != self._devices:
-                self.refresh_devices()
+            self.refresh_devices()
         except Exception:
             pass  # A temporary driver error must not replace the saved interface.
 
     def _device_changed(self, *_):
+        if self._loading:
+            return
         self.close_audio()
         info = self.device.currentData()
         self._populate_audio_controls(info)
@@ -1606,7 +1623,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 self.input_calibration.setChecked(False)
                 self.input_calibration.blockSignals(False)
             self.remember_setup()
-            self.close_audio()
+            worker = getattr(self, "settings_audio_worker", None)
+            if worker is not None:
+                worker.set_noise(worker.noise[0], level)
+            if self.session:
+                self.session.close_audio()
+                self.session = None
         except ValueError as error:
             self.notify_error(error)
 
@@ -1694,6 +1716,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             self.notify_error(error)
 
     def close_audio(self):
+        self._stop_settings_audio()
         if self.session:
             self.session.close_audio()
             self.session = None
@@ -1749,35 +1772,6 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.update_enabled()
         if self._close_after_pause:
             self.close()
-
-    def test_route(self):
-        if not self.device.currentData():
-            self.notify_error(
-                "Connect a supported duplex audio interface, then refresh the device list."
-            )
-            return
-        try:
-            self.save_audio()
-            session = self._get_session()
-            self.route_status.setText("Checking return signal and timing…")
-            self.run_audio(
-                lambda progress, cancel: session.route_test(
-                    sample_rate=session.project.sample_rate or 48000,
-                    progress=progress,
-                    cancel=cancel,
-                    meter=self.route_levels.emit,
-                ),
-                self._route_done,
-            )
-        except Exception as error:
-            self.notify_error(error)
-
-    def _route_done(self, result):
-        self.route_status.setText(
-            ("Connection verified" if result.ok else "Check the connections")
-            + f" · Return peak {result.peak:.1f} dBFS"
-            + (" · Clean loopback missing" if result.loopback_failed else "")
-        )
 
     def _route_metered(self, send, returned, loopback_send=0.0, loopback_return=0.0):
         import math

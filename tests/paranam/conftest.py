@@ -37,8 +37,36 @@ def qapp():
 
 @pytest.fixture
 def window(qapp, monkeypatch, tmp_path):
-    from PySide6.QtCore import QSettings
+    from PySide6.QtCore import QSettings, QObject, Signal
     from paranam import wizard
+    from paranam import settings_audio
+
+    class FakeSettingsAudio(QObject):
+        metered = Signal(float, float, float, float)
+        failed = Signal(str)
+        finished = Signal()
+
+        def __init__(self, device, audio, rate, parent):
+            super().__init__(parent)
+            self.device, self.audio, self.rate = device, audio, rate
+            self.noise = (False, 0.0)
+            self.stopped = False
+
+        def start(self):
+            pass
+
+        def set_noise(self, enabled, level):
+            self.noise = (enabled, level)
+
+        def stop(self):
+            self.stopped = True
+            self.noise = (False, 0.0)
+
+        def wait(self, timeout):
+            return True
+
+    # GUI tests use synthetic interface indices; never open the user's hardware.
+    monkeypatch.setattr(settings_audio, "SettingsAudioWorker", FakeSettingsAudio)
 
     monkeypatch.setattr(wizard, "list_devices", lambda **kwargs: [])
     settings = QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat)

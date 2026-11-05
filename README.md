@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.5.7 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.7-preview)**
+**[Download ParaNAM Trainer 0.5.8 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.8-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -280,6 +280,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.5.8 changes](docs/release-0.5.8.md)
 - [0.5.7 changes](docs/release-0.5.7.md)
 - [0.5.6 changes](docs/release-0.5.6.md)
 - [0.5.5 changes](docs/release-0.5.5.md)

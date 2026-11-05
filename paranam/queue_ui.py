@@ -242,6 +242,7 @@ class QueueActions:
     def update_enabled(self, *_):
         if not hasattr(self, "queue_table"):
             return
+        self._sync_settings_audio()
         self.export_status.setVisible(bool(self.export_status.text()))
         active, present = self.busy(), self.workspace is not None
         listening = getattr(self, "play_worker", None) is not None
@@ -407,6 +408,14 @@ class QueueActions:
             self.additions.setEnabled(enabled)
 
     def closeEvent(self, event):
+        self._closing_settings_audio = True
+        if getattr(self, "_audio_device_events", None) is not None:
+            from PySide6.QtWidgets import QApplication
+
+            QApplication.instance().removeNativeEventFilter(self._audio_device_events)
+            self._audio_device_events.close()
+            self._audio_device_events = None
+        self._stop_settings_audio()
         self.device_timer.stop()
         self.queue_controller.enabled = False
         if getattr(self, "play_worker", None):

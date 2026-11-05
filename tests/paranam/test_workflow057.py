@@ -81,6 +81,7 @@ def test_reconnected_interface_restores_identity_and_route_automatically(
     assert window.device.currentData() is None
     assert "Original interface" in window.device.currentText()
     available.append(DeviceInfo(17, "Original interface", "ASIO", 4, 4, 48000))
+    window._settings_device_changed()
     window._reconnect_device()
     assert window.device.currentData().index == 17
     assert window.input_channel.currentData() == 3
