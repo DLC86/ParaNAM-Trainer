@@ -71,10 +71,18 @@ def train(data_config, model_config, learning, output, callback):
         for dataset in datasets:
             dataset.handshake(model.net)
             model.net.handshake(dataset)
-        loaders = [
-            DataLoader(dataset, **learning[key])
-            for dataset, key in zip(datasets, ("train_dataloader", "val_dataloader"))
-        ]
+        loaders = []
+        for dataset, key in zip(datasets, ("train_dataloader", "val_dataloader")):
+            config = dict(learning[key])
+            seed = config.pop("sampler_seed", None)
+            if seed is not None:
+                import torch
+                from nam.train._samplers import EpochShuffleSampler
+
+                config["generator"] = torch.Generator().manual_seed(seed)
+                if config.pop("shuffle", False):
+                    config["sampler"] = EpochShuffleSampler(dataset, seed)
+            loaders.append(DataLoader(dataset, **config))
         if len(loaders[0]) == 0:
             raise ValueError(
                 "Training capture is too short for the selected NY and batch size. Reduce NY or Batch Size."
@@ -159,6 +167,9 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         output = job / f"member-{member}"
         output.mkdir(exist_ok=True)
         learning = copy.deepcopy(spec["learning"])
+        if learning["trainer"].get("deterministic") is True:
+            learning["train_dataloader"]["sampler_seed"] = 938 + member
+            learning["val_dataloader"]["sampler_seed"] = 939 + member
         learning["trainer"]["enable_progress_bar"] = False
         checkpoint = job / f"resume-{member}.ckpt"
         if checkpoint.exists():

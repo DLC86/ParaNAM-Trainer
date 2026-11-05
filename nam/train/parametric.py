@@ -149,8 +149,9 @@ class _CaptureBatchSampler(_Sampler):
     whole batch instead of one per unique setting.
 
     Trade-off vs. global shuffling: rows are shuffled *within* a capture and the batch order
-    is shuffled across captures, but a batch never mixes captures. Uses the global torch RNG
-    (seeded once by ``nam.train.full``) so the order is reproducible yet varies per epoch.
+    is shuffled across captures, but a batch never mixes captures. By default it uses the
+    global torch RNG. An optional seed isolates shuffling by epoch from model initialization
+    and makes the order reproducible after an epoch-boundary resume.
 
     Since every batch is capture-pure, each ``__iter__`` call also records which capture
     every yielded batch belongs to (``last_batch_captures``), so a caller holding a reference
@@ -166,6 +167,7 @@ class _CaptureBatchSampler(_Sampler):
         batch_size: int,
         shuffle: bool,
         drop_last: bool,
+        seed: int | None = None,
     ):
         if batch_size <= 0:
             raise ValueError(f"batch_size must be positive; got {batch_size}")
@@ -173,9 +175,19 @@ class _CaptureBatchSampler(_Sampler):
         self._batch_size = int(batch_size)
         self._shuffle = bool(shuffle)
         self._drop_last = bool(drop_last)
+        self.seed = seed
+        self.epoch = 0
         # Populated by __iter__; index i is the capture index of the i-th batch of the most
         # recently started iteration (epoch).
         self.last_batch_captures: tuple[int, ...] = ()
+
+    @property
+    def sampler(self):
+        # Lightning calls set_epoch on batch_sampler.sampler before each epoch.
+        return self
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
 
     def _capture_offsets(self) -> tuple[int, ...]:
         offsets = []
@@ -186,6 +198,11 @@ class _CaptureBatchSampler(_Sampler):
         return tuple(offsets)
 
     def __iter__(self):
+        generator = (
+            None
+            if self.seed is None
+            else _torch.Generator().manual_seed(self.seed + self.epoch)
+        )
         batches: list[list[int]] = []
         batch_captures: list[int] = []
         for capture_idx, (offset, length) in enumerate(
@@ -194,7 +211,10 @@ class _CaptureBatchSampler(_Sampler):
             if length == 0:
                 continue
             if self._shuffle:
-                order = [offset + i for i in _torch.randperm(length).tolist()]
+                order = [
+                    offset + i
+                    for i in _torch.randperm(length, generator=generator).tolist()
+                ]
             else:
                 order = list(range(offset, offset + length))
             for start in range(0, length, self._batch_size):
@@ -204,7 +224,7 @@ class _CaptureBatchSampler(_Sampler):
                 batches.append(batch)
                 batch_captures.append(capture_idx)
         if self._shuffle:
-            permutation = _torch.randperm(len(batches)).tolist()
+            permutation = _torch.randperm(len(batches), generator=generator).tolist()
             batches = [batches[i] for i in permutation]
             batch_captures = [batch_captures[i] for i in permutation]
         # Set before yielding the first batch: everything above runs eagerly on the first
@@ -234,8 +254,15 @@ def _capture_lengths(dataset) -> tuple[int, ...]:
 
 def _make_parametric_dataloader(dataset, loader_config: dict) -> _DataLoader:
     loader_config = dict(loader_config)
+    seed = loader_config.pop("sampler_seed", None)
     capture_grouped = loader_config.pop(_CAPTURE_GROUPED_KEY, True)
+    if seed is not None:
+        loader_config["generator"] = _torch.Generator().manual_seed(seed)
     if not capture_grouped:
+        if seed is not None and loader_config.pop("shuffle", False):
+            from ._samplers import EpochShuffleSampler
+
+            loader_config["sampler"] = EpochShuffleSampler(dataset, seed)
         return _DataLoader(dataset, **loader_config)
 
     # batch_sampler is mutually exclusive with these DataLoader args, so the sampler owns them.
@@ -248,6 +275,7 @@ def _make_parametric_dataloader(dataset, loader_config: dict) -> _DataLoader:
         batch_size=batch_size,
         shuffle=shuffle,
         drop_last=drop_last,
+        seed=seed,
     )
     return _DataLoader(dataset, batch_sampler=batch_sampler, **loader_config)
 

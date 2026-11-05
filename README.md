@@ -299,3 +299,5 @@ documentation is retained in [README_UPSTREAM.md](README_UPSTREAM.md).
 See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for
 credits and bundled components. The interface uses the TTS logo and title font
 from NAM On Steroids; the logo links to [The Tone Scientist](https://shop.thetonescientist.com).
+
+Advanced settings also offer cuDNN benchmark and strict deterministic training for reproducible comparisons. See [training controls](docs/training-controls.md#reproducible-comparisons) for scope and limitations.

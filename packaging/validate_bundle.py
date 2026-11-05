@@ -140,7 +140,11 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
         batch_size=1,
         # This short diagnostic deliberately tests the Full HyperA2 recipe,
         # independently of the user-facing new-project defaults.
-        advanced_parametric=training_preset("HyperA2"),
+        advanced_parametric={
+            **training_preset("HyperA2"),
+            "deterministic_training": True,
+            "cudnn_benchmark": False,
+        },
         device=device,
     )
     workspace.generate_plan()

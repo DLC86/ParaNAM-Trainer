@@ -470,6 +470,8 @@ class Workspace:
         kind = kind or self.preferences["capture_type"]
         defaults = dict(
             rate_preset="manual",
+            cudnn_benchmark=True,
+            deterministic_training=False,
             optimizer="Adam",
             learning_rate=0.004,
             lr_decay=0.994,
@@ -491,6 +493,8 @@ class Workspace:
         options.setdefault("hypernetwork_rank", 2)
         options.setdefault("condition_dilated_convolutions", hyper_a2)
         options.setdefault("branch_loss_reduction", "sum" if hyper_a2 else "mean")
+        if options["deterministic_training"] is True:
+            options["cudnn_benchmark"] = False
         return options
 
     def fingerprint(
@@ -570,6 +574,14 @@ class Workspace:
                     "hypernetwork_rate_preset", None
                 )
                 data["settings"]["advanced_training"].pop("hypernetwork_lr_decay", None)
+            if data["settings"]["advanced_training"].get("cudnn_benchmark", True):
+                data["settings"]["advanced_training"].pop("cudnn_benchmark", None)
+            if not data["settings"]["advanced_training"].get(
+                "deterministic_training", False
+            ):
+                data["settings"]["advanced_training"].pop(
+                    "deterministic_training", None
+                )
             if not include_optimizer:
                 data["settings"]["advanced_training"].pop("optimizer")
             if not include_gradient_safety:

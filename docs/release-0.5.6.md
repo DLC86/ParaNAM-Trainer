@@ -49,5 +49,15 @@
   and training-instance settings are retained. Static training keeps its A2
   advanced defaults; the new-project epoch budget is 100 for either capture type.
 
+- Advanced settings add **cuDNN benchmark (CUDA)** and **Deterministic training**
+  for static and parametric jobs. Existing defaults remain benchmark on and
+  determinism off. Strict determinism forces benchmark off, configures cuBLAS
+  before CUDA initialization, and uses epoch-seeded batch shuffling independent
+  of model initialization and consistent across pause/resume. Unsupported
+  deterministic operations raise an error. Repeatability is limited to the same
+  supported hardware/software environment and may cost performance; it does not
+  guarantee lower ESR or better generalization. Changed backend choices require
+  a new training instance; existing checkpoints retain their saved choices.
+
 Self-contained installers: Windows x64, Linux x86-64 (DEB and portable archive),
 macOS Apple Silicon and Intel. Existing optional NVIDIA runtimes are reused.

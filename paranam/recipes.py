@@ -26,6 +26,8 @@ def training_preset(name):
     hyper_a2 = name == "HyperA2"
     return dict(
         rate_preset="manual",
+        cudnn_benchmark=True,
+        deterministic_training=False,
         hypernetwork_rate_preset="follow",
         hypernetwork_lr_decay=0.994,
         hypernetwork_recipe=name,

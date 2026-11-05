@@ -773,6 +773,21 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.advanced_fields["check_nonfinite_gradients"] = nonfinite
         advanced_form.addRow(nonfinite)
         nonfinite.toggled.connect(self.save_preferences)
+        benchmark = QCheckBox("cuDNN benchmark (CUDA)")
+        benchmark.setToolTip(
+            "Benchmark convolution algorithms for speed. Disabling it stabilizes algorithm selection, but is not sufficient for fully deterministic training. Applies to new training instances."
+        )
+        benchmark.setChecked(True)
+        self.advanced_fields["cudnn_benchmark"] = benchmark
+        advanced_form.addRow(benchmark)
+        benchmark.toggled.connect(self.save_preferences)
+        deterministic = QCheckBox("Deterministic training")
+        deterministic.setToolTip(
+            "Use deterministic PyTorch algorithms and a fixed per-epoch batch order. Forces benchmark off. Unsupported operations raise an error. Results are reproducible within the same supported software/hardware environment; training can be slower."
+        )
+        self.advanced_fields["deterministic_training"] = deterministic
+        advanced_form.addRow(deterministic)
+        deterministic.toggled.connect(self._deterministic_changed)
         weight_mode = QComboBox()
         weight_mode.addItem("Full", "full")
         weight_mode.addItem("Low rank", "low_rank")
@@ -969,6 +984,15 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.training_tabs.addTab(self.details, "Training log")
         layout.addWidget(self.training_tabs, 1)
 
+    def _deterministic_changed(self, enabled):
+        benchmark = self.advanced_fields["cudnn_benchmark"]
+        if enabled:
+            benchmark.blockSignals(True)
+            benchmark.setChecked(False)
+            benchmark.blockSignals(False)
+        benchmark.setEnabled(not enabled)
+        self.save_preferences()
+
     def load_advanced_options(self, kind=None):
         options = self.workspace.training_options(kind)
         for key, field in self.advanced_fields.items():
@@ -989,6 +1013,14 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         ) == "parametric"
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
+        self.advanced_fields["cudnn_benchmark"].setEnabled(
+            not options["deterministic_training"]
+        )
+        if options["deterministic_training"]:
+            field = self.advanced_fields["cudnn_benchmark"]
+            field.blockSignals(True)
+            field.setChecked(False)
+            field.blockSignals(False)
         self.refresh_hypernetwork_controls(kind)
         self.refresh_rate_preview(kind)
 

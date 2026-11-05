@@ -60,6 +60,9 @@ def main():
         with (job / "worker.log").open("a", encoding="utf-8", buffering=1) as log:
             with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
                 try:
+                    from .training_environment import prepare_worker_environment
+
+                    prepare_worker_environment(job)
                     if "--gpu-runtime" in args:
                         from . import gpu_runtime
 
@@ -198,6 +201,18 @@ def main():
                 scheduler.step()
         assert math.isclose(optimizer.param_groups[0]["lr"], 0.004 * 0.9**2)
         assert math.isclose(optimizer.param_groups[1]["lr"], 0.0004 * 0.8)
+        from nam.train._samplers import EpochShuffleSampler
+        from .training_environment import apply_backend_flags
+
+        sampler = EpochShuffleSampler(range(12), 938)
+        sampler.set_epoch(2)
+        expected = list(sampler)
+        torch.rand(20)
+        assert list(sampler) == expected
+        apply_backend_flags({"learning": {"trainer": {"deterministic": True}}})
+        assert torch.are_deterministic_algorithms_enabled()
+        assert not torch.backends.cudnn.benchmark
+        apply_backend_flags({"learning": {"trainer": {"benchmark": True}}})
         Path(args[1]).write_text(
             json.dumps(
                 {
@@ -209,6 +224,7 @@ def main():
                     "bundled_irs": ir_count,
                     "fractional_lr_cadence": True,
                     "independent_lr_cadences": True,
+                    "deterministic_training": True,
                     "default_optimizer": window.advanced_fields[
                         "optimizer"
                     ].currentData(),

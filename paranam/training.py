@@ -95,6 +95,16 @@ def job_can_resume(workspace, job):
     )
     legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
     options = workspace.training_options()
+    saved_trainer = spec.get("learning", {}).get("trainer", {})
+    if bool(saved_trainer.get("benchmark", True)) != (
+        options["cudnn_benchmark"] and not options["deterministic_training"]
+    ):
+        return False
+    if (
+        bool(saved_trainer.get("deterministic", False))
+        != options["deterministic_training"]
+    ):
+        return False
     generation_keys = (
         "hypernetwork_mode",
         "hypernetwork_rank",
@@ -283,6 +293,9 @@ def make_job(workspace, resume=False, job_directory=None):
                 raise ValueError("The training instance folder is not empty")
             job.mkdir(parents=True, exist_ok=True)
         options = workspace.training_options()
+        for key in ("cudnn_benchmark", "deterministic_training"):
+            if not isinstance(options[key], bool):
+                raise ValueError(f"{key} must be true or false")
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
         if options.get("rate_preset", "manual") not in (
@@ -470,6 +483,9 @@ def make_job(workspace, resume=False, job_directory=None):
         else:
             learning["trainer"].pop("gradient_clip_val", None)
         learning["trainer"].update(
+            benchmark=options["cudnn_benchmark"]
+            and not options["deterministic_training"],
+            deterministic=options["deterministic_training"],
             max_epochs=prefs["epochs"],
             accelerator=prefs["device"],
             devices=1,
@@ -1236,13 +1252,17 @@ def _propose_captures(workspace, job, spec, shared):
 
 def run_job(job):
     """Worker entry point. Never invoked inside the GUI process."""
+    job = Path(job).resolve()
+    from .training_environment import prepare_worker_environment, apply_backend_flags
+
+    prepare_worker_environment(job)
     import torch
     import pytorch_lightning as pl
     from filelock import FileLock
     from nam.train.parametric import main as train
 
-    job = Path(job).resolve()
     spec = read_json(job / "spec.json")
+    apply_backend_flags(spec)
     workspace = Workspace(Path(spec["project"]))
     shared = job_progress(job)
     elapsed_base = float(shared.get("elapsed", 0))
@@ -1274,6 +1294,10 @@ def run_job(job):
                 output = job / f"member-{member}"
                 output.mkdir(exist_ok=True)
                 learning = json.loads(json.dumps(spec["learning"]))
+                if learning["trainer"].get("deterministic") is True:
+                    seed = 938 + spec["round"] * 101 + member
+                    learning["train_dataloader"]["sampler_seed"] = seed
+                    learning["val_dataloader"]["sampler_seed"] = seed + 1
                 learning["trainer"]["enable_progress_bar"] = False
                 if (
                     spec["preferences"]["device"] == "auto"

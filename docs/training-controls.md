@@ -173,3 +173,28 @@ for the currently training named capture. The button label, file dialog and file
 extension follow the training type automatically. Calibration and user metadata are
 retained. The snapshot does not modify live weights, optimizer state or training
 RNG, and writes atomically to the selected destination.
+
+
+## Reproducible comparisons
+
+Advanced training settings include **cuDNN benchmark (CUDA)** (default on) and
+**Deterministic training** (default off) for both static and parametric models.
+Disabling benchmark prevents timing-based convolution algorithm selection; it
+alone does not guarantee deterministic arithmetic. Deterministic training forces
+benchmark off, configures cuBLAS before the worker probes CUDA, and requests strict
+PyTorch deterministic algorithms. Unsupported operations fail with an error instead
+of silently falling back to nondeterministic training. It can reduce performance.
+
+The existing seed is 938, offset for ensemble members/active-learning rounds.
+Deterministic mode also isolates the batch shuffle from model initialization and
+seeds it by epoch, including checkpoint resume. Existing default jobs retain their
+original shuffling and backend settings. Changing either backend option requires
+a new training instance; existing checkpoints resume with their saved choices.
+
+Use this mode to compare settings with the same recordings, split, seed, batch size
+and training budget. Different architectures have different initial weights even
+with the same seed. Verify promising configurations over several seeds and datasets;
+repeatability does not itself improve generalization. Bitwise reproducibility is
+limited to supported operations within the same hardware/software environment,
+not across PyTorch/CUDA versions or CPU/GPU/Metal backends. See the
+[PyTorch reproducibility notes](https://docs.pytorch.org/docs/2.10/notes/randomness.html).
