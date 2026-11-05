@@ -1069,8 +1069,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                         if schedule["interval"] == "epoch"
                         else "optimizer updates on average"
                     )
+                    field_name = (
+                        "rate_preset" if name == "audio" else "hypernetwork_rate_preset"
+                    )
+                    preset_name = self.advanced_fields[field_name].currentText()
                     descriptions.append(
-                        f"{name.title()}: {schedule['preset']}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs."
+                        f"{name.title()}: {preset_name}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs."
                     )
                 self.rate_preview.setText(
                     "Independent LR schedules.\n" + "\n".join(descriptions)
