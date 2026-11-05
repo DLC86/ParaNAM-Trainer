@@ -260,7 +260,7 @@ class AsioRecorder:
             self.job = None
             job.done.set()
 
-    def _exchange(self, main, loop, cancel, progress=None):
+    def _exchange(self, main, loop, cancel, progress=None, meter=None):
         job = _BlockJob(
             main,
             loop,
@@ -268,7 +268,30 @@ class AsioRecorder:
             None if loop is None else np.zeros_like(loop),
         )
         self.job = job
+        metered = 0
+
+        def report_meter():
+            nonlocal metered
+            end = job.position
+            if meter is not None and end > metered:
+                meter(
+                    float(np.max(np.abs(main[metered:end]))),
+                    float(np.max(np.abs(job.recorded[metered:end]))),
+                    (
+                        float(np.max(np.abs(loop[metered:end])))
+                        if loop is not None
+                        else 0.0
+                    ),
+                    (
+                        float(np.max(np.abs(job.loop_recorded[metered:end])))
+                        if loop is not None
+                        else 0.0
+                    ),
+                )
+                metered = end
+
         while not job.done.wait(0.05):
+            report_meter()
             if cancel is not None and cancel():
                 job.cancelled = True
                 while self.stream.active and not job.done.wait(0.05):
@@ -282,6 +305,7 @@ class AsioRecorder:
                 progress(job.position / len(main))
         if job.error is not None:
             raise job.error
+        report_meter()
         return job.recorded, job.loop_recorded
 
     def _probe(self, cancel):
@@ -389,7 +413,11 @@ class AsioRecorder:
                     self.reference = None
                     self._stabilize(cancel)
         main, recorded = self._exchange(
-            settings["playback"], loop, cancel, settings["progress"]
+            settings["playback"],
+            loop,
+            cancel,
+            settings["progress"],
+            settings.get("meter"),
         )
         if loop is not None:
             lag, reference = self.reference

@@ -4,7 +4,7 @@ import math
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal, Qt, QTimer, QRectF
+from PySide6.QtCore import QThread, Signal, Qt, QTimer, QRectF, QSize
 from PySide6.QtGui import QPainter, QPen, QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget,
@@ -21,11 +21,14 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QFrame,
     QSlider,
+    QSizePolicy,
 )
 
 from .playback import NativeModel, PlayWorker, validate_route
 from .workspace import read_json
 from .ir import BUNDLED, prepare_ir, IRProcessor
+from .preview import preview_files
+from .ui_widgets import navigation_icon
 
 
 class PlayDial(QDial):
@@ -321,6 +324,39 @@ class LevelMeter(QWidget):
                     painter.fillRect(left, 86 - step * 4, width - 4, 3, QColor(color))
 
 
+class HorizontalLevelMeter(LevelMeter):
+    """Compact routing meter; the Compare page retains its vertical meters."""
+
+    def __init__(self, parent=None):
+        super().__init__(1, parent)
+        self.setMinimumSize(40, 20)
+        self.setMaximumSize(16777215, 20)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#242424"))
+        count = max(22, self.width() // 8)
+        step_width = (self.width() - 4) / count
+        for index in range(count):
+            threshold = -60 + (index + 1) * 60 / count
+            if self.levels[0] >= threshold:
+                color = (
+                    "#bf0000"
+                    if threshold >= -3
+                    else "#c4a03b" if threshold >= -12 else "#54a87b"
+                )
+                painter.fillRect(
+                    QRectF(
+                        2 + index * step_width,
+                        3,
+                        max(1, step_width - 1),
+                        self.height() - 6,
+                    ),
+                    QColor(color),
+                )
+
+
 class PlayActions:
     def _play(self, layout):
         title = QLabel("Play & Compare")
@@ -378,11 +414,38 @@ class PlayActions:
         panel = QVBoxLayout(self.play_action_bar)
         panel.setContentsMargins(16, 12, 16, 16)
         panel.setSpacing(14)
-        self.play_start = QPushButton("Play")
+        self._play_input_mode = "instrument"
+        self.play_start = QPushButton()
         self.play_start.setObjectName("comparePlay")
         self.play_start.setProperty("playing", False)
-        self.play_start.setFixedSize(160, 62)
-        self.play_start.clicked.connect(self.start_playback)
+        self.play_start.setIcon(navigation_icon(5))
+        self.play_start.setAccessibleName("Play instrument input")
+        self.play_start.setToolTip("Play / stop the live instrument input")
+        self.play_start.setCheckable(True)
+        self.play_start.setIconSize(QSize(36, 36))
+        self.play_start.setFixedSize(68, 68)
+        self.play_start.clicked.connect(
+            lambda: self.toggle_playback_source("instrument")
+        )
+        self.preview_start = QPushButton()
+        self.preview_start.setObjectName("comparePlay")
+        self.preview_start.setIcon(navigation_icon(7))
+        self.preview_start.setAccessibleName("Play recorded audio")
+        self.preview_start.setToolTip(
+            "Play / stop the selected TONE3000 recorded input"
+        )
+        self.preview_start.setCheckable(True)
+        self.preview_start.setIconSize(QSize(32, 32))
+        self.preview_start.setFixedSize(68, 68)
+        self.preview_start.clicked.connect(
+            lambda: self.toggle_playback_source("recording")
+        )
+        self.preview_file = QComboBox()
+        for caption, path in preview_files():
+            self.preview_file.addItem(caption, str(path))
+        self.preview_file.setMaximumWidth(280)
+        self.preview_file.setAccessibleName("Recorded input signal")
+        self.preview_file.currentIndexChanged.connect(self._preview_file_changed)
         self.play_stop = QPushButton("Stop playing")
         self.play_stop.setObjectName("comparePlay")
         self.play_stop.setProperty("playing", True)
@@ -391,8 +454,15 @@ class PlayActions:
         self.play_start.setEnabled(False)
         self.play_stop.setEnabled(False)
         self.play_stop.hide()
-        panel.addWidget(self.play_start, alignment=Qt.AlignmentFlag.AlignHCenter)
-        panel.addWidget(self.play_stop, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.play_stop.setParent(self.play_action_bar)
+        transport_row = QHBoxLayout()
+        transport_row.addStretch()
+        transport_row.addWidget(self.play_start)
+        transport_row.addSpacing(8)
+        transport_row.addWidget(self.preview_start)
+        transport_row.addWidget(self.preview_file)
+        transport_row.addStretch()
+        panel.addLayout(transport_row)
         row = QHBoxLayout()
         row.setSpacing(18)
         self.gear_button, self.model_button = QPushButton("Gear"), QPushButton("Model")
@@ -852,7 +922,10 @@ class PlayActions:
             device = self.device.currentData()
             if not device:
                 raise ValueError("Select your audio interface in Settings.")
-            validate_route(device, self.audio_settings())
+            recorded = self._play_input_mode == "recording"
+            validate_route(
+                device, self.audio_settings(), require_instrument=not recorded
+            )
             self.close_audio()
             project = self.playback_project()
             if self.ir_loader:
@@ -875,6 +948,11 @@ class PlayActions:
                 self.instrument_reference(),
                 self.play_size.currentData(),
                 self,
+                **(
+                    {"preview_path": self.preview_file.currentData()}
+                    if recorded
+                    else {}
+                ),
             )
             self.update_play_settings()
             self.play_worker.failed.connect(self.play_status.setText)
@@ -892,6 +970,25 @@ class PlayActions:
             self.update_enabled()
         except Exception as error:
             self.notify_error(error)
+            self.update_enabled()
+
+    def toggle_playback_source(self, mode):
+        if self.play_worker:
+            if self._play_input_mode == mode:
+                self.stop_playback()
+            else:
+                self._play_input_mode = mode
+                self._play_restart = True
+                self.stop_playback(reconfigure=True)
+        else:
+            self._play_input_mode = mode
+            self.start_playback()
+        self.update_enabled()
+
+    def _preview_file_changed(self, *_):
+        if self.play_worker and self._play_input_mode == "recording":
+            self._play_restart = True
+            self.stop_playback(reconfigure=True)
 
     def _play_metered(self, values):
         db = lambda value: 20 * math.log10(max(value, 1e-12))

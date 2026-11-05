@@ -289,6 +289,29 @@ class TrainingQueue:
 
         self._edit(edit)
 
+    def prioritize(self, identifier):
+        """Resume a paused queue's current instance before its waiting successors."""
+
+        def edit(entries):
+            entry = next(
+                (
+                    e
+                    for e in entries
+                    if e["id"] == identifier and e["state"] == "queued"
+                ),
+                None,
+            )
+            if entry is None:
+                return
+            entries.remove(entry)
+            position = next(
+                (i for i, e in enumerate(entries) if e["state"] == "queued"),
+                len(entries),
+            )
+            entries.insert(position, entry)
+
+        self._edit(edit)
+
     def remove(self, identifier):
         with self.lock:
             data = read_json(self.path, {"version": 1, "entries": []})

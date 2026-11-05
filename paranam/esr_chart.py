@@ -26,6 +26,8 @@ class ESRChart(QWidget):
         super().__init__(parent)
         self.model_size = size
         self.history = []
+        self.hover_epoch = None
+        self.setMouseTracking(True)
         self.setMinimumHeight(215)
         self.setMaximumHeight(265)
         self.setAccessibleName(f"{size.title()} Validation ESR and Train ESR by epoch")
@@ -38,7 +40,49 @@ class ESRChart(QWidget):
         history = [dict(entry) for entry in history]
         if history != self.history:
             self.history = history
+            if self.hover_epoch not in {entry["epoch"] for entry in history}:
+                self.hover_epoch = None
             self.update()
+
+    def plot_rect(self):
+        return QRectF(65, 47, max(self.width() - 90, 1), max(self.height() - 78, 1))
+
+    def displayed_entry(self):
+        if not self.history:
+            return {}
+        return next(
+            (entry for entry in self.history if entry["epoch"] == self.hover_epoch),
+            self.history[-1],
+        )
+
+    def mouseMoveEvent(self, event):
+        plot = self.plot_rect()
+        self.hover_epoch = None
+        if self.history and plot.contains(event.position()):
+            last_epoch = max(2, max(entry["epoch"] for entry in self.history))
+            epoch = 1 + (event.position().x() - plot.left()) / plot.width() * (
+                last_epoch - 1
+            )
+            candidates = [
+                entry
+                for entry in self.history
+                if any(
+                    entry.get(key) is not None
+                    and math.isfinite(entry[key])
+                    and entry[key] >= 0
+                    for key in (self.model_size, f"train_{self.model_size}")
+                )
+            ]
+            if candidates:
+                self.hover_epoch = min(
+                    candidates, key=lambda entry: abs(entry["epoch"] - epoch)
+                )["epoch"]
+        self.update()
+
+    def leaveEvent(self, event):
+        self.hover_epoch = None
+        self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -46,7 +90,14 @@ class ESRChart(QWidget):
         painter.fillRect(self.rect(), QColor("#292929"))
         painter.setPen(QColor("#eeeeee"))
         painter.drawText(
-            12, 22, f"{self.model_size.title()} ESR · log scale · completed epochs"
+            12,
+            22,
+            f"{self.model_size.title()} ESR · log scale · "
+            + (
+                f"epoch {self.hover_epoch}"
+                if self.hover_epoch is not None
+                else "completed epochs"
+            ),
         )
         values = [
             max(float(entry[key]), 1e-12)
@@ -69,7 +120,7 @@ class ESRChart(QWidget):
         )
         if bottom == top:
             bottom -= 1
-        plot = QRectF(65, 47, max(self.width() - 90, 1), max(self.height() - 78, 1))
+        plot = self.plot_rect()
         last_epoch = max(2, max(entry["epoch"] for entry in self.history))
 
         def point(epoch, value):
@@ -80,6 +131,11 @@ class ESRChart(QWidget):
                 / (top - bottom)
                 * plot.height(),
             )
+
+        if self.hover_epoch is not None:
+            x = point(self.hover_epoch, values[0]).x()
+            painter.setPen(QPen(QColor("#cccccc"), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
 
         for tick in range(4):
             exponent = bottom + (top - bottom) * tick / 3
@@ -132,7 +188,15 @@ class ESRChart(QWidget):
                 painter.drawEllipse(pos, 2, 2)
                 connected = True
             painter.drawPath(path)
-            last = self.history[-1].get(size)
+            selected = self.displayed_entry()
+            last = selected.get(size)
+            if (
+                self.hover_epoch is not None
+                and last is not None
+                and math.isfinite(last)
+                and last >= 0
+            ):
+                painter.drawEllipse(point(selected["epoch"], last), 4, 4)
             text = (
                 f"{title}  {last:.6g}"
                 if last is not None and math.isfinite(last)

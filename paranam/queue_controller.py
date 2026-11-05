@@ -60,6 +60,8 @@ class QueueController(QObject):
         self.active_id = None
         self.enabled = False
         self.preparing = None
+        self.control_path = self.store.directory / "queue-control.json"
+        self.paused_queue_id = read_json(self.control_path, {}).get("paused_job")
         for entry in self.store.entries():
             if entry["state"] in ACTIVE:
                 if process_alive(entry):
@@ -89,8 +91,25 @@ class QueueController(QObject):
         self.tick()
 
     def start(self):
+        if self.paused_queue_id:
+            entry = self.store.get(self.paused_queue_id)
+            if entry and entry["state"] in ("paused", "interrupted", "failed"):
+                self.store.prepare_resume(entry["id"])
+                self.store.prioritize(entry["id"])
+            self.paused_queue_id = None
+            atomic_write_json(self.control_path, {})
         self.enabled = True
         self.tick()
+
+    def pause_queue(self):
+        # Disable scheduling before issuing the pause: the worker can exit and
+        # emit changed/finished immediately, and must never launch its successor.
+        self.enabled = False
+        self.paused_queue_id = self.active_id
+        atomic_write_json(self.control_path, {"paused_job": self.paused_queue_id})
+        if self.active_id:
+            self.pause(self.active_id)
+        self.changed.emit()
 
     def tick(self):
         if self.active_id:

@@ -787,6 +787,7 @@ class CaptureSession:
         progress: _Optional[_Callable[[float], None]],
         cancel: _Optional[_Callable[[], bool]],
         loopback_playback: _Optional[_np.ndarray] = None,
+        meter=None,
     ) -> tuple[_np.ndarray, _Optional[_np.ndarray]]:
         audio = self.project.audio
         use_loopback = audio.loopback_enabled and loopback_playback is not None
@@ -807,6 +808,7 @@ class CaptureSession:
             host_api=audio.host_api,
             progress=progress,
             cancel=cancel,
+            **({"meter": meter} if meter is not None else {}),
             **self._resolve_devices(),
         )
         main = _np.asarray(main, dtype=_np.float32).squeeze()
@@ -1083,6 +1085,7 @@ class CaptureSession:
         sample_rate: _Optional[int] = None,
         progress: _Optional[_Callable[[float], None]] = None,
         cancel: _Optional[_Callable[[], bool]] = None,
+        meter=None,
     ) -> RouteTestResult:
         """
         Play just the blip preamble through the configured route and check that the
@@ -1108,6 +1111,7 @@ class CaptureSession:
             progress,
             cancel,
             loopback_playback,
+            meter=meter,
         )
         latency, crosscheck, disagreement, loopback_failed = self._resolve_latency(
             main, loopback, preamble

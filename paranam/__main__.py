@@ -151,6 +151,9 @@ def main():
         from .ir import verify_bundled_irs
 
         ir_count = verify_bundled_irs()
+        from .preview import verify_bundled_previews
+
+        verify_bundled_previews()
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         import json
         import torch

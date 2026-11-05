@@ -773,6 +773,34 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             self.trainer = None
             self.last_log_update = 0
             self.export_request_stamp = None
+            from .batch_timing import BatchTiming
+
+            self.timing = BatchTiming()
+            self.batch_started = None
+            self.batch_done = 0
+            self.validation_started = None
+
+        def batch_estimate(self, trainer, validated=False):
+            batches = getattr(trainer, "num_training_batches", None)
+            if not batches or not math.isfinite(batches):
+                return None
+            epochs = spec["preferences"]["epochs"]
+            future_epochs = max(0, epochs - trainer.current_epoch - 1)
+            future_members = max(0, spec["members"] - member - 1)
+            member_counts = shared.get("member_train_batches", {})
+            future_batches = sum(
+                member_counts.get(str(index), batches) * epochs
+                for index in range(member + 1, spec["members"])
+            )
+            remaining = (
+                max(0, batches - self.batch_done)
+                + future_epochs * batches
+                + future_batches
+            )
+            validation_passes = (
+                future_epochs + future_members * epochs + (0 if validated else 1)
+            )
+            return self.timing.remaining(remaining, validation_passes)
 
         def print_progress(self, trainer, fraction, phase):
             from .training_log import epoch_line
@@ -785,6 +813,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                     label,
                     fraction,
                     phase,
+                    self.timing.iterations_per_second,
                 ),
                 end="",
                 flush=True,
@@ -867,6 +896,8 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 "best_esr": self.best,
                 "best_train_esr": self.best_train,
                 "epoch_times": self.epoch_times,
+                "batch_durations": list(self.timing.durations),
+                "validation_times": list(self.timing.validation_times),
                 "esr_history": self.esr_history,
                 "torch_rng": torch.get_rng_state(),
                 "python_rng": random.getstate(),
@@ -901,6 +932,8 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 data.get("last_validation") if current_reference else None
             )
             self.epoch_times = data.get("epoch_times", [])
+            self.timing.durations.extend(data.get("batch_durations", []))
+            self.timing.validation_times.extend(data.get("validation_times", []))
             self.esr_history = data.get("esr_history", self.esr_history)
             self.best_lite_metrics = (
                 data.get("best_lite_validation") if current_reference else None
@@ -954,6 +987,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             )
             batches = trainer.num_training_batches
             batches = int(batches) if math.isfinite(batches) else None
+            shared.setdefault("member_train_batches", {})[str(member)] = batches
             self.write(
                 device=str(module.device),
                 device_name=device_name,
@@ -987,13 +1021,27 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
 
         def on_train_epoch_start(self, trainer, module):
             self.epoch_started = time.monotonic()
-            self.write(epoch=trainer.current_epoch + 1, batch_fraction=0)
+            self.batch_started = self.epoch_started
+            self.batch_done = 0
+            self.write(
+                epoch=trainer.current_epoch + 1,
+                batch_fraction=0,
+                eta=self.batch_estimate(trainer),
+            )
             self.print_progress(trainer, 0, "Training")
 
         def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
+            now = time.monotonic()
+            if self.batch_started is not None:
+                self.timing.record(now - self.batch_started)
+            self.batch_started = now
+            self.batch_done = batch_idx + 1
             self.check_action()
             # Throttle disk/GUI updates on short CPU batches.
-            if batch_idx % 10 == 0:
+            if (
+                now - self.last_log_update >= 0.5
+                or self.batch_done == trainer.num_training_batches
+            ):
                 batches = trainer.num_training_batches
                 fraction = (
                     (batch_idx + 1) / batches
@@ -1002,14 +1050,17 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 )
                 self.write(
                     batch_fraction=fraction,
+                    batches_completed=self.batch_done,
+                    iterations_per_second=self.timing.iterations_per_second,
+                    eta=self.batch_estimate(trainer),
                     message="Training " + label,
                 )
-                if time.monotonic() - self.last_log_update >= 1:
-                    self.print_progress(trainer, fraction, "Training")
-                    self.last_log_update = time.monotonic()
+                self.print_progress(trainer, fraction, "Training")
+                self.last_log_update = time.monotonic()
 
         def on_validation_start(self, trainer, module):
             if not trainer.sanity_checking:
+                self.validation_started = time.monotonic()
                 self.print_progress(trainer, 1, "Validating")
 
         def on_validation_end(self, trainer, module):
@@ -1062,7 +1113,14 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
 
             print(
                 "\r"
-                + epoch_line(epoch, total_epochs, label, 1, "Validation ESR")
+                + epoch_line(
+                    epoch,
+                    total_epochs,
+                    label,
+                    1,
+                    "Validation ESR",
+                    self.timing.iterations_per_second,
+                )
                 + " | "
                 f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}"
                 f" | Train ESR | Lite={display(train_lite)} | Full={display(train_full)}",
@@ -1106,11 +1164,11 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 time.monotonic() - (self.epoch_started or time.monotonic()), 0.001
             )
             self.epoch_times.append(duration)
-            remaining = (spec["members"] - member - 1) * spec["preferences"]["epochs"]
-            remaining += max(
-                0, spec["preferences"]["epochs"] - trainer.current_epoch - 1
-            )
-            eta = remaining * sum(self.epoch_times) / len(self.epoch_times)
+            if self.validation_started is not None:
+                self.timing.validation_times.append(
+                    time.monotonic() - self.validation_started
+                )
+            eta = self.batch_estimate(trainer, validated=True)
             self.write(
                 epoch=trainer.current_epoch + 1,
                 eta=eta,

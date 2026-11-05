@@ -138,8 +138,12 @@ class NativeModel:
         self.close()
 
 
-def validate_route(device, audio):
-    incoming = (audio.instrument_input_channel, audio.input_channel)
+def validate_route(device, audio, require_instrument=True):
+    incoming = (
+        (audio.instrument_input_channel, audio.input_channel)
+        if require_instrument
+        else (audio.input_channel,)
+    )
     outgoing = (
         audio.output_channel,
         audio.monitor_output_left,
@@ -149,7 +153,7 @@ def validate_route(device, audio):
         raise ValueError(
             "Select Instrument input and both Monitor outputs in Settings."
         )
-    if len(set(incoming)) != 2:
+    if len(set(incoming)) != len(incoming):
         raise ValueError(
             "Instrument input and gear return must use different channels."
         )
@@ -181,7 +185,15 @@ class PlayWorker(QThread):
     metered = Signal(dict)
 
     def __init__(
-        self, path, device, project, instrument_dbu=None, lite=False, parent=None
+        self,
+        path,
+        device,
+        project,
+        instrument_dbu=None,
+        lite=False,
+        parent=None,
+        *,
+        preview_path=None,
     ):
         super().__init__(parent)
         self.path, self.device, self.project = (
@@ -190,6 +202,7 @@ class PlayWorker(QThread):
             project.model_copy(deep=True),
         )
         self.instrument_dbu, self.lite = instrument_dbu, lite
+        self.preview_path = preview_path
         self.stopping = threading.Event()
         self.settings = dict(
             parameters=None,
@@ -206,9 +219,16 @@ class PlayWorker(QThread):
         model = None
         try:
             audio = self.project.audio
-            validate_route(self.device, audio)
+            validate_route(
+                self.device, audio, require_instrument=self.preview_path is None
+            )
             rate, block = self.project.sample_rate or 48000, max(
                 64, audio.blocksize or 2048
+            )
+            from .preview import PreviewLoop
+
+            preview = (
+                PreviewLoop(self.preview_path, rate) if self.preview_path else None
             )
             model = NativeModel(self.path, rate, block, self.lite)
             self.loaded.emit(model.info)
@@ -261,7 +281,11 @@ class PlayWorker(QThread):
                     )
                     input_ramp = target_input + (current_input - target_input) * decay
                     current_input = float(input_ramp[-1])
-                    raw_instrument = incoming[:, audio.instrument_input_channel - 1]
+                    raw_instrument = (
+                        preview.read(frames)
+                        if preview is not None
+                        else incoming[:, audio.instrument_input_channel - 1]
+                    )
                     instrument = raw_instrument * input_ramp
                     send = instrument * reamp_gain
                     outgoing[:, audio.output_channel - 1] = np.clip(send, -1, 1)

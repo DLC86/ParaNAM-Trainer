@@ -69,6 +69,10 @@ def test_interface_routes_survive_disconnect_other_device_and_new_indices(
     assert saved_a["loopback_input_channel"] == 7
     available[:] = [b]
     window.refresh_devices()
+    assert window.device.currentData() is None
+    window.device.setCurrentIndex(
+        0
+    )  # Selecting the fallback is an explicit user choice.
     window.input_channel.setCurrentIndex(window.input_channel.findData(3))
     window.buffer.setCurrentIndex(window.buffer.findData(128))
     available.clear()
@@ -77,6 +81,9 @@ def test_interface_routes_survive_disconnect_other_device_and_new_indices(
     assert window.remembered_audio_route(a) == saved_a
     available[:] = [device("Interface A", 42), device("Interface B", 51)]
     window.refresh_devices()
+    assert window.device.currentData().name == "Interface B"
+    assert window.input_channel.currentData() == 3
+    window.device.setCurrentIndex(0)
     assert window.input_channel.currentData() == 5
     assert window.output_channel.currentData() == 6
     assert window.loop_input.currentData() == 7

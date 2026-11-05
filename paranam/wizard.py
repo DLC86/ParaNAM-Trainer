@@ -74,7 +74,7 @@ from .audio_devices import capabilities
 from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 from .signals import asset_path
 from .queue_ui import QueueActions
-from .play_ui import PlayActions
+from .play_ui import PlayActions, HorizontalLevelMeter
 from .queue_controller import QueueController
 from .ui_preferences import UIPreferences
 from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
@@ -116,13 +116,16 @@ def duration(seconds):
 
 class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
     capture_stage = Signal(str)
+    route_levels = Signal(float, float, float, float)
 
     def __init__(self):
         super().__init__()
         load_font()
         self.setWindowTitle("ParaNAM Trainer")
         self.setStyleSheet(
-            THEME.replace("CHECKMARK_URL", asset_path("checkmark.svg").as_posix())
+            THEME.replace(
+                "CHECKMARK_URL", asset_path("checkmark.svg").as_posix()
+            ).replace("ASSET_ROOT", asset_path("checkmark.svg").parent.as_posix())
         )
         self.resize(1260, 840)
         self.setMinimumSize(1000, 700)
@@ -164,10 +167,17 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.restore_startup_setup()
         self._restoring_setup = False
         self.capture_stage.connect(self.capture_status.setText)
+        self.route_levels.connect(self._route_metered)
         self.timer = QTimer(self)
         self.timer.setInterval(600)
         self.timer.timeout.connect(self.refresh_training)
         self.timer.start()
+        self.device_timer = QTimer(self)
+        self.device_timer.setInterval(3000)
+        self.device_timer.timeout.connect(
+            lambda: self._reconnect_device() if self.isVisible() else None
+        )
+        self.device_timer.start()
         self.navigate(0)
 
     def _build(self):
@@ -193,6 +203,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         )
         self.brand_title = label("ParaNAM\nTrainer", "brand")
         self.version_label = label(f"VERSION {__version__}", "eyebrow")
+        self.version_label.setObjectName("version")
         self.brand_title.setParent(sidebar)
         self.version_label.setParent(sidebar)
         brand_text = QVBoxLayout()
@@ -215,7 +226,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.steps = []
         for index, text in enumerate(
             (
-                "Project",
+                "Projects",
                 "Plan",
                 "Capture",
                 "Train",
@@ -263,10 +274,20 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             layout.setContentsMargins(0, 0, 10, 0)
             layout.setSpacing(20)
             builder(layout)
+            page.setMaximumWidth(1100 if index in (1, 3, 6) else 1400)
+            for field_type in (QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox):
+                for field in page.findChildren(field_type):
+                    field.setMaximumWidth(
+                        min(
+                            field.maximumWidth(),
+                            560 if field_type in (QComboBox, QLineEdit) else 260,
+                        )
+                    )
             if index not in (0, 2, 4):
                 layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
+            scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             scroll.setWidget(page)
             self.pages.addWidget(scroll)
             self.page_contents.append(page)
@@ -365,8 +386,30 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             "muted",
         )
         row.addWidget(self.route_button)
-        row.addWidget(self.route_status, 1)
+        self.route_meter_panel = QWidget()
+        self.route_meter_panel.setStyleSheet("QWidget { background: transparent; }")
+        meters = QGridLayout(self.route_meter_panel)
+        meters.setContentsMargins(0, 0, 0, 0)
+        meters.setHorizontalSpacing(12)
+        meters.setVerticalSpacing(3)
+        meters.setColumnStretch(1, 1)
+        for index, name in enumerate(
+            ("send", "return", "loopback_send", "loopback_return")
+        ):
+            title = label(name.replace("_", " ").title())
+            title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            meter = HorizontalLevelMeter()
+            peak = label("−∞ dBFS")
+            peak.setAlignment(Qt.AlignmentFlag.AlignRight)
+            peak.setMinimumWidth(82)
+            meters.addWidget(title, index, 0)
+            meters.addWidget(meter, index, 1)
+            meters.addWidget(peak, index, 2)
+            setattr(self, f"route_{name}_meter", meter)
+            setattr(self, f"route_{name}_peak", peak)
+        row.addWidget(self.route_meter_panel, 1)
         box.addLayout(row)
+        box.addWidget(self.route_status)
         self.audio_hint = label(
             "Tone3000 standard sweep and the fixed repository validation signal are bundled offline.\n"
             "Use your interface's normal driver; no Python, Anaconda or CUDA toolkit is required.",
@@ -393,6 +436,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             spin.valueChanged.connect(self.save_calibration)
         box.addLayout(form)
         self.capture_level = OutputLevelEdit(0.0)
+        self.capture_level.setMaximumWidth(260)
         self.instrument_calibration = QCheckBox("Instrument input at 0 dBFS")
         self.instrument_dbu = QDoubleSpinBox()
         self.instrument_dbu.setRange(-200, 200)
@@ -402,11 +446,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.instrument_calibration.toggled.connect(self.save_instrument_calibration)
         self.instrument_dbu.valueChanged.connect(self.save_instrument_calibration)
         self.capture_level.editingFinished.connect(self.save_capture_level)
-        attenuation_form = QFormLayout()
-        attenuation_form.addRow(
-            "Capture / validation output (dBFS peak)", self.capture_level
-        )
-        box.addLayout(attenuation_form)
+        form.addRow("Capture / validation output (dBFS peak)", self.capture_level)
         box.addWidget(button("Calibrate send and return…", self.calibrate_levels))
         box.addWidget(
             label(
@@ -451,7 +491,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             ["Name", "Type", "Range / positions", "Default"]
         )
         self.control_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
+            QHeaderView.ResizeMode.Interactive
+        )
+        for column, width in enumerate((200, 100, 320, 160)):
+            self.control_table.setColumnWidth(column, width)
+        self.control_table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.control_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -892,7 +937,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.queue_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive
         )
-        self.queue_table.horizontalHeader().setStretchLastSection(True)
+        self.queue_table.horizontalHeader().setStretchLastSection(False)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
         for column, width in enumerate((56, 140, 120, 110, 90, 100, 65, 85)):
@@ -936,8 +981,8 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         for index, (name, text) in enumerate(
             (
                 ("epoch", "EPOCH"),
-                ("esr", "BEST VALIDATION ESR (FULL)"),
-                ("train_esr", "BEST TRAIN ESR (FULL)"),
+                ("esr", "BEST VALIDATION ESR"),
+                ("train_esr", "BEST TRAIN ESR"),
                 ("elapsed", "ELAPSED"),
                 ("eta", "REMAINING"),
             )
@@ -1357,6 +1402,12 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.remember_setup()
         self.close_audio()
         selected = self.device.currentData()
+        wanted = (self.last_setup() or {}).get("audio", {})
+        identity = (
+            (selected.host_api, selected.name)
+            if selected
+            else (wanted.get("host_api"), wanted.get("input_device"))
+        )
         self._loading = True
         try:
             self.device.clear()
@@ -1367,19 +1418,42 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             ]
             for info in self._devices:
                 self.device.addItem(f"{info.name}  ·  {info.host_api}", info)
-            if selected:
-                for i, info in enumerate(self._devices):
-                    if (
-                        info.name == selected.name
-                        and info.host_api == selected.host_api
-                    ):
-                        self.device.setCurrentIndex(i)
-                        break
+            if identity[1]:
+                index = next(
+                    (
+                        i
+                        for i, info in enumerate(self._devices)
+                        if (info.host_api, info.name) == identity
+                    ),
+                    None,
+                )
+                if index is None:
+                    self.device.addItem(f"Unavailable: {identity[1]}", None)
+                    index = self.device.count() - 1
+                self.device.setCurrentIndex(index)
         except Exception as error:
             self.route_status.setText(str(error))
         finally:
             self._loading = False
         self._device_changed()
+
+    def _reconnect_device(self):
+        from PySide6.QtWidgets import QApplication
+
+        if self.busy() or self.session or QApplication.activeModalWidget():
+            return
+        if self.pages.currentIndex() != 6 and self.device.currentData() is not None:
+            return
+        try:
+            devices = [
+                d
+                for d in list_devices(refresh=True)
+                if d.max_input_channels > 0 and d.max_output_channels > 0
+            ]
+            if devices != self._devices:
+                self.refresh_devices()
+        except Exception:
+            pass  # A temporary driver error must not replace the saved interface.
 
     def _device_changed(self, *_):
         self.close_audio()
@@ -1476,6 +1550,19 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         )
 
     def _diagram(self):
+        required = bool(
+            self.workspace and self.capture_kind.currentData() == "parametric"
+        )
+        if required:
+            self.loop_enabled.blockSignals(True)
+            self.loop_enabled.setChecked(True)
+            self.loop_enabled.blockSignals(False)
+        self.loop_enabled.setEnabled(not required)
+        self.loop_enabled.setToolTip(
+            "A separate clean loopback is required for parametric captures."
+            if required
+            else "Use a separate clean timing reference."
+        )
         self.loop_input.setEnabled(self.loop_enabled.isChecked())
         self.loop_output.setEnabled(self.loop_enabled.isChecked())
 
@@ -1678,6 +1765,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                     sample_rate=session.project.sample_rate or 48000,
                     progress=progress,
                     cancel=cancel,
+                    meter=self.route_levels.emit,
                 ),
                 self._route_done,
             )
@@ -1690,6 +1778,19 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             + f" · Return peak {result.peak:.1f} dBFS"
             + (" · Clean loopback missing" if result.loopback_failed else "")
         )
+
+    def _route_metered(self, send, returned, loopback_send=0.0, loopback_return=0.0):
+        import math
+
+        for name, value in (
+            ("send", send),
+            ("return", returned),
+            ("loopback_send", loopback_send),
+            ("loopback_return", loopback_return),
+        ):
+            getattr(self, f"route_{name}_meter").set_levels([value])
+            text = f"{20 * math.log10(value):.1f} dBFS" if value > 1e-6 else "−∞ dBFS"
+            getattr(self, f"route_{name}_peak").setText(text)
 
     def refresh_controls(self):
         if not self.workspace:
@@ -1716,6 +1817,19 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 self.control_table.setItem(row, col, item)
+        self.control_table.resizeRowsToContents()
+        self.control_table.setFixedHeight(
+            max(
+                205,
+                self.control_table.horizontalHeader().height()
+                + sum(
+                    self.control_table.rowHeight(row)
+                    for row in range(self.control_table.rowCount())
+                )
+                + self.control_table.horizontalScrollBar().sizeHint().height()
+                + 4,
+            )
+        )
         self.refresh_recommendation()
 
     def _control_dialog(self, index=None):
@@ -1830,6 +1944,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             input_mode=self.signal_mode.currentData(),
         )
         static = prefs["capture_type"] == "static"
+        self._diagram()
         self.metadata_editor.set_name_visible(not static)
         self.batch_size.setToolTip(
             "16 matches the official NAM trainer default for static models. Reduce it if GPU memory is insufficient."
@@ -2170,6 +2285,15 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                     "Select an available audio interface in Project & routing."
                 )
             self.save_audio()
+            audio = self.audio_settings()
+            if self.workspace.project.capture_type == "parametric" and (
+                not audio.loopback_enabled
+                or audio.loopback_input_channel == audio.input_channel
+                or audio.loopback_output_channel == audio.output_channel
+            ):
+                raise ValueError(
+                    "Parametric captures require separate clean loopback input and output channels. Configure them in Settings."
+                )
             problem = timebase_problem(self.workspace.project, self.workspace.directory)
             if problem:
                 raise ValueError(problem)
@@ -2383,7 +2507,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             else 0
         )
         self.metrics["elapsed"].setText(duration(progress.get("elapsed", 0) + live))
-        self.metrics["eta"].setText(duration(progress.get("eta")))
+        eta = progress.get("eta")
+        self.metrics["eta"].setText(
+            duration(max(0, eta - live) if eta is not None else None)
+        )
         fraction = (
             progress.get("member", 0)
             + (max(0, epoch - 1) + progress.get("batch_fraction", 0)) / max(epochs, 1)

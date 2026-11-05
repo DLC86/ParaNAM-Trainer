@@ -49,7 +49,7 @@ def test_navigation_brand_recent_rows_and_responsive_queue(window, workspace, qa
     settle(qapp)
     assert all(button.text().startswith(" ") for button in window.steps)
     assert [button.text().strip() for button in window.steps] == [
-        "Project",
+        "Projects",
         "Plan",
         "Capture",
         "Train",
@@ -65,6 +65,7 @@ def test_navigation_brand_recent_rows_and_responsive_queue(window, workspace, qa
         for label in window.findChildren(QLabel)
     )
     from paranam import __version__
+
     assert window.version_label.text() == f"VERSION {__version__}"
     assert (
         window.version_label.mapTo(

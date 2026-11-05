@@ -38,7 +38,13 @@ class QueueActions:
         self.refresh_training()
 
     def run_queue(self):
-        self.queue_controller.start()
+        try:
+            if self.queue_controller.enabled or self.queue_controller.active_id:
+                self.queue_controller.pause_queue()
+            else:
+                self.queue_controller.start()
+        except Exception as error:
+            self.notify_error(error)
         if self.queue_controller.active_id:
             self.selected_job_id = self.queue_controller.active_id
         self.refresh_training()
@@ -286,12 +292,27 @@ class QueueActions:
         self.cancel_button.setEnabled(self.worker is not None)
         if hasattr(self, "play_start"):
             play_idle = self.play_worker is None and self.play_loader is None
-            self.play_start.setVisible(not listening)
-            self.play_stop.setVisible(listening)
+            self.play_start.setVisible(True)
+            self.play_stop.hide()
             self.play_quick_stop.setEnabled(listening and self.play_stop.isEnabled())
             self.play_start.setEnabled(
-                present and self._play_ready and play_idle and self.worker is None
+                present
+                and self._play_ready
+                and self.play_loader is None
+                and self.worker is None
             )
+            self.preview_start.setEnabled(self.play_start.isEnabled())
+            for mode, widget in (
+                ("instrument", self.play_start),
+                ("recording", self.preview_start),
+            ):
+                checked = listening and self._play_input_mode == mode
+                widget.blockSignals(True)
+                widget.setChecked(checked)
+                widget.blockSignals(False)
+                widget.setProperty("playing", checked)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
             self.play_open.setEnabled(self.play_loader is None and self.worker is None)
             self.play_refresh.setEnabled(
                 self.play_loader is None and self.worker is None
@@ -313,8 +334,28 @@ class QueueActions:
         state = entry["state"] if entry else None
         running = bool(entry and entry["id"] == self.queue_controller.active_id)
         self.queue_start_button.setEnabled(
-            any(e["state"] == "queued" for e in self.queue_controller.store.entries())
+            bool(self.queue_controller.active_id)
+            or any(
+                e["state"] == "queued" for e in self.queue_controller.store.entries()
+            )
+            or bool(self.queue_controller.paused_queue_id)
         )
+        pausing_queue = bool(
+            self.queue_controller.active_id
+            and not self.queue_controller.enabled
+            and self.queue_controller.paused_queue_id
+        )
+        self.queue_start_button.setText(
+            "Pausing queue…"
+            if pausing_queue
+            else (
+                "Pause queue"
+                if self.queue_controller.enabled or self.queue_controller.active_id
+                else "Start queue"
+            )
+        )
+        if pausing_queue:
+            self.queue_start_button.setEnabled(False)
         self.pause_button.setEnabled(
             state == "queued" or running and state not in ("pausing", "stopping")
         )
@@ -366,6 +407,7 @@ class QueueActions:
             self.additions.setEnabled(enabled)
 
     def closeEvent(self, event):
+        self.device_timer.stop()
         self.queue_controller.enabled = False
         if getattr(self, "play_worker", None):
             self.stop_playback()
@@ -388,4 +430,5 @@ class QueueActions:
         if self.workspace:
             self.workspace.save()
         self.close_audio()
+        self.timer.stop()
         event.accept()

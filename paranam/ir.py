@@ -38,8 +38,12 @@ class IRKernel:
 def prepare_ir(path, rate=48000):
     """Read/resample/normalize off the audio thread; retain at most two channels."""
     info = sf.info(path)
-    if info.channels not in (1, 2) or not 0 < info.duration <= 10:
-        raise ValueError("Choose a mono/stereo IR WAV lasting at most 10 seconds.")
+    if (
+        info.channels not in (1, 2)
+        or not math.isfinite(info.duration)
+        or info.duration <= 0
+    ):
+        raise ValueError("Choose a non-empty mono/stereo IR WAV.")
     taps, source_rate = sf.read(path, dtype="float64", always_2d=True)
     if not np.isfinite(taps).all() or not np.any(taps):
         raise ValueError("The IR contains silence or non-finite samples.")

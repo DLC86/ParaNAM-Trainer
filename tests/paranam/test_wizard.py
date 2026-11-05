@@ -208,7 +208,17 @@ def test_capture_rows_record_the_displayed_setting_after_route_reordering(
     window._attach(workspace)
     assert window._capture_entries[0] is original[1]
     assert window.scene.values["Gain"] == 0
-    window.device.addItem("Test interface", {"available": True})
+    from nam.capture.audio import DeviceInfo
+    from paranam.audio_devices import Capabilities
+
+    monkeypatch.setattr(
+        wizard,
+        "capabilities",
+        lambda info: Capabilities(
+            ("Return", "Loopback"), ("Send", "Loopback"), (2048,)
+        ),
+    )
+    window.device.addItem("Test interface", DeviceInfo(0, "Test", "ASIO", 2, 2, 48000))
     window.device.setCurrentIndex(window.device.count() - 1)
     window.rig_ready.setChecked(True)
     recorded = []

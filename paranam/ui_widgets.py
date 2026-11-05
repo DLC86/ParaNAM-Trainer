@@ -3,7 +3,16 @@
 import math
 
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QTableWidget,
     QStyledItemDelegate,
@@ -153,20 +162,41 @@ def navigation_icon(kind):
             p.save()
             p.translate(12, 12)
             p.rotate(38)
-            p.drawRoundedRect(QRectF(-1.5, -11, 3, 12), 1, 1)
-            p.drawEllipse(QRectF(-5, -1, 10, 11))
-            p.drawEllipse(QRectF(-3.5, -3, 7, 7))
-            p.drawEllipse(QPointF(0, 3), 1.3, 1.3)
+            p.drawRoundedRect(QRectF(-1, -9, 2, 11), 0.4, 0.4)
+            p.drawRoundedRect(QRectF(-1, -12, 3, 4), 0.8, 0.8)
+            body = QPainterPath(QPointF(-1, 1))
+            body.cubicTo(-3, 1, -2, -5, -4, -3)
+            body.cubicTo(-7, 0, -3, 1, -6, 5)
+            body.cubicTo(-9, 12, 8, 13, 6, 5)
+            body.cubicTo(5, 2, 3, 3, 4, 0)
+            body.cubicTo(5, -4, 2, -3, 1, 1)
+            body.closeSubpath()
+            p.drawPath(body)
+            p.drawLine(-2, 4, 2, 4)
+            p.drawLine(-2, 7, 2, 7)
             p.restore()
-        else:  # Settings gear.
-            for i in range(8):
-                angle = math.radians(i * 45)
-                p.drawLine(
-                    QPointF(12 + 8 * math.cos(angle), 12 + 8 * math.sin(angle)),
-                    QPointF(12 + 10.5 * math.cos(angle), 12 + 10.5 * math.sin(angle)),
+        elif kind == 6:  # Settings cog, with eight solid teeth.
+            outline = QPainterPath()
+            for i in range(32):
+                angle = math.radians(i * 360 / 32 - 5.625)
+                radius = 10 if i % 4 in (0, 1) else 7.8
+                point = QPointF(
+                    12 + radius * math.cos(angle), 12 + radius * math.sin(angle)
                 )
-            p.drawEllipse(QPointF(12, 12), 8, 8)
+                if i == 0:
+                    outline.moveTo(point)
+                else:
+                    outline.lineTo(point)
+            outline.closeSubpath()
+            p.drawPath(outline)
             p.drawEllipse(QPointF(12, 12), 3, 3)
+        elif kind == 7:  # Recorded-audio transport.
+            path = QPainterPath(QPointF(7, 3))
+            path.lineTo(21, 12)
+            path.lineTo(7, 21)
+            path.closeSubpath()
+            p.setBrush(QColor(color))
+            p.drawPath(path)
         p.end()
         icon.addPixmap(pixmap, QIcon.Mode.Normal, state)
     return icon

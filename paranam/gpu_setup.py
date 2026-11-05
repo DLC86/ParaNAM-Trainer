@@ -177,5 +177,11 @@ def show_setup(selected=False, parent=None):
     app = QApplication.instance() or QApplication([])
     load_font()
     dialog = GPUSetupDialog(selected, parent)
-    dialog.setStyleSheet(THEME)
+    from .signals import asset_path
+
+    dialog.setStyleSheet(
+        THEME.replace("CHECKMARK_URL", asset_path("checkmark.svg").as_posix()).replace(
+            "ASSET_ROOT", asset_path("checkmark.svg").parent.as_posix()
+        )
+    )
     return dialog.exec()

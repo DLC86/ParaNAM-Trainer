@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.5.6 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.6-preview)**
+**[Download ParaNAM Trainer 0.5.7 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.7-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -43,7 +43,7 @@ system libraries.
 
 ## The workflow
 
-The sidebar contains **Project → Plan → Capture → Train → Queue → Compare**.
+The sidebar contains **Projects → Plan → Capture → Train → Queue → Compare**.
 **Settings** stays at the bottom of the sidebar. You can return to earlier pages
 to edit the setup; changes that require new captures preserve the old recordings
 in the project's History.
@@ -52,13 +52,13 @@ The screenshots below show the current interface with a demonstration project
 and example audio-interface labels. The Queue chart uses illustrative history,
 not a model-quality or training-speed benchmark.
 
-### Project
+### Projects
 
 Create a project with **+ New project**, use **Open project…**, or double-click a
 recent project. Opening a project takes you directly to **Plan**. Projects are
 saved locally as you work, and file dialogs remember the last folder you opened.
 
-![Project — create, open and return to recent projects](docs/screenshots/projects.png)
+![Projects — create, open and return to recent projects](docs/screenshots/projects.png)
 
 ### Settings — routing and level calibration
 
@@ -199,11 +199,17 @@ finished instance’s configuration, allowing changes before a new instance is q
 Other training instances continue running independently. The **Name** column uses
 the model metadata name (the first member’s name for a static batch).
 
-The queue shows the epoch, best Validation Full ESR, best Train Full ESR, elapsed
-time and ETA. **Full ESR chart**, **Lite ESR chart** and **Training log** show both
+The queue shows the epoch, best Validation ESR, best Train ESR, elapsed
+time and ETA. Both best scores refer to Full. Remaining time updates from measured
+batch throughput, with measured validation overhead once available. The log includes
+iterations per second (it/s). **Full ESR chart**, **Lite ESR chart** and **Training log** show both
 sizes separately. Checkpoint selection uses **Validation Full ESR**; both sizes'
 scores are retained in exported metadata. Train ESR uses held-out audio from
 training captures, while Validation ESR uses the separate validation captures.
+While processing, **Start queue** becomes **Pause queue**. It pauses the current
+job and leaves the remaining jobs waiting. **Start queue** resumes that job first.
+Hover over either chart to inspect the nearest completed epoch: a vertical cursor
+and the legend show that epoch's Validation and Train ESR values.
 
 **Export best PNAM/NAM** is available once a suitable checkpoint exists, including
 paused or stopped jobs. The button caption follows the selected job's model type.
@@ -226,7 +232,12 @@ guarantees.
 ### Compare — play the model and the real gear
 
 The **Compare** sidebar page opens **Play & Compare**. Load a `.nam` or `.pnam`,
-select **Full** or **Lite** where supported, then choose **Play**. **Gear** and
+select **Full** or **Lite** where supported, then press the **guitar button** for
+live instrument input or the **play triangle** for a recorded audition signal.
+Only one input source plays at a time; press its button again to stop. The selector
+beside the triangle offers eight bundled TONE3000 preview inputs: Brit, Mayer,
+Power, Jazz Hop, Fast Thrash, Hammer Lead, Downtown Bass and Garden Bass.
+The same source feeds the model and the real reamp send. **Gear** and
 **Model** switch the monitored source using the routing from Settings.
 
 Input and Output both span **−20 to +20 dB**, with **0 dB** at the center. Parametric
@@ -242,6 +253,8 @@ Eminence, Mesa, Plate and Spring), plus custom mono/stereo WAV loading. IR defau
 to Off. Loading and resampling run in the background; changes crossfade during
 playback. IR processing adds 256 samples (5.33 ms at 48 kHz), affects both Gear
 and Model monitoring, and leaves the reamp send unchanged.
+Custom IRs have no fixed duration limit and retain their complete tail; memory and
+CPU requirements grow with the IR length.
 
 You can change the model, model size and playback buffer while playback is active.
 The playback buffer is independent of the capture buffer. Channel routing and
@@ -267,6 +280,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.5.7 changes](docs/release-0.5.7.md)
 - [0.5.6 changes](docs/release-0.5.6.md)
 - [0.5.5 changes](docs/release-0.5.5.md)
 - [Training controls and presets](docs/training-controls.md)

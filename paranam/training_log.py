@@ -5,11 +5,16 @@ import re
 from pathlib import Path
 
 
-def epoch_line(epoch, total, label, fraction, phase):
+def epoch_line(epoch, total, label, fraction, phase, iterations_per_second=None):
     fraction = max(0.0, min(float(fraction), 1.0))
     filled = int(24 * fraction)
     bar = "#" * filled + "." * (24 - filled)
-    return f"Epoch {epoch}/{total} | {label} | [{bar}] {fraction:6.1%} | {phase}"
+    speed = (
+        f" | {iterations_per_second:.2f} it/s"
+        if iterations_per_second is not None
+        else ""
+    )
+    return f"Epoch {epoch}/{total} | {label} | [{bar}] {fraction:6.1%}{speed} | {phase}"
 
 
 class TrainingLog:

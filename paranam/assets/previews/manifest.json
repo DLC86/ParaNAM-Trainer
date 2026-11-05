@@ -1,0 +1,39 @@
+{
+  "repository": "https://github.com/tone-3000/neural-amp-modeler-wasm",
+  "revision": "ea8dc285462d6cedd982691b9f090cd03dac04a2",
+  "license": "MIT",
+  "files": {
+    "Brit - Guitar.wav": {
+      "sha256": "167883b5001dbf4ff974781fce917c8e3b6234138500d0b054d4ebf13f2ac93f",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Brit%20-%20Guitar.wav"
+    },
+    "Mayer - Guitar.wav": {
+      "sha256": "b710d3cdda97300898bbfa5c2011d0c1fe3748b2a8ae9a58c42419bafc6f623f",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Mayer%20-%20Guitar.wav"
+    },
+    "Power - Guitar.wav": {
+      "sha256": "65fd7b09aee783ac4d446874c12b1bfc04b01f577494238db6ced55430d27958",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Power%20-%20Guitar.wav"
+    },
+    "Jazz Hop - Guitar.wav": {
+      "sha256": "4b03d1640a935cbe567f253c197f156dd49fcccdb6ab3ea561d4241beae2bc8e",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Jazz%20Hop%20-%20Guitar.wav"
+    },
+    "Fast Thrash - Guitar.wav": {
+      "sha256": "f47c8eb0cc0933d72c5f3cd4fa8730fc507d03b85046786926773e45a41b3ab8",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Fast%20Thrash%20-%20Guitar.wav"
+    },
+    "Hammer Lead - Guitar.wav": {
+      "sha256": "24a6a75c4d847697109254853d1d8b913918c795cb59c9cac8d90b5dab00d7e9",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Hammer%20Lead%20-%20Guitar.wav"
+    },
+    "Downtown - Bass.wav": {
+      "sha256": "29c0d9276655edae7f614f31125d9ce134c2d35be228db6657f505d2a5fcd67c",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Downtown%20-%20Bass.wav"
+    },
+    "Garden - Bass.wav": {
+      "sha256": "45f4d51ac27427ecb4edd666e8e28a923d7f81d201a0ea764bb171428e37c36c",
+      "source": "https://raw.githubusercontent.com/tone-3000/neural-amp-modeler-wasm/ea8dc285462d6cedd982691b9f090cd03dac04a2/ui/public/inputs/Garden%20-%20Bass.wav"
+    }
+  }
+}

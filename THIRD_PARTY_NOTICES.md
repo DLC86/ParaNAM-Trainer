@@ -52,3 +52,10 @@ Copyright (c) 2026 TONE3000. MIT license; the complete upstream UI license
 is included as `paranam/assets/irs/LICENSE.txt`. `manifest.json` records
 source URLs and SHA-256 digests. IR normalization follows the upstream
 `ui/src/audio/irGain.ts` left-channel, 64-frequency mean-power method.
+
+## TONE3000 preview inputs
+
+The eight bundled audition WAVs in `paranam/assets/previews` come from the
+TONE3000 web preview player, under its MIT license. Original file names, pinned
+source URLs and SHA-256 hashes are retained in that directory's `manifest.json`;
+the complete upstream license is included as `LICENSE.txt` and bundled with the app.

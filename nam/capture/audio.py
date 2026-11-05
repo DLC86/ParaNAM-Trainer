@@ -409,6 +409,7 @@ class PlaybackRecorder(_Protocol):
         host_api: _Optional[str] = None,
         progress: _Optional[_Callable[[float], None]] = None,
         cancel: _Optional[_Callable[[], bool]] = None,
+        meter: _Optional[_Callable[[float, float, float, float], None]] = None,
     ) -> _Tuple[_np.ndarray, _Optional[_np.ndarray]]:
         """
         Play ``playback`` (mono, float32 in [-1, 1]) on ``output_channel`` (1-based)
@@ -428,6 +429,8 @@ class PlaybackRecorder(_Protocol):
 
         ``progress`` is called with a fraction in [0, 1]; ``cancel`` is polled and a
         truthy return aborts the stream by raising :class:`CaptureCancelled`.
+        ``meter`` receives linear send, return, loopback-send and loopback-return
+        peak levels from the polling thread, never the real-time callback.
 
         Raises :class:`AudioDropoutError` if the stream over- or underflowed, since the
         recording is then silently missing samples.
@@ -507,6 +510,7 @@ class SounddeviceRecorder:
         host_api: _Optional[str] = None,
         progress: _Optional[_Callable[[float], None]] = None,
         cancel: _Optional[_Callable[[], bool]] = None,
+        meter=None,
     ) -> _Tuple[_np.ndarray, _Optional[_np.ndarray]]:
         import sounddevice as sd
 
@@ -528,6 +532,7 @@ class SounddeviceRecorder:
                 blocksize=blocksize,
                 progress=progress,
                 cancel=cancel,
+                **({"meter": meter} if meter is not None else {}),
             )
 
         self.close()
@@ -609,12 +614,59 @@ class SounddeviceRecorder:
         started = _time.monotonic()
         try:
             stream = sd.get_stream()
+            metered = 0
             while stream.active:
                 if cancel is not None and cancel():
                     raise CaptureCancelled()
                 if progress is not None:
                     elapsed = _time.monotonic() - started
                     progress(min(elapsed / duration, 1.0))
+                if meter is not None:
+                    # Read only an already recorded region, leaving the host latency
+                    # and one polling interval behind the current audio callback.
+                    latency_in = (
+                        stream.latency[0]
+                        if isinstance(stream.latency, tuple)
+                        else stream.latency
+                    )
+                    end = min(
+                        len(playback),
+                        max(
+                            0,
+                            int(
+                                (_time.monotonic() - started - latency_in - 0.05)
+                                * sample_rate
+                            ),
+                        ),
+                    )
+                    if end > metered:
+                        meter(
+                            float(_np.max(_np.abs(playback[metered:end]))),
+                            float(
+                                _np.max(
+                                    _np.abs(recording[metered:end, input_channel - 1])
+                                )
+                            ),
+                            (
+                                float(_np.max(_np.abs(loopback_playback[metered:end])))
+                                if use_loopback
+                                else 0.0
+                            ),
+                            (
+                                float(
+                                    _np.max(
+                                        _np.abs(
+                                            recording[
+                                                metered:end, loopback_input_channel - 1
+                                            ]
+                                        )
+                                    )
+                                )
+                                if use_loopback
+                                else 0.0
+                            ),
+                        )
+                        metered = end
                 sd.sleep(self._POLL_MS)
             sd.wait()
         except BaseException:
@@ -627,4 +679,11 @@ class SounddeviceRecorder:
         loopback = (
             recording[:, loopback_input_channel - 1].copy() if use_loopback else None
         )
+        if meter is not None:
+            meter(
+                float(_np.max(_np.abs(playback))),
+                float(_np.max(_np.abs(main))),
+                float(_np.max(_np.abs(loopback_playback))) if use_loopback else 0.0,
+                float(_np.max(_np.abs(loopback))) if use_loopback else 0.0,
+            )
         return main, loopback
