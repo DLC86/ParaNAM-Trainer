@@ -163,6 +163,9 @@ Its preview shows update counts and the resulting final learning rates.
 The **A2 — slower (knobs × 2^switches)** variant keeps the same reduction
 factor, with `n = knobs × 2^switches`: two knobs and no switches give 2×;
 two knobs and one switch give 4×; two knobs and two switches give 8×.
+**A2 Slow** divides that factor by √2: `(knobs × 2^switches) / √2`.
+For example, two knobs and no switches give approximately 1.414×. Fractional
+update progress is retained across reductions and checkpoint resume.
 Switch position counts do not enter the formula. For switch-only models,
 the knob multiplier is one. Both initial rates remain editable.
 New projects default to **HyperWaveNet**, this scaled LR preset, **100 epochs**,

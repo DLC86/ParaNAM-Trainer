@@ -851,9 +851,13 @@ class _ParametricLightningModule(_LightningModule):
         )
         if self._scheduler_config is None:
             return optimizer
-        base_scheduler = getattr(
-            _torch.optim.lr_scheduler, self._scheduler_config["class"]
-        )(optimizer, **self._scheduler_config["kwargs"])
+        if self._scheduler_config["class"] == "UpdateCadenceLR":
+            from ._lr_scheduler import UpdateCadenceLR as scheduler_class
+        else:
+            scheduler_class = getattr(
+                _torch.optim.lr_scheduler, self._scheduler_config["class"]
+            )
+        base_scheduler = scheduler_class(optimizer, **self._scheduler_config["kwargs"])
         warmup_epochs = self._scheduler_config.get("warmup_epochs") or 0
         if warmup_epochs > 0:
             warmup = _torch.optim.lr_scheduler.LinearLR(

@@ -289,9 +289,10 @@ def make_job(workspace, resume=False, job_directory=None):
             "manual",
             "a2_updates",
             "a2_controls",
+            "a2_slow",
         ):
             raise ValueError(
-                "Choose Manual, A2 cadence or A2 controls-scaled cadence as the learning-rate preset"
+                "Choose Manual, A2 cadence, A2 controls-scaled cadence or A2 Slow as the learning-rate preset"
             )
         if not math.isfinite(options["learning_rate"]) or options["learning_rate"] <= 0:
             raise ValueError("Learning rate must be finite and positive")
@@ -377,8 +378,9 @@ def make_job(workspace, resume=False, job_directory=None):
         if not is_static and options.get("rate_preset", "manual") in (
             "a2_updates",
             "a2_controls",
+            "a2_slow",
         ):
-            from .recipes import a2_update_schedule, control_cadence_multiplier
+            from .recipes import a2_update_schedule, rate_cadence_multiplier
 
             schedule = a2_update_schedule(
                 data,
@@ -389,14 +391,16 @@ def make_job(workspace, resume=False, job_directory=None):
                 options["learning_rate"],
                 options["hypernetwork_learning_rate"],
                 options["lr_decay"],
-                cadence_multiplier=(
-                    control_cadence_multiplier(workspace.project)
-                    if options["rate_preset"] == "a2_controls"
-                    else 1
+                cadence_multiplier=rate_cadence_multiplier(
+                    workspace.project, options["rate_preset"]
                 ),
             )
             model["lr_scheduler"] = {
-                "class": "StepLR",
+                "class": (
+                    "UpdateCadenceLR"
+                    if options["rate_preset"] == "a2_slow"
+                    else "StepLR"
+                ),
                 "kwargs": {
                     "gamma": schedule["reference_gamma"],
                     "step_size": schedule["decay_steps"],

@@ -719,9 +719,10 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         rate_preset.addItem("Manual / per-epoch decay", "manual")
         rate_preset.addItem("A2 — same cadence per optimizer update", "a2_updates")
         rate_preset.addItem("A2 — slower (knobs × 2^switches)", "a2_controls")
+        rate_preset.addItem("A2 Slow", "a2_slow")
         rate_preset.setToolTip(
             "The controls-scaled preset keeps the A2 reduction factor but multiplies "
-            "the number of updates between reductions by knobs × 2^switches."
+            "the number of updates between reductions by knobs × 2^switches. A2 Slow divides that factor by √2."
         )
         self.advanced_fields["rate_preset"] = rate_preset
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
@@ -982,6 +983,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         if self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
+            "a2_slow",
         ):
             for key, value in (
                 ("learning_rate", 0.004),
@@ -1003,6 +1005,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
+            "a2_slow",
         )
         self.advanced_fields["lr_decay"].setEnabled(not matched)
         self.advanced_fields["lr_decay"].setToolTip(
@@ -1017,12 +1020,17 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             from .recipes import workspace_update_schedule
 
             schedule = workspace_update_schedule(self.workspace)
+            formula = {
+                "a2_updates": "original A2 cadence",
+                "a2_controls": "knobs × 2^switches",
+                "a2_slow": "(knobs × 2^switches) / √2",
+            }[self.advanced_fields["rate_preset"].currentData()]
             self.rate_preview.setText(
                 f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "
                 f"This plan: {schedule['steps_per_epoch']} updates/epoch, {schedule['training_seconds']:.1f} s of training audio.\n"
-                f"Cadence multiplier: {schedule['cadence_multiplier']}× "
-                f"({'knobs × 2^switches' if self.advanced_fields['rate_preset'].currentData() == 'a2_controls' else 'original A2 cadence'}). "
-                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['decay_steps']} optimizer updates; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
+                f"Cadence multiplier: {schedule['cadence_multiplier']:g}× "
+                f"({formula}). "
+                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['decay_steps']:.8g} optimizer updates on average; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
                 f"After {self.workspace.preferences['epochs']} epochs: LR {schedule['final_learning_rate']:.3e}, "
                 f"hypernetwork LR {schedule['final_hypernetwork_learning_rate']:.3e} "
                 f"({schedule['reductions']} LR reductions; {schedule['equivalent_a2_epochs']:.1f} reference A2 epochs of updates). "

@@ -13,6 +13,13 @@ def control_cadence_multiplier(project):
     return max(1, knobs) * 2**switches
 
 
+def rate_cadence_multiplier(project, preset):
+    if preset not in ("a2_controls", "a2_slow"):
+        return 1
+    factor = control_cadence_multiplier(project)
+    return factor / math.sqrt(2) if preset == "a2_slow" else factor
+
+
 def training_preset(name):
     if name not in ("HyperA2", "HyperWaveNet"):
         raise ValueError(f"Unknown training preset: {name}")
@@ -75,10 +82,11 @@ def a2_update_schedule(
         )
     if (
         isinstance(cadence_multiplier, bool)
-        or not isinstance(cadence_multiplier, int)
-        or cadence_multiplier < 1
+        or not isinstance(cadence_multiplier, (int, float))
+        or not math.isfinite(cadence_multiplier)
+        or cadence_multiplier <= 0
     ):
-        raise ValueError("The A2 cadence multiplier must be a positive integer")
+        raise ValueError("The A2 cadence multiplier must be a positive finite number")
     receptive_field = (
         1
         + sum((k - 1) * d for k, d in zip(_WAVENET_KERNEL_SIZES, _WAVENET_DILATIONS))
@@ -125,14 +133,19 @@ def a2_update_schedule(
         total_seconds += count / x.samplerate
     if steps < 1:
         raise ValueError("Apply a capture plan before calculating the A2 cadence")
-    decay_steps = reference_steps * cadence_multiplier
-    reductions = steps * epochs // decay_steps
+    interval = reference_steps * cadence_multiplier
+    decay_steps = int(interval) if float(interval).is_integer() else interval
+    reductions = math.floor(steps * epochs / decay_steps)
     factor = reference_gamma**reductions
     return dict(
         protocol=(
-            "a2-standard-update-cadence-v1"
-            if cadence_multiplier == 1
-            else "a2-standard-update-cadence-scaled-v1"
+            "a2-standard-update-cadence-fractional-v1"
+            if not float(interval).is_integer()
+            else (
+                "a2-standard-update-cadence-v1"
+                if cadence_multiplier == 1
+                else "a2-standard-update-cadence-scaled-v1"
+            )
         ),
         reference_steps=reference_steps,
         cadence_multiplier=cadence_multiplier,
@@ -171,9 +184,7 @@ def workspace_update_schedule(workspace):
         options["learning_rate"],
         options["hypernetwork_learning_rate"],
         options["lr_decay"],
-        cadence_multiplier=(
-            control_cadence_multiplier(project)
-            if options.get("rate_preset") == "a2_controls"
-            else 1
+        cadence_multiplier=rate_cadence_multiplier(
+            project, options.get("rate_preset", "a2_updates")
         ),
     )

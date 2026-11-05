@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from nam.capture.params import KnobSpec, SwitchSpec
@@ -11,11 +13,13 @@ from paranam.workspace import Workspace, read_json
 from tests.paranam.test_workflow055 import ready_audio
 
 
+@pytest.mark.parametrize("preset", ["a2_controls", "a2_slow"])
 @pytest.mark.parametrize(
     "controls",
     [
         [KnobSpec("Gain", 0, 10)],
         [KnobSpec("Gain", 0, 10), KnobSpec("Tone", 0, 10)],
+        [KnobSpec("Gain", 0, 10), KnobSpec("Tone", 0, 10), KnobSpec("Bass", 0, 10)],
         [KnobSpec("Gain", 0, 10), SwitchSpec("Bright", ("Off", "On"))],
         [
             KnobSpec("Gain", 0, 10),
@@ -25,7 +29,7 @@ from tests.paranam.test_workflow055 import ready_audio
     ],
 )
 def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
-    workspace, controls
+    workspace, controls, preset
 ):
     import torch
     from nam.train.parametric import _ParametricLightningModule
@@ -33,12 +37,14 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     workspace.draft_controls = [control.to_dict() for control in controls]
     workspace.preferences.update(n_train=4, n_validation=2)
     ready_audio(workspace)
-    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_controls")
+    workspace.preferences["advanced_parametric"] = dict(rate_preset=preset)
     workspace.save()
     job = training.make_job(workspace)
     spec = read_json(job / "spec.json")
     schedule = spec["preferences"]["rate_schedule"]
-    count = control_cadence_multiplier(workspace.project)
+    count = control_cadence_multiplier(workspace.project) / (
+        math.sqrt(2) if preset == "a2_slow" else 1
+    )
     assert schedule["cadence_multiplier"] == count
     assert schedule["decay_steps"] == schedule["reference_steps"] * count
     assert (
@@ -52,7 +58,10 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     assert schedule["gamma_epoch"] == pytest.approx(
         original["gamma_epoch"] ** (1 / count)
     )
-    assert schedule["reductions"] == original["reductions"] // count
+    assert schedule["reductions"] == math.floor(
+        schedule["steps_per_epoch"] * 2 / schedule["decay_steps"]
+    )
+    assert isinstance(schedule["decay_steps"], float if preset == "a2_slow" else int)
     assert schedule["final_learning_rate"] == pytest.approx(
         0.004 * 0.994 ** schedule["reductions"]
     )
@@ -66,7 +75,7 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     scheduler = configured["lr_scheduler"]["scheduler"]
     assert configured["lr_scheduler"]["interval"] == "step"
     initial = [group["lr"] for group in optimizer.param_groups]
-    for _ in range(schedule["decay_steps"] - 1):
+    for _ in range(math.ceil(schedule["decay_steps"]) - 1):
         optimizer.step()
         scheduler.step()
     assert [group["lr"] for group in optimizer.param_groups] == initial
@@ -96,34 +105,85 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     assert not training.job_can_resume(workspace, job)
 
 
-def test_scaled_preset_preview_and_selection_are_saved(window, workspace):
+@pytest.mark.parametrize(
+    "preset,expected", [("a2_controls", 2), ("a2_slow", math.sqrt(2))]
+)
+def test_scaled_preset_preview_and_selection_are_saved(
+    window, workspace, preset, expected
+):
     workspace.draft_controls.append(SwitchSpec("Bright", ("Off", "On")).to_dict())
     workspace.preferences.update(n_train=4, n_validation=2)
     ready_audio(workspace)
     window._attach(workspace)
     selector = window.advanced_fields["rate_preset"]
-    selector.setCurrentIndex(selector.findData("a2_controls"))
+    selector.setCurrentIndex(selector.findData(preset))
     selector.activated.emit(selector.currentIndex())
     schedule = workspace_update_schedule(workspace)
-    assert "Cadence multiplier: 2×" in window.rate_preview.text()
+    assert f"Cadence multiplier: {expected:g}×" in window.rate_preview.text()
+    if preset == "a2_slow":
+        assert selector.currentText() == "A2 Slow"
+        assert "(knobs × 2^switches) / √2" in window.rate_preview.text()
     assert (
-        f"every {schedule['decay_steps']} optimizer updates"
+        f"every {schedule['decay_steps']:.8g} optimizer updates"
         in window.rate_preview.text()
     )
     assert not window.advanced_fields["lr_decay"].isEnabled()
-    assert (
-        Workspace(workspace.directory).training_options()["rate_preset"]
-        == "a2_controls"
-    )
+    assert Workspace(workspace.directory).training_options()["rate_preset"] == preset
     selector.setCurrentIndex(selector.findData("a2_updates"))
     selector.activated.emit(selector.currentIndex())
     assert workspace_update_schedule(workspace)["cadence_multiplier"] == 1
     assert "original A2 cadence" in window.rate_preview.text()
 
 
-@pytest.mark.parametrize("factor", [0, -1, True, 1.5])
+@pytest.mark.parametrize("factor", [0, -1, True, "1", None, float("nan"), float("inf")])
 def test_schedule_rejects_invalid_cadence_multipliers(tmp_path, factor):
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="positive finite number"):
         a2_update_schedule(
             {}, tmp_path, 16, 8192, 2, 0.004, 0.0004, cadence_multiplier=factor
         )
+
+
+def test_fractional_update_boundaries_do_not_drift_and_survive_resume():
+    import torch
+    from nam.train._lr_scheduler import UpdateCadenceLR
+
+    parameters = [torch.nn.Parameter(torch.zeros(1)) for _ in range(2)]
+    optimizer = torch.optim.Adam(
+        [
+            {"params": [parameters[0]], "lr": 0.004},
+            {"params": [parameters[1]], "lr": 0.0004},
+        ]
+    )
+    interval = 62 * 2 / math.sqrt(2)
+    scheduler = UpdateCadenceLR(optimizer, step_size=interval)
+    observed = []
+    previous = scheduler.get_last_lr()
+    for step in range(1, 2001):
+        optimizer.step()
+        scheduler.step()
+        if scheduler.get_last_lr() != previous:
+            observed.append(step)
+        previous = scheduler.get_last_lr()
+        if step == 351:
+            optimizer_state, scheduler_state = (
+                optimizer.state_dict(),
+                scheduler.state_dict(),
+            )
+            optimizer = torch.optim.Adam(
+                [
+                    {"params": [parameters[0]], "lr": 0.004},
+                    {"params": [parameters[1]], "lr": 0.0004},
+                ]
+            )
+            scheduler = UpdateCadenceLR(optimizer, step_size=1)
+            optimizer.load_state_dict(optimizer_state)
+            scheduler.load_state_dict(scheduler_state)
+            assert scheduler.step_size == interval
+    expected = [
+        math.ceil(k * interval) for k in range(1, 24) if math.ceil(k * interval) <= 2000
+    ]
+    assert observed == expected
+    assert observed[:4] == [88, 176, 264, 351]
+    assert scheduler.get_last_lr() == pytest.approx(
+        [0.004 * 0.994 ** len(expected), 0.0004 * 0.994 ** len(expected)]
+    )

@@ -72,6 +72,17 @@ saved job specification show the multiplier, actual update interval, reduction
 count and final rates. Resume restores the scheduler counter; changing the
 preset requires a new training instance.
 
+**A2 Slow** uses `n = (knobs × 2^switches) / √2`. Initial rates and decay
+match the other A2 presets. Both rates are reduced by 0.994 every `62 × n`
+optimizer updates on average. For two knobs, zero/one/two switches give factors
+about 1.414×/2.828×/5.657×. One knob and no switches gives about 0.707×.
+The interval is not rounded to a fixed number of updates: reductions occur at
+`ceil(k × 62 × n)` for each reduction k, preserving fractional progress across
+updates and checkpoint resume. For two knobs and no switches, for example, the
+interval averages 87.68124 updates, with reductions at 88, 176, 264, 351, … .
+The existing control-based preset remains the new-project default. Saved jobs
+retain their scheduler and counter; changing presets requires a new instance.
+
 Control-based scaling is an optional heuristic for optimization, not a guarantee
 of better validation or generalization. A large capture set and a long epoch
 budget can still make the final rates very small; inspect the preview before

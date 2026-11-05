@@ -164,6 +164,23 @@ def main():
         app = QApplication.instance() or QApplication([])
         window = WizardWindow()
         window.close()
+        # Exercise the fractional scheduler in the frozen binary as well as in
+        # source tests, including state restoration across an LR boundary.
+        import math
+        from nam.train._lr_scheduler import UpdateCadenceLR
+
+        optimizer = torch.optim.Adam([torch.nn.Parameter(torch.zeros(1))], lr=0.004)
+        interval = 62 * 2 / math.sqrt(2)
+        scheduler = UpdateCadenceLR(optimizer, step_size=interval)
+        for _ in range(math.ceil(interval) - 1):
+            optimizer.step()
+            scheduler.step()
+        state = scheduler.state_dict()
+        scheduler = UpdateCadenceLR(optimizer, step_size=1)
+        scheduler.load_state_dict(state)
+        optimizer.step()
+        scheduler.step()
+        assert scheduler.get_last_lr() == [0.004 * 0.994]
         Path(args[1]).write_text(
             json.dumps(
                 {
@@ -173,6 +190,7 @@ def main():
                     "mps": torch.backends.mps.is_available(),
                     "architecture": "HyperA2",
                     "bundled_irs": ir_count,
+                    "fractional_lr_cadence": True,
                     "default_optimizer": window.advanced_fields[
                         "optimizer"
                     ].currentData(),

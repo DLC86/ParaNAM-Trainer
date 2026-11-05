@@ -32,6 +32,12 @@
   no switch = 2×; with one switch = 4×; with two = 8×. Switch position counts are
   irrelevant; switch-only models use a knob multiplier of one. Preview and newly
   created jobs use the same formula. Existing jobs resume their saved scheduler.
+- Added the separate **A2 Slow** learning-rate preset with factor
+  `(knobs × 2^switches) / √2`. Fractional update cadence is retained rather than
+  rounded: two knobs and no switches average 87.68124 optimizer updates between
+  reductions. The scheduler counter and interval survive checkpoint resume.
+  Initial rates and decay match the other A2 cadence presets. Existing presets,
+  new-project defaults and saved scheduler states are preserved.
 - New projects default to HyperWaveNet, the slower A2 LR preset and 100 epochs.
   Batch size is 32; initial audio/hypernetwork LR is 0.004/0.0004. Existing project
   and training-instance settings are retained. Static training keeps its A2
