@@ -153,7 +153,8 @@ hidden here. Exported filenames follow the model Name, with filesystem-safe
 characters.
 
 **Advanced training settings** is collapsed by default. It contains Batch Size,
-Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, LR Decay, NY, Fit MRSTFT,
+Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, separate LR presets and
+manual decay controls for the audio network and hypernetwork, NY, Fit MRSTFT,
 MRSTFT Weight, Weight Decay and the parametric hypernetwork options. The HyperWaveNet preset uses **AdamW**. HyperA2 and static A2 use batch 16 by default; selecting the
 reference HyperWaveNet recipe initializes its batch and settings separately.
 
@@ -171,6 +172,10 @@ the knob multiplier is one. Both initial rates remain editable.
 New projects default to **HyperWaveNet**, this scaled LR preset, **100 epochs**,
 and batch 32. The LR preset initializes audio/hypernetwork LR to 0.004/0.0004.
 Saved projects and existing training instances keep their settings.
+**Hypernetwork learning-rate preset** defaults to Follow, preserving the shared
+cadence. Select a separate preset to decay audio and hypernetwork at different
+rates; Manual hypernetwork decay has its own per-epoch multiplier. The preview
+shows each schedule and final LR separately. Saved jobs restore both counters.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 

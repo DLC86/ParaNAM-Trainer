@@ -294,6 +294,17 @@ def make_job(workspace, resume=False, job_directory=None):
             raise ValueError(
                 "Choose Manual, A2 cadence, A2 controls-scaled cadence or A2 Slow as the learning-rate preset"
             )
+        if options.get("hypernetwork_rate_preset", "follow") not in (
+            "follow",
+            "manual",
+            "a2_updates",
+            "a2_controls",
+            "a2_slow",
+        ):
+            raise ValueError("Choose a listed hypernetwork learning-rate preset")
+        hyper_decay = options.get("hypernetwork_lr_decay", options["lr_decay"])
+        if not math.isfinite(hyper_decay) or not 0 <= hyper_decay <= 1:
+            raise ValueError("Hypernetwork LR Decay must be between 0 and 1")
         if not math.isfinite(options["learning_rate"]) or options["learning_rate"] <= 0:
             raise ValueError("Learning rate must be finite and positive")
         if options["gradient_clipping"] and (
@@ -375,7 +386,35 @@ def make_job(workspace, resume=False, job_directory=None):
         from .evaluation import PROTOCOL, reserve_validation_audio
 
         reserve_validation_audio(data)
-        if not is_static and options.get("rate_preset", "manual") in (
+        if (
+            not is_static
+            and options.get("hypernetwork_rate_preset", "follow") != "follow"
+        ):
+            from .recipes import rate_group_schedule
+
+            schedules = {
+                name: rate_group_schedule(
+                    workspace.project,
+                    data,
+                    workspace.directory,
+                    prefs["batch_size"],
+                    prefs["epochs"],
+                    options,
+                    hypernetwork=hyper,
+                )
+                for name, hyper in (("audio", False), ("hypernetwork", True))
+            }
+            model["lr_scheduler"] = {
+                "class": "IndependentGroupLR",
+                "kwargs": {
+                    name: {
+                        key: schedule[key] for key in ("interval", "step_size", "gamma")
+                    }
+                    for name, schedule in schedules.items()
+                },
+            }
+            prefs["rate_schedule"] = schedules
+        elif not is_static and options.get("rate_preset", "manual") in (
             "a2_updates",
             "a2_controls",
             "a2_slow",

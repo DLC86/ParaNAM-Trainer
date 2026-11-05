@@ -484,6 +484,8 @@ class Workspace:
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
         options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
+        options.setdefault("hypernetwork_rate_preset", "follow")
+        options.setdefault("hypernetwork_lr_decay", options["lr_decay"])
         hyper_a2 = options["hypernetwork_recipe"] == "HyperA2"
         options.setdefault("hypernetwork_mode", "full" if hyper_a2 else "low_rank")
         options.setdefault("hypernetwork_rank", 2)
@@ -557,6 +559,17 @@ class Workspace:
             data["settings"]["advanced_training"] = self.training_options()
             if data["settings"]["advanced_training"].get("rate_preset") == "manual":
                 data["settings"]["advanced_training"].pop("rate_preset")
+            if (
+                self.project.capture_type == "static"
+                or data["settings"]["advanced_training"].get(
+                    "hypernetwork_rate_preset", "follow"
+                )
+                == "follow"
+            ):
+                data["settings"]["advanced_training"].pop(
+                    "hypernetwork_rate_preset", None
+                )
+                data["settings"]["advanced_training"].pop("hypernetwork_lr_decay", None)
             if not include_optimizer:
                 data["settings"]["advanced_training"].pop("optimizer")
             if not include_gradient_safety:

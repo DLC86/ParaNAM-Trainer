@@ -16,8 +16,8 @@ class UpdateCadenceLR(LRScheduler):
     def __init__(self, optimizer, step_size, gamma=0.994, last_epoch=-1):
         if not math.isfinite(step_size) or step_size <= 0:
             raise ValueError("step_size must be positive and finite")
-        if not math.isfinite(gamma) or not 0 < gamma <= 1:
-            raise ValueError("gamma must be finite and in (0, 1]")
+        if not math.isfinite(gamma) or not 0 <= gamma <= 1:
+            raise ValueError("gamma must be finite and in [0, 1]")
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch=last_epoch)
@@ -28,3 +28,20 @@ class UpdateCadenceLR(LRScheduler):
 
     def get_lr(self):
         return self._get_closed_form_lr()
+
+
+class GroupUpdateCadenceLR(UpdateCadenceLR):
+    """Advance one group's clock without changing another scheduler's rates."""
+
+    def __init__(self, optimizer, group_index, step_size, gamma=0.994, last_epoch=-1):
+        if not 0 <= group_index < len(optimizer.param_groups):
+            raise ValueError("Invalid optimizer group index")
+        self.group_index = group_index
+        super().__init__(optimizer, step_size, gamma, last_epoch)
+
+    def _get_closed_form_lr(self):
+        selected = super()._get_closed_form_lr()[self.group_index]
+        return [
+            selected if index == self.group_index else group["lr"]
+            for index, group in enumerate(self.optimizer.param_groups)
+        ]

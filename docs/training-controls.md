@@ -44,8 +44,15 @@ capture or ensemble member has its own displayed history.
 ## Advanced training settings
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** can be set
-independently. Both use the same selected LR schedule. Hypernetwork controls
-apply only to parametric training.
+independently. **Hypernetwork learning-rate preset** defaults to **Follow
+learning-rate preset**, preserving the shared schedule. Select Manual, the
+original A2 cadence, the control-scaled cadence, or A2 Slow independently to
+give the hypernetwork a different clock. Manual hypernetwork scheduling uses
+its own **Hypernetwork LR Decay** once per epoch; A2 presets use optimizer
+updates. The preview shows the two intervals and final rates separately.
+Selecting a hypernetwork preset initializes only its own rate/decay; changing
+the main preset leaves an independently configured hypernetwork rate intact.
+Hypernetwork controls apply only to parametric training.
 
 The optional **A2 — same cadence per optimizer update** learning-rate preset
 starts at audio LR 0.004 and hypernetwork LR 0.0004. Both rates remain editable.
@@ -67,7 +74,7 @@ LRs are 0.004 (audio) and 0.0004 (hypernetwork), as when selecting the LR preset
 manually. Batch defaults to the HyperWaveNet recipe’s 32. Previously saved
 projects retain their settings. Already-created jobs retain their frozen update
 interval and scheduler state, including the older control-count formula.
-Both the audio and hypernetwork LR follow the slower schedule. The preview and
+In Follow mode, both the audio and hypernetwork LR follow the selected schedule. The preview and
 saved job specification show the multiplier, actual update interval, reduction
 count and final rates. Resume restores the scheduler counter; changing the
 preset requires a new training instance.

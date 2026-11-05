@@ -167,7 +167,7 @@ def main():
         # Exercise the fractional scheduler in the frozen binary as well as in
         # source tests, including state restoration across an LR boundary.
         import math
-        from nam.train._lr_scheduler import UpdateCadenceLR
+        from nam.train._lr_scheduler import UpdateCadenceLR, GroupUpdateCadenceLR
 
         optimizer = torch.optim.Adam([torch.nn.Parameter(torch.zeros(1))], lr=0.004)
         interval = 62 * 2 / math.sqrt(2)
@@ -181,6 +181,23 @@ def main():
         optimizer.step()
         scheduler.step()
         assert scheduler.get_last_lr() == [0.004 * 0.994]
+        parameters = [torch.nn.Parameter(torch.zeros(1)) for _ in range(2)]
+        optimizer = torch.optim.Adam(
+            [
+                {"params": [parameters[0]], "lr": 0.004},
+                {"params": [parameters[1]], "lr": 0.0004},
+            ]
+        )
+        schedulers = [
+            GroupUpdateCadenceLR(optimizer, 0, 1.5, 0.9),
+            GroupUpdateCadenceLR(optimizer, 1, 3, 0.8),
+        ]
+        for _ in range(3):
+            optimizer.step()
+            for scheduler in schedulers:
+                scheduler.step()
+        assert math.isclose(optimizer.param_groups[0]["lr"], 0.004 * 0.9**2)
+        assert math.isclose(optimizer.param_groups[1]["lr"], 0.0004 * 0.8)
         Path(args[1]).write_text(
             json.dumps(
                 {
@@ -191,6 +208,7 @@ def main():
                     "architecture": "HyperA2",
                     "bundled_irs": ir_count,
                     "fractional_lr_cadence": True,
+                    "independent_lr_cadences": True,
                     "default_optimizer": window.advanced_fields[
                         "optimizer"
                     ].currentData(),

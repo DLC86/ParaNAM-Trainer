@@ -188,3 +188,75 @@ def workspace_update_schedule(workspace):
             project, options.get("rate_preset", "a2_updates")
         ),
     )
+
+
+def rate_group_schedule(
+    project, data, directory, batch_size, epochs, options, *, hypernetwork=False
+):
+    """Serializable scheduler/preview description for one independently timed group."""
+    preset = (
+        options.get("hypernetwork_rate_preset", "follow")
+        if hypernetwork
+        else options["rate_preset"]
+    )
+    follow = preset == "follow"
+    if follow:
+        preset = options["rate_preset"]
+    rate = options["hypernetwork_learning_rate" if hypernetwork else "learning_rate"]
+    gamma = (
+        options.get("hypernetwork_lr_decay", options["lr_decay"])
+        if hypernetwork and not follow
+        else options["lr_decay"]
+    )
+    if preset == "manual":
+        return dict(
+            preset=preset,
+            interval="epoch",
+            step_size=1,
+            gamma=gamma,
+            initial_learning_rate=rate,
+            final_learning_rate=rate * gamma**epochs,
+            reductions=epochs,
+        )
+    schedule = a2_update_schedule(
+        data,
+        directory,
+        batch_size,
+        options["ny"],
+        epochs,
+        rate,
+        rate,
+        gamma,
+        cadence_multiplier=rate_cadence_multiplier(project, preset),
+    )
+    return dict(
+        schedule,
+        preset=preset,
+        interval="step",
+        step_size=schedule["decay_steps"],
+        gamma=gamma,
+        initial_learning_rate=rate,
+    )
+
+
+def workspace_group_schedules(workspace):
+    from nam.capture.export import build_data_config
+    from .evaluation import reserve_validation_audio
+
+    project = workspace.project.model_copy(deep=True)
+    for entry in project.entries:
+        entry.status = "captured"
+    data = build_data_config(project)
+    reserve_validation_audio(data)
+    return {
+        name: rate_group_schedule(
+            project,
+            data,
+            workspace.directory,
+            workspace.training_batch_size(),
+            workspace.preferences["epochs"],
+            workspace.training_options(),
+            hypernetwork=hyper,
+        )
+        for name, hyper in (("audio", False), ("hypernetwork", True))
+    }

@@ -678,6 +678,7 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
                 9,
             ),
             ("lr_decay", "LR Decay", 0.994, 0, 1, 6),
+            ("hypernetwork_lr_decay", "Hypernetwork LR Decay", 0.994, 0, 1, 6),
             ("ny", "NY (samples)", 8192, 1, 1048576, 0),
             ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
             ("weight_decay", "Weight Decay", 3.17e-7, 0, 10, 12),
@@ -727,13 +728,27 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         self.advanced_fields["rate_preset"] = rate_preset
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
         rate_preset.activated.connect(self.apply_rate_preset)
+        hyper_rate_preset = QComboBox()
+        hyper_rate_preset.addItem("Follow learning-rate preset", "follow")
+        for index in range(rate_preset.count()):
+            hyper_rate_preset.addItem(
+                rate_preset.itemText(index), rate_preset.itemData(index)
+            )
+        hyper_rate_preset.setToolTip(
+            "Follow keeps the existing shared cadence. Select a separate preset to decay only the hypernetwork at a different pace."
+        )
+        self.advanced_fields["hypernetwork_rate_preset"] = hyper_rate_preset
+        advanced_form.insertRow(
+            2, "Hypernetwork learning-rate preset", hyper_rate_preset
+        )
+        hyper_rate_preset.activated.connect(self.apply_hypernetwork_rate_preset)
         self.rate_preview = label("", "muted")
         self.rate_preview.setWordWrap(True)
         advanced_form.addRow(self.rate_preview)
         self.preset_description = label("", "muted")
         advanced_form.addRow(self.preset_description)
         self.advanced_fields["hypernetwork_learning_rate"].setToolTip(
-            "Independent learning rate for the knob-to-weight network. Both learning rates decay together. Parametric training only."
+            "Independent learning rate for the knob-to-weight network. Its cadence can follow the main preset or use a separate preset. Parametric training only."
         )
         self.advanced_fields["learning_rate"].setToolTip(
             "Learning rate for the base audio-network weights."
@@ -987,12 +1002,35 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
         ):
             for key, value in (
                 ("learning_rate", 0.004),
-                ("hypernetwork_learning_rate", 0.0004),
                 ("lr_decay", 0.994),
             ):
                 self.advanced_fields[key].blockSignals(True)
                 self.advanced_fields[key].setValue(value)
                 self.advanced_fields[key].blockSignals(False)
+            if (
+                self.advanced_fields["hypernetwork_rate_preset"].currentData()
+                == "follow"
+            ):
+                self.advanced_fields["hypernetwork_learning_rate"].blockSignals(True)
+                self.advanced_fields["hypernetwork_learning_rate"].setValue(0.0004)
+                self.advanced_fields["hypernetwork_learning_rate"].blockSignals(False)
+        self.save_preferences()
+
+    def apply_hypernetwork_rate_preset(self, *_):
+        if not self.workspace or self._loading:
+            return
+        if self.advanced_fields["hypernetwork_rate_preset"].currentData() not in (
+            "follow",
+            "manual",
+        ):
+            for key, value in (
+                ("hypernetwork_learning_rate", 0.0004),
+                ("hypernetwork_lr_decay", 0.994),
+            ):
+                field = self.advanced_fields[key]
+                field.blockSignals(True)
+                field.setValue(value)
+                field.blockSignals(False)
         self.save_preferences()
 
     def refresh_rate_preview(self, kind=None):
@@ -1002,6 +1040,11 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         self.advanced_fields["rate_preset"].setEnabled(parametric)
+        hyper_preset = self.advanced_fields["hypernetwork_rate_preset"].currentData()
+        self.advanced_fields["hypernetwork_rate_preset"].setEnabled(parametric)
+        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(
+            parametric and hyper_preset == "manual"
+        )
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
@@ -1013,6 +1056,28 @@ class WizardWindow(UIPreferences, QueueActions, PlayActions, QMainWindow):
             if matched
             else "Exponential learning-rate multiplier after each epoch."
         )
+        if parametric and hyper_preset != "follow":
+            self.rate_preview.setVisible(True)
+            try:
+                from .recipes import workspace_group_schedules
+
+                schedules = workspace_group_schedules(self.workspace)
+                descriptions = []
+                for name, schedule in schedules.items():
+                    unit = (
+                        "epochs"
+                        if schedule["interval"] == "epoch"
+                        else "optimizer updates on average"
+                    )
+                    descriptions.append(
+                        f"{name.title()}: {schedule['preset']}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs."
+                    )
+                self.rate_preview.setText(
+                    "Independent LR schedules.\n" + "\n".join(descriptions)
+                )
+            except (ValueError, OSError, RuntimeError) as error:
+                self.rate_preview.setText(f"LR cadence preview unavailable: {error}")
+            return
         self.rate_preview.setVisible(matched)
         if not matched:
             return

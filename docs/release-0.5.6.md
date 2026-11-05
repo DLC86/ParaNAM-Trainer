@@ -38,6 +38,12 @@
   reductions. The scheduler counter and interval survive checkpoint resume.
   Initial rates and decay match the other A2 cadence presets. Existing presets,
   new-project defaults and saved scheduler states are preserved.
+- Added **Hypernetwork learning-rate preset**, defaulting to Follow. Audio and
+  hypernetwork can independently select Manual, original A2, control-scaled A2,
+  or A2 Slow, including mixed per-epoch/per-update clocks. Manual hypernetwork
+  decay has its own multiplier. Preview and saved jobs retain both schedules;
+  checkpoints restore both counters. Existing Follow jobs retain their original
+  scheduler, parameter-group layout and resume fingerprint.
 - New projects default to HyperWaveNet, the slower A2 LR preset and 100 epochs.
   Batch size is 32; initial audio/hypernetwork LR is 0.004/0.0004. Existing project
   and training-instance settings are retained. Static training keeps its A2

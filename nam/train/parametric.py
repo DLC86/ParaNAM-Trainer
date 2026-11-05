@@ -831,7 +831,11 @@ class _ParametricLightningModule(_LightningModule):
         # AdamW as the legacy fallback for pre-selection parametric configurations;
         # ParaNAM explicitly selects Adam for new training jobs.
         parameters = None
-        if self._hypernet_lr_scale != 1.0:
+        independent_rates = (
+            self._scheduler_config is not None
+            and self._scheduler_config["class"] == "IndependentGroupLR"
+        )
+        if self._hypernet_lr_scale != 1.0 or independent_rates:
             # A readout coefficient affects many conditioned audio weights. The
             # static A2 LR is not an equivalent step in this parameter space.
             hyper = [
@@ -851,6 +855,24 @@ class _ParametricLightningModule(_LightningModule):
         )
         if self._scheduler_config is None:
             return optimizer
+        if independent_rates:
+            from ._lr_scheduler import GroupUpdateCadenceLR
+
+            schedulers = []
+            for index, name in enumerate(("audio", "hypernetwork")):
+                schedule = self._scheduler_config["kwargs"][name]
+                scheduler = GroupUpdateCadenceLR(
+                    optimizer, index, schedule["step_size"], schedule["gamma"]
+                )
+                schedulers.append(
+                    dict(
+                        scheduler=scheduler,
+                        interval=schedule["interval"],
+                        frequency=1,
+                        name=name + "_lr",
+                    )
+                )
+            return [optimizer], schedulers
         if self._scheduler_config["class"] == "UpdateCadenceLR":
             from ._lr_scheduler import UpdateCadenceLR as scheduler_class
         else:
