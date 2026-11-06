@@ -118,7 +118,10 @@ def test_presets_and_independent_hypernetwork_lr_are_saved(window, workspace):
     configured = _ParametricLightningModule.init_from_config(
         spec["model"]
     ).configure_optimizers()
-    assert configured["optimizer"].param_groups[-1]["lr"] == pytest.approx(0.0013)
+    optimizers, schedules = configured
+    assert optimizers[0].param_groups[-1]["lr"] == pytest.approx(0.0013)
+    assert len(schedules) == 2
+    assert all(schedule["interval"] == "epoch" for schedule in schedules)
     selector.setCurrentIndex(selector.findData("HyperA2"))
     window.apply_training_preset()
     assert window.batch_size.value() == 16
