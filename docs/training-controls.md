@@ -36,7 +36,9 @@ Long lines scroll horizontally so an epoch does not wrap into multiple rows.
 
 The chart below the log has **Full ESR chart** and **Lite ESR chart** tabs. Each
 shows Validation ESR (solid blue) and Train ESR (dashed orange) for its own model
-size at each completed epoch, on a labelled logarithmic axis. Lower values are better. Missing or
+size at each completed epoch, on a labelled logarithmic axis. The horizontal axis
+is fixed to the job's planned total epochs, including before the first epoch;
+adding points does not change their horizontal spacing. Lower values are better. Missing or
 nonfinite values break a curve rather than becoming a misleading point. History
 is saved with progress and checkpoints and survives pause/resume. Each static
 capture or ensemble member has its own displayed history.
@@ -87,12 +89,17 @@ normalization is not recomputed mid-training. Changing a preset requires a new
 training instance. No schedule guarantees better validation ESR or generalization;
 normalization trades faster decay for a comparable progression per dataset epoch.
 
-Old projects and jobs keep their saved choices and effective clocks. When an old
-project uses an earlier scheduler, its selector displays a **Legacy:** entry:
-original A2 (`62`), control-scaled (`62 × knobs × 2^switches`), or A2 Slow
-(`62 × knobs × 2^switches / sqrt(2)`). These choices are retained for compatibility
-and do not appear as new choices in a fresh project. No old run, checkpoint,
-queue entry or project is automatically migrated to a new schedule.
+The original A2, control-scaled A2 and A2 Slow presets have been removed.
+Old project settings using them select Dataset-normalized when preparing a new
+training. Existing jobs using a removed preset cannot resume or launch in 0.6.0;
+use Retrain with the new choices. Their recordings, history and checkpoints are
+kept, and completed best checkpoints remain available for export.
+
+In static capture mode, hypernetwork-specific fields and their labels are hidden,
+including the parametric recipe selector, LR/preset/decay, weight mode/rank,
+convolution conditioning and Full/Lite parametric loss reduction. Common static
+training settings remain visible. Switching back restores the saved parametric
+values.
 
 **Hypernetwork weight mode** selects Full or Low rank independently of
 **Condition dilated convolution kernels on knobs**. All four combinations are supported.
@@ -141,8 +148,7 @@ topologies, validation and compilation settings are common to both recipes.
 
 HyperA2 retains the advanced fields of the saved 06/11 02:52 training,
 with the subsequently requested dataset-normalized audio/hypernetwork schedules
-and its preset label changed to HyperA2. Existing jobs retain their saved label
-and effective settings; no preset migration is applied to them.
+and its preset label changed to HyperA2. Old jobs retain their saved label and files; removed-scheduler jobs cannot resume.
 
 The HyperWaveNet settings were verified against Phillip Self's
 [capture exporter](https://github.com/phillipmself/neural-amp-modeler-parametric/blob/a3684411076be69dab53505df14922487697f2cf/nam/capture/export.py)

@@ -178,15 +178,16 @@ the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `
 is the complete updates per project training epoch after validation audio is
 excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
 shows actual counts, intervals and final rates. Manual per-epoch decay and Follow
-for the hypernetwork remain available. Existing projects display their saved
-older scheduler as a Legacy entry and retain its behavior on resume.
+for the hypernetwork remain available. The original A2, control-scaled A2 and A2 Slow choices have been removed.
+Jobs using them cannot resume after upgrading; use Retrain with a new preset.
 
 New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 retains
 the requested 06/11 02:52 advanced configuration (Adam, audio/hypernetwork LR
 0.004/0.0004, rank-2 deltas, dilated convolution kernels excluded, clipping,
 NaN/Inf scanning and cuDNN benchmark off), with the subsequently requested linear
 dataset-normalized schedule for both rates. Initial rates remain editable.
-Existing projects and training instances keep their settings and both counters.
+Existing recordings and checkpoints are kept. New-scheduler jobs retain both
+counters on resume. Hypernetwork settings are hidden in static capture mode.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 
@@ -335,3 +336,17 @@ Unexpected-shutdown recovery preserves damaged files, restores valid state backu
 and rebuilds training progress from complete checkpoints. A recovery notice explains
 what was recovered; **Review recovery** offers backup restoration and queue rebuilding
 when automatic repair is insufficient. See [recovery details](docs/state-recovery.md).
+
+### Updates
+
+The app checks the published Latest release on GitHub in the background at launch.
+A newer version offers **Download and install**, **Release notes**, and **Dismiss**.
+Dismiss is remembered for that release, with a clickable blinking LED beside VERSION;
+a subsequent release can notify again. Downloads are checked against GitHub's SHA-256
+and size. Installation waits for a safe app shutdown, pausing active training first.
+Native installers update the installed application and reopen it; system authorization
+may be requested on macOS or Debian. Linux portable updates retain the previous app
+folder. No update replaces project recordings, queue data or checkpoints.
+Every audio routing selector also offers **None**; required capture/playback routes
+must be assigned before starting those operations. Unassigned Settings meter channels
+read silence and do not receive test noise.

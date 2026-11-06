@@ -75,7 +75,7 @@ def test_reconnected_interface_restores_identity_and_route_automatically(
         ),
     )
     window.refresh_devices()
-    window.input_channel.setCurrentIndex(2)
+    window.input_channel.setCurrentIndex(window.input_channel.findData(3))
     available.clear()
     window.refresh_devices()
     assert window.device.currentData() is None

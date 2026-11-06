@@ -514,6 +514,10 @@ class SounddeviceRecorder:
     ) -> _Tuple[_np.ndarray, _Optional[_np.ndarray]]:
         import sounddevice as sd
 
+        if input_channel is None or output_channel is None:
+            raise AudioDeviceError(
+                "Select a Send output and Return input before capturing audio."
+            )
         if host_api == "ASIO":
             from ._asio_stream import AsioRecorder
 

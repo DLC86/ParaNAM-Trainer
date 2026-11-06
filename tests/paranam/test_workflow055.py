@@ -80,7 +80,7 @@ def test_a2_cadence_counts_real_batches_and_preserves_optimizer_step_decay(works
     from paranam.recipes import a2_update_schedule
 
     ready_audio(workspace)
-    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_updates")
+    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_dataset")
     job = training.make_job(workspace)
     spec = read_json(job / "spec.json")
     module = _ParametricLightningModule.init_from_config(spec["model"])
@@ -101,7 +101,7 @@ def test_a2_cadence_counts_real_batches_and_preserves_optimizer_step_decay(works
         configured["lr_scheduler"]["scheduler"],
     )
     initial = [group["lr"] for group in optimizer.param_groups]
-    for _ in range(schedule["reference_steps"] - 1):
+    for _ in range(schedule["decay_steps"] - 1):
         optimizer.step()
         scheduler.step()
     assert [group["lr"] for group in optimizer.param_groups] == initial
@@ -128,10 +128,10 @@ def test_a2_cadence_counts_real_batches_and_preserves_optimizer_step_decay(works
 
 def test_rate_preset_preview_persists_and_updates_with_batch(window, workspace):
     ready_audio(workspace)
-    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_updates")
+    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_dataset")
     window._attach(workspace)
     selector = window.advanced_fields["rate_preset"]
-    selector.setCurrentIndex(selector.findData("a2_updates"))
+    selector.setCurrentIndex(selector.findData("a2_dataset"))
     selector.activated.emit(selector.currentIndex())
     assert not window.advanced_fields["lr_decay"].isEnabled()
     assert "reference" in window.rate_preview.text()
@@ -140,7 +140,7 @@ def test_rate_preset_preview_persists_and_updates_with_batch(window, workspace):
     window.batch_size.setValue(2)
     assert window.rate_preview.text() != first
     assert (
-        Workspace(workspace.directory).training_options()["rate_preset"] == "a2_updates"
+        Workspace(workspace.directory).training_options()["rate_preset"] == "a2_dataset"
     )
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert not selector.isEnabled() and window.rate_preview.isHidden()

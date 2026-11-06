@@ -86,6 +86,10 @@ def job_can_resume(workspace, job):
     if not job:
         return False
     spec = read_json(Path(job) / "spec.json", {})
+    from .recipes import uses_removed_rate_preset
+
+    if uses_removed_rate_preset(spec):
+        return False
     from .evaluation import PROTOCOL
 
     if spec.get("evaluation_protocol") != PROTOCOL:
@@ -255,6 +259,10 @@ def make_job(workspace, resume=False, job_directory=None):
                     "Older checkpoints already learned those segments; existing captures can be reused."
                 )
             if job:
+                from .recipes import uses_removed_rate_preset, REMOVED_RATE_MESSAGE
+
+                if uses_removed_rate_preset(read_json(job / "spec.json")):
+                    raise ValueError(REMOVED_RATE_MESSAGE)
                 from .recovery import ensure_resume_checkpoint
 
                 ensure_resume_checkpoint(job, lock_held=True)
@@ -318,9 +326,6 @@ def make_job(workspace, resume=False, job_directory=None):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
         if options.get("rate_preset", "manual") not in (
             "manual",
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
@@ -328,9 +333,6 @@ def make_job(workspace, resume=False, job_directory=None):
         if options.get("hypernetwork_rate_preset", "follow") not in (
             "follow",
             "manual",
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
@@ -448,13 +450,10 @@ def make_job(workspace, resume=False, job_directory=None):
             }
             prefs["rate_schedule"] = schedules
         elif not is_static and options.get("rate_preset", "manual") in (
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
-            from .recipes import a2_update_schedule, rate_cadence_multiplier
+            from .recipes import a2_update_schedule
 
             schedule = a2_update_schedule(
                 data,
@@ -465,9 +464,6 @@ def make_job(workspace, resume=False, job_directory=None):
                 options["learning_rate"],
                 options["hypernetwork_learning_rate"],
                 options["lr_decay"],
-                cadence_multiplier=rate_cadence_multiplier(
-                    workspace.project, options["rate_preset"]
-                ),
                 normalization=(
                     options["rate_preset"]
                     if options["rate_preset"] in ("a2_dataset", "a2_dataset_sqrt")
@@ -475,12 +471,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 ),
             )
             model["lr_scheduler"] = {
-                "class": (
-                    "UpdateCadenceLR"
-                    if options["rate_preset"]
-                    in ("a2_slow", "a2_dataset", "a2_dataset_sqrt")
-                    else "StepLR"
-                ),
+                "class": "UpdateCadenceLR",
                 "kwargs": {
                     "gamma": schedule["reference_gamma"],
                     "step_size": schedule["decay_steps"],
@@ -1354,6 +1345,10 @@ def run_job(job):
     from nam.train.parametric import main as train
 
     spec = read_json(job / "spec.json")
+    from .recipes import uses_removed_rate_preset, REMOVED_RATE_MESSAGE
+
+    if uses_removed_rate_preset(spec):
+        raise ValueError(REMOVED_RATE_MESSAGE)
     apply_backend_flags(spec)
     workspace = Workspace(Path(spec["project"]))
     shared = job_progress(job)

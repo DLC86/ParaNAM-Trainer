@@ -379,8 +379,17 @@ class QueueActions:
                 or training.job_progress(self.job).get("recovery_required")
             )
         )
+        from .recipes import uses_removed_rate_preset
+
+        removed_schedule = bool(
+            self.job
+            and uses_removed_rate_preset(
+                read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
+            )
+        )
         resumable = (
-            not recovery_blocked
+            not removed_schedule
+            and not recovery_blocked
             and state in FINISHED - {"completed", "needs_captures"}
             and not running
             and not exporting
@@ -432,6 +441,10 @@ class QueueActions:
                 self.queue_start_button.setEnabled(False)
 
     def closeEvent(self, event):
+        if not self.stop_update_workers():
+            self._close_after_pause = True
+            event.ignore()
+            return
         self._closing_settings_audio = True
         if getattr(self, "_audio_device_events", None) is not None:
             from PySide6.QtWidgets import QApplication
@@ -464,4 +477,6 @@ class QueueActions:
             self.workspace.save()
         self.close_audio()
         self.timer.stop()
+        if getattr(self, "_update_dialog", None) is not None:
+            self._update_dialog.accept()
         event.accept()

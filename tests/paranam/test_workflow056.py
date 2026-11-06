@@ -18,7 +18,6 @@ from paranam.ir import (
     prepare_ir,
 )
 from paranam.play_ui import ControlValue, SlideSwitch, SwitchPositions
-from paranam.recipes import control_cadence_multiplier
 from paranam.workspace import Workspace
 from tests.paranam.test_queue import small_ready
 
@@ -190,17 +189,6 @@ def test_ir_loader_keeps_previous_valid_ir_on_failure(
     assert "could not be loaded" in window.play_ir_status.text()
     window.play_ir.setCurrentIndex(0)
     assert window._ir_kernel is None and window._ir_processor is None
-
-
-@pytest.mark.parametrize(
-    "knobs,switches,expected",
-    [(2, 0, 2), (2, 1, 4), (2, 2, 8), (3, 1, 6), (3, 2, 12), (1, 1, 2), (0, 1, 2)],
-)
-def test_cadence_formula(knobs, switches, expected):
-    controls = [SimpleNamespace(type="knob") for _ in range(knobs)] + [
-        SimpleNamespace(type="switch") for _ in range(switches)
-    ]
-    assert control_cadence_multiplier(SimpleNamespace(knobs=controls)) == expected
 
 
 @pytest.mark.parametrize("stereo", [False, True])

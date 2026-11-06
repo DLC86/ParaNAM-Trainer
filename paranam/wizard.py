@@ -77,6 +77,7 @@ from .queue_ui import QueueActions
 from .play_ui import PlayActions, HorizontalLevelMeter
 from .settings_audio import SettingsAudioActions, AudioDeviceEvents
 from .recovery_ui import RecoveryActions
+from .updates import UpdateActions
 from .queue_controller import QueueController
 from .ui_preferences import UIPreferences
 from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
@@ -122,6 +123,7 @@ class WizardWindow(
     PlayActions,
     SettingsAudioActions,
     RecoveryActions,
+    UpdateActions,
     QMainWindow,
 ):
     capture_stage = Signal(str)
@@ -197,6 +199,7 @@ class WizardWindow(
         )
         self.device_timer.start()
         self.navigate(0)
+        self.setup_updates()
 
     def _build(self):
         central = QWidget(self)
@@ -227,7 +230,19 @@ class WizardWindow(
         brand_text = QVBoxLayout()
         brand_text.setSpacing(4)
         brand_text.addWidget(self.brand_title)
-        brand_text.addWidget(self.version_label)
+        version_row = QHBoxLayout()
+        version_row.setContentsMargins(0, 0, 0, 0)
+        version_row.setSpacing(5)
+        version_row.addWidget(self.version_label)
+        self.update_led = QToolButton()
+        self.update_led.setText("●")
+        self.update_led.setFixedSize(15, 18)
+        self.update_led.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_led.setAccessibleName("New ParaNAM version available")
+        self.update_led.hide()
+        version_row.addWidget(self.update_led)
+        version_row.addStretch()
+        brand_text.addLayout(version_row)
         self.brand_title.ensurePolished()
         self.version_label.ensurePolished()
         logo_height = (
@@ -373,17 +388,19 @@ class WizardWindow(
             self.loop_output,
             self.loop_input,
         ):
+            spin.addItem("None", None)
             spin.addItem("Channel name unavailable", 1)
             spin.addItem("Channel name unavailable", 2)
-        self.loop_output.setCurrentIndex(1)
-        self.loop_input.setCurrentIndex(1)
+            spin.setCurrentIndex(spin.findData(1))
+        self.loop_output.setCurrentIndex(self.loop_output.findData(2))
+        self.loop_input.setCurrentIndex(self.loop_input.findData(2))
         form.addRow("Output → reamp / rig", self.output_channel)
         form.addRow("Input ← load box / microphone", self.input_channel)
         self.instrument_input, self.monitor_left, self.monitor_right = [
             QComboBox() for _ in range(3)
         ]
         for combo in (self.instrument_input, self.monitor_left, self.monitor_right):
-            combo.addItem("Not configured", None)
+            combo.addItem("None", None)
         form.addRow("Instrument input ← guitar", self.instrument_input)
         form.addRow("Monitor out L → speakers / headphones", self.monitor_left)
         form.addRow("Monitor out R → speakers / headphones", self.monitor_right)
@@ -1061,14 +1078,6 @@ class WizardWindow(
         for key, field in self.advanced_fields.items():
             field.blockSignals(True)
             if isinstance(field, QComboBox):
-                if key in ("rate_preset", "hypernetwork_rate_preset"):
-                    from .recipes import LEGACY_RATE_PRESETS
-
-                    for index in reversed(range(field.count())):
-                        if field.itemData(index) in LEGACY_RATE_PRESETS:
-                            field.removeItem(index)
-                    if options[key] in LEGACY_RATE_PRESETS:
-                        field.addItem(LEGACY_RATE_PRESETS[options[key]], options[key])
                 field.setCurrentIndex(max(0, field.findData(options[key])))
             elif isinstance(field, QCheckBox):
                 field.setChecked(options[key])
@@ -1099,9 +1108,6 @@ class WizardWindow(
         if not self.workspace or self._loading:
             return
         if self.advanced_fields["rate_preset"].currentData() in (
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
@@ -1151,9 +1157,6 @@ class WizardWindow(
             parametric and hyper_preset == "manual"
         )
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         )
@@ -1203,9 +1206,6 @@ class WizardWindow(
 
             schedule = workspace_update_schedule(self.workspace)
             formula = {
-                "a2_updates": "original A2 cadence",
-                "a2_controls": "knobs × 2^switches",
-                "a2_slow": "(knobs × 2^switches) / √2",
                 "a2_dataset": "dataset updates / reference updates",
                 "a2_dataset_sqrt": "√(dataset updates / reference updates)",
             }[self.advanced_fields["rate_preset"].currentData()]
@@ -1230,11 +1230,25 @@ class WizardWindow(
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         for key in (
+            "hypernetwork_recipe",
+            "hypernetwork_learning_rate",
+            "hypernetwork_rate_preset",
+            "hypernetwork_lr_decay",
+            "hypernetwork_mode",
+            "hypernetwork_rank",
+            "condition_dilated_convolutions",
+            "branch_loss_reduction",
+        ):
+            self.advanced_panel.layout().setRowVisible(
+                self.advanced_fields[key], parametric
+            )
+        for key in (
             "hypernetwork_mode",
             "condition_dilated_convolutions",
             "branch_loss_reduction",
         ):
             self.advanced_fields[key].setEnabled(parametric)
+        self.preset_description.setVisible(parametric)
         low_rank = self.advanced_fields["hypernetwork_mode"].currentData() == "low_rank"
         self.advanced_fields["hypernetwork_rank"].setEnabled(parametric and low_rank)
         mode = (
@@ -1542,8 +1556,7 @@ class WizardWindow(
                 )
                 combo.blockSignals(True)
                 combo.clear()
-                if default is None:
-                    combo.addItem("Not configured", None)
+                combo.addItem("None", None)
                 for number, name in enumerate(names, 1):
                     combo.addItem(name, number)
                 combo.setCurrentIndex(max(0, combo.findData(previous)))
@@ -1583,11 +1596,11 @@ class WizardWindow(
             host_api=info.host_api if info else None,
             input_device=info.name if info else None,
             output_device=info.name if info else None,
-            input_channel=self.input_channel.currentData() or 1,
+            input_channel=self.input_channel.currentData(),
             instrument_input_channel=self.instrument_input.currentData(),
             monitor_output_left=self.monitor_left.currentData(),
             monitor_output_right=self.monitor_right.currentData(),
-            output_channel=self.output_channel.currentData() or 1,
+            output_channel=self.output_channel.currentData(),
             loopback_input_channel=(
                 self.loop_input.currentData() if self.loop_enabled.isChecked() else None
             ),
@@ -1683,6 +1696,13 @@ class WizardWindow(
             self.notify_error("Select your audio interface before calibrating.")
             return
         try:
+            if (
+                self.input_channel.currentData() is None
+                or self.output_channel.currentData() is None
+            ):
+                raise ValueError(
+                    "Select a Send output and Return input before calibrating."
+                )
             self.close_audio()
             dialog = LevelCalibrationDialog(
                 self.device.currentData(),
@@ -2313,6 +2333,10 @@ class WizardWindow(
                 )
             self.save_audio()
             audio = self.audio_settings()
+            if audio.input_channel is None or audio.output_channel is None:
+                raise ValueError(
+                    "Select a Send output and Return input in Settings before capturing."
+                )
             if self.workspace.project.capture_type == "parametric" and (
                 not audio.loopback_enabled
                 or audio.loopback_input_channel == audio.input_channel
@@ -2463,8 +2487,14 @@ class WizardWindow(
 
     def _render_job_progress(self):
         progress = training.job_progress(self.job)
+        spec = (
+            read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
+            if self.job
+            else {}
+        )
+        total_epochs = spec.get("preferences", {}).get("epochs")
         if not progress:
-            self.esr_chart.set_history([])
+            self.esr_chart.set_history([], total_epochs)
             entry = (
                 self.queue_controller.store.get(self.selected_job_id)
                 if self.selected_job_id
@@ -2479,7 +2509,7 @@ class WizardWindow(
             self.train_progress.setValue(0)
             self.update_enabled()
             return
-        self.esr_chart.set_history(progress.get("esr_history", []))
+        self.esr_chart.set_history(progress.get("esr_history", []), total_epochs)
         status = progress.get("status", "starting")
         selected = (
             self.queue_controller.store.get(self.selected_job_id)

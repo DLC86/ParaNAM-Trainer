@@ -16,6 +16,10 @@ def main():
     if sys.platform == "win32":
         os.environ.setdefault("SD_ENABLE_ASIO", "1")
     args = sys.argv[1:]
+    if args and args[0] == "--apply-update":
+        from .update_install import apply_update
+
+        return apply_update(args[1])
     if args and args[0] == "--gpu-probe":
         from .gpu_runtime import write_probe
 
@@ -141,6 +145,7 @@ def main():
         report.write_text(json.dumps(result), encoding="utf-8")
         return 0 if result["ok"] else 1
     if args and args[0] == "--self-test":
+        os.environ["PARANAM_DISABLE_UPDATE_CHECK"] = "1"
         if sys.stdout is None:
             sys.stdout = open(os.devnull, "w")
         if sys.stderr is None:
@@ -287,7 +292,16 @@ def main():
         window = WizardWindow()
         window.show()
         splash.finish(window)
-        return app.exec()
+        result = app.exec()
+        if window._pending_update:
+            from .update_install import launch_pending_update
+
+            try:
+                launch_pending_update(window._pending_update)
+            except Exception as error:
+                QMessageBox.critical(None, "Update could not start", str(error))
+                return 1
+        return result
     except Exception as error:
         import traceback
 

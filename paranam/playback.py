@@ -151,7 +151,7 @@ def validate_route(device, audio, require_instrument=True):
     )
     if any(c is None for c in (*incoming, *outgoing)):
         raise ValueError(
-            "Select Instrument input and both Monitor outputs in Settings."
+            "Select Send output, Return input, Instrument input and both Monitor outputs in Settings."
         )
     if len(set(incoming)) != len(incoming):
         raise ValueError(

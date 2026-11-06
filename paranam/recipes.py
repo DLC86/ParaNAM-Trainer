@@ -6,25 +6,22 @@ from pathlib import Path
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
 DATASET_RATE_PRESETS = ("a2_dataset", "a2_dataset_sqrt")
-LEGACY_RATE_PRESETS = {
-    "a2_updates": "Legacy: A2 per-update cadence",
-    "a2_controls": "Legacy: A2 knobs × 2^switches",
-    "a2_slow": "Legacy: A2 Slow",
-}
+REMOVED_RATE_PRESETS = frozenset(("a2_updates", "a2_controls", "a2_slow"))
 
 
-def control_cadence_multiplier(project):
-    """Each switch doubles the knob-based cadence; switch positions are irrelevant."""
-    switches = sum(control.type == "switch" for control in project.knobs)
-    knobs = len(project.knobs) - switches
-    return max(1, knobs) * 2**switches
+def uses_removed_rate_preset(spec):
+    options = spec.get("preferences", {}).get("advanced_training", {}) or {}
+    return any(
+        options.get(key) in REMOVED_RATE_PRESETS
+        for key in ("rate_preset", "hypernetwork_rate_preset")
+    )
 
 
-def rate_cadence_multiplier(project, preset):
-    if preset not in ("a2_controls", "a2_slow"):
-        return 1
-    factor = control_cadence_multiplier(project)
-    return factor / math.sqrt(2) if preset == "a2_slow" else factor
+REMOVED_RATE_MESSAGE = (
+    "This training uses a learning-rate preset removed in 0.6.0 and cannot resume. "
+    "Use Retrain to start a new instance with a dataset-normalized preset; "
+    "the original recordings and checkpoints have been kept."
+)
 
 
 def training_preset(name):
@@ -214,9 +211,6 @@ def workspace_update_schedule(workspace):
         options["learning_rate"],
         options["hypernetwork_learning_rate"],
         options["lr_decay"],
-        cadence_multiplier=rate_cadence_multiplier(
-            project, options.get("rate_preset", "a2_updates")
-        ),
         normalization=(
             options["rate_preset"]
             if options["rate_preset"] in DATASET_RATE_PRESETS
@@ -253,6 +247,8 @@ def rate_group_schedule(
             final_learning_rate=rate * gamma**epochs,
             reductions=epochs,
         )
+    if preset not in DATASET_RATE_PRESETS:
+        raise ValueError("Choose a listed learning-rate preset")
     schedule = a2_update_schedule(
         data,
         directory,
@@ -262,7 +258,6 @@ def rate_group_schedule(
         rate,
         rate,
         gamma,
-        cadence_multiplier=rate_cadence_multiplier(project, preset),
         normalization=preset if preset in DATASET_RATE_PRESETS else None,
     )
     return dict(

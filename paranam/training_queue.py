@@ -354,6 +354,10 @@ class TrainingQueue:
             raise ValueError(
                 "This instance's files are unavailable. Reconnect its project drive before resuming."
             )
+        from .recipes import uses_removed_rate_preset, REMOVED_RATE_MESSAGE
+
+        if uses_removed_rate_preset(spec):
+            raise ValueError(REMOVED_RATE_MESSAGE)
         workspace = Workspace(Path(spec["project"]))
         from .evaluation import PROTOCOL
 

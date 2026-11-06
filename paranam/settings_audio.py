@@ -127,8 +127,16 @@ class SettingsAudioWorker(QThread):
                             if channel is not None:
                                 outgoing[:, channel - 1] = noise
                     values = (
-                        np.max(np.abs(outgoing[:, audio.output_channel - 1])),
-                        np.max(np.abs(incoming[:, audio.input_channel - 1])),
+                        (
+                            np.max(np.abs(outgoing[:, audio.output_channel - 1]))
+                            if audio.output_channel is not None
+                            else 0.0
+                        ),
+                        (
+                            np.max(np.abs(incoming[:, audio.input_channel - 1]))
+                            if audio.input_channel is not None
+                            else 0.0
+                        ),
                         (
                             np.max(
                                 np.abs(outgoing[:, audio.loopback_output_channel - 1])
@@ -256,6 +264,11 @@ class SettingsAudioActions:
                 return
             if self.device.currentData() is None:
                 raise ValueError("Select your audio interface in Settings.")
+            audio = self.audio_settings()
+            if audio.output_channel is None and audio.loopback_output_channel is None:
+                raise ValueError(
+                    "Select a Send or Loopback output before testing the connection."
+                )
             self._sync_settings_audio(retry=True)
             worker = getattr(self, "settings_audio_worker", None)
             if worker is None:

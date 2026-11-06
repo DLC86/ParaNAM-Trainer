@@ -245,8 +245,8 @@ class AudioSettingsModel(_BaseModel):
     host_api: _Optional[str] = None
     output_device: _Optional[str] = None
     input_device: _Optional[str] = None
-    output_channel: int = 1
-    input_channel: int = 1
+    output_channel: _Optional[int] = 1
+    input_channel: _Optional[int] = 1
     instrument_input_channel: _Optional[int] = None
     monitor_output_left: _Optional[int] = None
     monitor_output_right: _Optional[int] = None

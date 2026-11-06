@@ -109,7 +109,7 @@ def test_independent_dataset_clocks_restore_exactly(workspace, audio, hyper):
                 schedule["scheduler"].load_state_dict(state)
 
 
-def test_new_choices_and_legacy_project_round_trip(window, workspace):
+def test_new_choices_replace_removed_presets_in_old_project(window, workspace):
     ready_audio(workspace)
     workspace.preferences["advanced_parametric"] = training_preset("HyperA2")
     window._attach(workspace)
@@ -135,4 +135,10 @@ def test_new_choices_and_legacy_project_round_trip(window, workspace):
     window.load_advanced_options()
     window.save_preferences()
     assert workspace.fingerprint() == before
-    assert window.advanced_fields["rate_preset"].currentText().startswith("Legacy:")
+    for key in ("rate_preset", "hypernetwork_rate_preset"):
+        selector = window.advanced_fields[key]
+        assert selector.currentData() == "a2_dataset"
+        assert all(
+            selector.findData(old) == -1
+            for old in ("a2_updates", "a2_controls", "a2_slow")
+        )

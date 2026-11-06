@@ -16,9 +16,9 @@ class ESRCharts(QTabWidget):
             self.charts[size] = chart
             self.addTab(chart, f"{size.title()} ESR chart")
 
-    def set_history(self, history):
+    def set_history(self, history, total_epochs=None):
         for chart in self.charts.values():
-            chart.set_history(history)
+            chart.set_history(history, total_epochs)
 
 
 class ESRChart(QWidget):
@@ -26,6 +26,7 @@ class ESRChart(QWidget):
         super().__init__(parent)
         self.model_size = size
         self.history = []
+        self.total_epochs = None
         self.hover_epoch = None
         self.setMouseTracking(True)
         self.setMinimumHeight(215)
@@ -36,16 +37,27 @@ class ESRChart(QWidget):
             "Each score is an equal-weight mean over captures, evaluated at epoch end."
         )
 
-    def set_history(self, history):
+    def set_history(self, history, total_epochs=None):
         history = [dict(entry) for entry in history]
-        if history != self.history:
+        total_epochs = max(1, int(total_epochs)) if total_epochs is not None else None
+        if history != self.history or total_epochs != self.total_epochs:
             self.history = history
+            self.total_epochs = total_epochs
             if self.hover_epoch not in {entry["epoch"] for entry in history}:
                 self.hover_epoch = None
             self.update()
 
     def plot_rect(self):
         return QRectF(65, 47, max(self.width() - 90, 1), max(self.height() - 78, 1))
+
+    def epoch_limit(self):
+        return self.total_epochs or max(
+            2, max((entry["epoch"] for entry in self.history), default=1)
+        )
+
+    def epoch_x(self, epoch):
+        plot = self.plot_rect()
+        return plot.left() + (epoch - 1) / max(1, self.epoch_limit() - 1) * plot.width()
 
     def displayed_entry(self):
         if not self.history:
@@ -59,7 +71,7 @@ class ESRChart(QWidget):
         plot = self.plot_rect()
         self.hover_epoch = None
         if self.history and plot.contains(event.position()):
-            last_epoch = max(2, max(entry["epoch"] for entry in self.history))
+            last_epoch = self.epoch_limit()
             epoch = 1 + (event.position().x() - plot.left()) / plot.width() * (
                 last_epoch - 1
             )
@@ -114,18 +126,18 @@ class ESRChart(QWidget):
                 Qt.AlignmentFlag.AlignCenter,
                 "The curves appear after the first validation epoch.",
             )
-            return
+            values = [1.0]
         bottom, top = math.floor(math.log10(min(values))), math.ceil(
             math.log10(max(values))
         )
         if bottom == top:
             bottom -= 1
         plot = self.plot_rect()
-        last_epoch = max(2, max(entry["epoch"] for entry in self.history))
+        last_epoch = self.epoch_limit()
 
         def point(epoch, value):
             return QPointF(
-                plot.left() + (epoch - 1) / (last_epoch - 1) * plot.width(),
+                self.epoch_x(epoch),
                 plot.bottom()
                 - (math.log10(max(value, 1e-12)) - bottom)
                 / (top - bottom)
