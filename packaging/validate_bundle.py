@@ -142,6 +142,13 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
         # independently of the user-facing new-project defaults.
         advanced_parametric={
             **training_preset("HyperA2"),
+            "rate_preset": "manual",
+            "hypernetwork_rate_preset": "follow",
+            "hypernetwork_mode": "full",
+            "condition_dilated_convolutions": True,
+            "branch_loss_reduction": "sum",
+            "gradient_clipping": True,
+            "check_nonfinite_gradients": True,
             "deterministic_training": True,
             "cudnn_benchmark": False,
         },
@@ -198,6 +205,9 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     atomic_write_json(
         job / "export-request.json", dict(id="frozen-export", path=str(intermediate))
     )
+    # Simulate the observed blackout damage in the real frozen worker, not in
+    # this source-side validator. Its complete checkpoint must remain usable.
+    (job / "progress.json").write_bytes(b"\0" * 15098)
     result = subprocess.run(
         [
             str(executable),
@@ -212,6 +222,10 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     if result.returncode != 0 or progress.get("status") != "completed":
         print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
         raise RuntimeError(f"Frozen training worker failed: {progress}")
+    assert list(
+        job.glob("progress.json.corrupt-*")
+    ), "Frozen worker did not preserve the damaged state"
+    assert "State recovery:" in (job / "worker.log").read_text(encoding="utf-8")
     model = read_json(Path(progress["export"]))
     assert model["architecture"] == "HyperA2"
     assert [s["name"] for s in model["config"]["submodels"]] == ["lite", "full"]

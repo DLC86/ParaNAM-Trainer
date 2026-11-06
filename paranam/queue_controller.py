@@ -62,6 +62,11 @@ class QueueController(QObject):
         self.preparing = None
         self.control_path = self.store.directory / "queue-control.json"
         self.paused_queue_id = read_json(self.control_path, {}).get("paused_job")
+        self.reconcile_interrupted()
+
+    def reconcile_interrupted(self):
+        from .recovery import RecoveryRequired
+
         for entry in self.store.entries():
             if entry["state"] in ACTIVE:
                 if process_alive(entry):
@@ -69,11 +74,14 @@ class QueueController(QObject):
                 else:
                     progress = training.job_progress(entry["job"])
                     state = progress.get("status")
-                    self.store.update(
-                        entry["id"],
-                        state=state if state in FINISHED else "interrupted",
-                        pid=None,
-                    )
+                    try:
+                        self.store.update(
+                            entry["id"],
+                            state=state if state in FINISHED else "interrupted",
+                            pid=None,
+                        )
+                    except RecoveryRequired:
+                        pass  # Read-only recovery must still allow the UI to open.
 
     def enqueue(self, workspace):
         if self.preparing:
@@ -91,6 +99,9 @@ class QueueController(QObject):
         self.tick()
 
     def start(self):
+        from .recovery import require_resolved
+
+        require_resolved(self.store.path)
         if self.paused_queue_id:
             entry = self.store.get(self.paused_queue_id)
             if entry and entry["state"] in ("paused", "interrupted", "failed"):
@@ -138,12 +149,23 @@ class QueueController(QObject):
             self.guard.release()
             return  # Another app window removed this waiting instance.
         job = Path(entry["job"])
-        spec = read_json(job / "spec.json")
-        if not spec or not Path(spec.get("project", "")).is_dir():
+        spec = read_json(job / "spec.json", {}, tolerate_corrupt=True)
+        from .recovery import is_blocked
+
+        recovery_blocked = (
+            is_blocked(job / "spec.json")
+            or is_blocked(job / "progress.json")
+            or training.job_progress(job).get("recovery_required")
+        )
+        if not spec or not Path(spec.get("project", "")).is_dir() or recovery_blocked:
             self.store.update(
                 entry["id"],
                 state="failed",
-                error="Training files are unavailable. Reconnect this project's drive, then Resume.",
+                error=(
+                    "This instance needs state recovery. Use Review recovery before resuming."
+                    if recovery_blocked
+                    else "Training files are unavailable. Reconnect this project's drive, then Resume."
+                ),
             )
             self.active_id = None
             self.guard.release()

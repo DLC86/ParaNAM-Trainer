@@ -76,6 +76,7 @@ from .signals import asset_path
 from .queue_ui import QueueActions
 from .play_ui import PlayActions, HorizontalLevelMeter
 from .settings_audio import SettingsAudioActions, AudioDeviceEvents
+from .recovery_ui import RecoveryActions
 from .queue_controller import QueueController
 from .ui_preferences import UIPreferences
 from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
@@ -116,7 +117,12 @@ def duration(seconds):
 
 
 class WizardWindow(
-    UIPreferences, QueueActions, PlayActions, SettingsAudioActions, QMainWindow
+    UIPreferences,
+    QueueActions,
+    PlayActions,
+    SettingsAudioActions,
+    RecoveryActions,
+    QMainWindow,
 ):
     capture_stage = Signal(str)
     route_levels = Signal(float, float, float, float)
@@ -268,6 +274,7 @@ class WizardWindow(
         content.setSpacing(18)
         self.project_label = label("No project open", "muted")
         content.addWidget(self.project_label)
+        self.build_recovery_notice(content)
         self.pages = QStackedWidget()
         self.page_contents = []
         for index, builder in enumerate(
@@ -1310,7 +1317,9 @@ class WizardWindow(
         for value in paths:
             path = Path(value)
             metadata = (
-                read_json(path / "capture_project.json", {}) if path.exists() else {}
+                read_json(path / "capture_project.json", {}, tolerate_corrupt=True)
+                if path.exists()
+                else {}
             )
             if metadata:
                 try:
@@ -1360,7 +1369,12 @@ class WizardWindow(
         self.close_audio()
         self.initialize_global_setup(workspace)
         self.workspace = workspace
-        self.queue_controller.store.register_legacy(workspace)
+        from .recovery import RecoveryRequired
+
+        try:
+            self.queue_controller.store.register_legacy(workspace)
+        except RecoveryRequired:
+            pass  # Opening a project must remain available for queue rebuilding.
         self.project_label.setText(
             f"{workspace.project.name or workspace.directory.name}  ·  Saved locally"
         )

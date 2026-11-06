@@ -16,7 +16,23 @@ def ready(workspace):
     for entry in workspace.project.entries:
         target = workspace.directory / entry.y_path
         target.parent.mkdir(exist_ok=True)
-        target.write_bytes(b"recorded capture placeholder")
+        options = workspace.training_options()
+        scheduled = options.get("rate_preset", "manual") != "manual" or options.get(
+            "hypernetwork_rate_preset", "follow"
+        ) not in ("manual", "follow")
+        target.unlink(missing_ok=True)
+        if scheduled:
+            import os, shutil
+
+            source = workspace.directory / workspace.project.input_for_split(
+                entry.split
+            )
+            try:
+                os.link(source, target)
+            except OSError:
+                shutil.copyfile(source, target)
+        else:
+            target.write_bytes(b"recorded capture placeholder")
         entry.status = "captured"
         entry.delay = 0
     workspace.save()

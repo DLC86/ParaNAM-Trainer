@@ -74,3 +74,12 @@ def window(qapp, monkeypatch, tmp_path):
     instance = wizard.WizardWindow()
     yield instance
     instance.close()
+
+
+@pytest.fixture(autouse=True)
+def clear_recovery_events():
+    from paranam.recovery import reset_session
+
+    reset_session()
+    yield
+    reset_session()

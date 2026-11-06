@@ -13,6 +13,8 @@ import json as _json
 import os as _os
 import tempfile as _tempfile
 import time as _time
+import shutil as _shutil
+import zipfile as _zipfile
 from datetime import datetime as _datetime
 from datetime import timezone as _timezone
 from pathlib import Path as _Path
@@ -54,11 +56,43 @@ _PROJECT_VERSION = 1
 _DEFAULT_NY = 8192
 
 
-def replace_file(source, target) -> None:
+def _backup_checkpoint(path):
+    if not path.is_file():
+        return
+    try:
+        with _zipfile.ZipFile(path) as archive:
+            if archive.testzip() or not any(
+                name.endswith("data.pkl") for name in archive.namelist()
+            ):
+                return
+    except Exception:
+        return  # Keep an existing good backup when the current file is damaged.
+    descriptor, temporary = _tempfile.mkstemp(
+        prefix=f".{path.name}.backup.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with _os.fdopen(descriptor, "wb") as dst, path.open("rb") as src:
+            _shutil.copyfileobj(src, dst)
+            dst.flush()
+            _os.fsync(dst.fileno())
+        replace_file(temporary, path.with_name(path.name + ".bak"))
+    finally:
+        if _os.path.exists(temporary):
+            _os.unlink(temporary)
+
+
+def replace_file(source, target, *, keep_checkpoint_backup=True) -> None:
     """Retry brief Windows sharing violations without replacing a good file early."""
     for attempt in range(10):
         try:
+            if _Path(target).suffix == ".ckpt":
+                with _Path(source).open("r+b") as checkpoint:
+                    _os.fsync(checkpoint.fileno())
+                if keep_checkpoint_backup:
+                    _backup_checkpoint(_Path(target))
             _os.replace(source, target)
+            if _Path(target).suffix == ".ckpt" and _os.name != "nt":
+                _sync_directory(_Path(target).parent)
             return
         except PermissionError:
             if attempt == 9:
@@ -66,27 +100,89 @@ def replace_file(source, target) -> None:
             _time.sleep(0.01)
 
 
+def _sync_directory(path):
+    try:
+        descriptor = _os.open(path, _os.O_RDONLY)
+        try:
+            _os.fsync(descriptor)
+        finally:
+            _os.close(descriptor)
+    except OSError:
+        pass  # Some filesystems do not support flushing directory metadata.
+
+
 def atomic_write_json(path: _Path, payload: _Any) -> None:
     """
-    Write JSON so a crash mid-write never leaves a truncated file: write to a
-    temporary file in the destination directory, then atomically replace.
+    Flush a complete temporary file before replacement. Mutable JSON state also
+    retains the previous valid document as .bak for unexpected-shutdown recovery.
     """
     path = _Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    previous, previous_data = None, None
+    if path.suffix.lower() == ".json":
+        for attempt in range(10):
+            try:
+                previous = path.read_bytes()
+                previous_data = _json.loads(previous.decode("utf-8"))
+                break
+            except (FileNotFoundError, ValueError, UnicodeError):
+                previous = None  # Never replace a good backup with corrupt state.
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                _time.sleep(0.01)
+    # Live fractions can be reconstructed from the epoch checkpoint. Avoid two
+    # disk-cache flushes every half second; persist boundaries/status changes.
+    live_progress = (
+        path.name == "progress.json"
+        and isinstance(payload, dict)
+        and isinstance(previous_data, dict)
+        and payload.get("status") == previous_data.get("status") == "running"
+        and "completed_epoch" in payload
+        and "completed_epoch" in previous_data
+        and "member" in payload
+        and "member" in previous_data
+        and payload["completed_epoch"] == previous_data["completed_epoch"]
+        and payload["member"] == previous_data["member"]
+    )
     fd, tmp_path = _tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
+    backup_tmp = None
     try:
-        with _os.fdopen(fd, "w") as fp:
+        with _os.fdopen(fd, "w", encoding="utf-8") as fp:
             _json.dump(payload, fp, indent=4)
             fp.write("\n")
+            fp.flush()
+            if not live_progress:
+                _os.fsync(fp.fileno())
+        if path.suffix.lower() == ".json" and not live_progress:
+            if previous is not None:
+                backup_fd, backup_tmp = _tempfile.mkstemp(
+                    prefix=f".{path.name}.backup.", suffix=".tmp", dir=path.parent
+                )
+                with _os.fdopen(backup_fd, "wb") as backup:
+                    backup.write(previous)
+                    backup.flush()
+                    _os.fsync(backup.fileno())
+                replace_file(backup_tmp, path.with_name(path.name + ".bak"))
+                backup_tmp = None
         replace_file(tmp_path, path)
+        if _os.name != "nt" and not live_progress:
+            _sync_directory(path.parent)
     except BaseException:
         try:
             _os.unlink(tmp_path)
         except OSError:
             pass
         raise
+    finally:
+        if backup_tmp is not None:
+            try:
+                _os.unlink(backup_tmp)
+            except OSError:
+                pass
 
 
 class KnobModel(_BaseModel):

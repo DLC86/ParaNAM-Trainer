@@ -668,9 +668,9 @@ class PackedBestCheckpoint(_pl.Callback):
     def _write_metadata(self, dirpath: _Path) -> None:
         if not self.best:
             return
-        with open(dirpath / "packed_best.json", "w") as fp:
-            _json.dump(
-                {"submodels": [self.best[i] for i in sorted(self.best)]},
-                fp,
-                indent=4,
-            )
+        from nam.capture.project import atomic_write_json
+
+        atomic_write_json(
+            dirpath / "packed_best.json",
+            {"submodels": [self.best[i] for i in sorted(self.best)]},
+        )

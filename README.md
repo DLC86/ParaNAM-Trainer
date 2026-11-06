@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.5.8 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.8-preview)**
+**[Download ParaNAM Trainer 0.5.9 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.9-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -183,11 +183,14 @@ For example, two knobs and no switches give approximately 1.414×. Fractional
 update progress is retained across reductions and checkpoint resume.
 Switch position counts do not enter the formula. For switch-only models,
 the knob multiplier is one. Both initial rates remain editable.
-New projects default to **HyperWaveNet**, this scaled LR preset, **100 epochs**,
-and batch 32. The LR preset initializes audio/hypernetwork LR to 0.004/0.0004.
+New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 now
+reproduces the advanced settings saved in the 06/11 02:52 training: Adam,
+audio/hypernetwork LR 0.004/0.0004, original A2 audio cadence, and control-scaled
+hypernetwork cadence. It uses rank-2 deltas, excludes dilated convolution kernels,
+and disables clipping, NaN/Inf scanning and cuDNN benchmark.
 Saved projects and existing training instances keep their settings.
-**Hypernetwork learning-rate preset** defaults to Follow, preserving the shared
-cadence. Select a separate preset to decay audio and hypernetwork at different
+**Hypernetwork learning-rate preset** can Follow the main schedule or select a
+separate cadence (HyperA2 starts control-scaled). Decay audio and hypernetwork at different
 rates; Manual hypernetwork decay has its own per-epoch multiplier. The preview
 shows each schedule and final LR separately. Saved jobs restore both counters.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
@@ -294,6 +297,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.5.9 changes](docs/release-0.5.9.md)
 - [0.5.8 changes](docs/release-0.5.8.md)
 - [0.5.7 changes](docs/release-0.5.7.md)
 - [0.5.6 changes](docs/release-0.5.6.md)
@@ -330,3 +334,9 @@ credits and bundled components. The interface uses the TTS logo and title font
 from NAM On Steroids; the logo links to [The Tone Scientist](https://shop.thetonescientist.com).
 
 Advanced settings also offer cuDNN benchmark and strict deterministic training for reproducible comparisons. See [training controls](docs/training-controls.md#reproducible-comparisons) for scope and limitations.
+
+
+Unexpected-shutdown recovery preserves damaged files, restores valid state backups,
+and rebuilds training progress from complete checkpoints. A recovery notice explains
+what was recovered; **Review recovery** offers backup restoration and queue rebuilding
+when automatic repair is insufficient. See [recovery details](docs/state-recovery.md).

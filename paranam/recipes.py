@@ -23,18 +23,20 @@ def rate_cadence_multiplier(project, preset):
 def training_preset(name):
     if name not in ("HyperA2", "HyperWaveNet"):
         raise ValueError(f"Unknown training preset: {name}")
+    # HyperA2 reproduces the saved 2026-11-06 02:52 training recipe. The name
+    # selects a starting configuration; every effective option is stored in jobs.
     hyper_a2 = name == "HyperA2"
     return dict(
-        rate_preset="manual",
-        cudnn_benchmark=True,
+        rate_preset="a2_updates" if hyper_a2 else "manual",
+        cudnn_benchmark=not hyper_a2,
         deterministic_training=False,
-        hypernetwork_rate_preset="follow",
+        hypernetwork_rate_preset="a2_controls" if hyper_a2 else "follow",
         hypernetwork_lr_decay=0.994,
         hypernetwork_recipe=name,
-        hypernetwork_mode="full" if hyper_a2 else "low_rank",
+        hypernetwork_mode="low_rank",
         hypernetwork_rank=2,
-        condition_dilated_convolutions=hyper_a2,
-        branch_loss_reduction="sum" if hyper_a2 else "mean",
+        condition_dilated_convolutions=False,
+        branch_loss_reduction="mean",
         optimizer="Adam" if hyper_a2 else "AdamW",
         learning_rate=0.004 if hyper_a2 else 0.002,
         hypernetwork_learning_rate=0.0004 if hyper_a2 else 0.002,
@@ -43,9 +45,9 @@ def training_preset(name):
         fit_mrstft=True,
         mrstft_weight=0.0005,
         weight_decay=3.17e-7,
-        gradient_clipping=True,
+        gradient_clipping=not hyper_a2,
         gradient_clip_val=1.0,
-        check_nonfinite_gradients=True,
+        check_nonfinite_gradients=not hyper_a2,
     )
 
 

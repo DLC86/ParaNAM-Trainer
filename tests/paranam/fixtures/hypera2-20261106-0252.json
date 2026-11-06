@@ -1,0 +1,23 @@
+{
+  "rate_preset": "a2_updates",
+  "cudnn_benchmark": false,
+  "deterministic_training": false,
+  "optimizer": "Adam",
+  "learning_rate": 0.004,
+  "lr_decay": 0.994,
+  "ny": 8192,
+  "fit_mrstft": true,
+  "mrstft_weight": 0.0005,
+  "weight_decay": 3.17e-07,
+  "gradient_clipping": false,
+  "gradient_clip_val": 1.0,
+  "check_nonfinite_gradients": false,
+  "hypernetwork_recipe": "HyperWaveNet",
+  "hypernetwork_learning_rate": 0.0004,
+  "hypernetwork_lr_decay": 0.994,
+  "hypernetwork_rate_preset": "a2_controls",
+  "hypernetwork_mode": "low_rank",
+  "hypernetwork_rank": 2,
+  "condition_dilated_convolutions": false,
+  "branch_loss_reduction": "mean"
+}

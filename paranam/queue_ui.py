@@ -132,7 +132,9 @@ class QueueActions:
             if state == "queued":
                 pending += 1
             esr = progress.get("best_esr")
-            spec = read_json(Path(entry["job"]) / "spec.json", {})
+            spec = read_json(
+                Path(entry["job"]) / "spec.json", {}, tolerate_corrupt=True
+            )
             captures = spec.get("static_captures") or []
             model_name = (
                 captures[0].get("name", "")
@@ -165,7 +167,7 @@ class QueueActions:
             else None
         )
         if selected and getattr(self, "_resume_entry_id", None) != selected["id"]:
-            spec = read_json(self.job / "spec.json")
+            spec = read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
             self.resume_batch_size.setValue(
                 spec.get("preferences", {}).get("batch_size", 16)
             )
@@ -223,7 +225,9 @@ class QueueActions:
         )
         directory = None
         if entry:
-            spec = read_json(Path(entry["job"]) / "spec.json")
+            spec = read_json(
+                Path(entry["job"]) / "spec.json", {}, tolerate_corrupt=True
+            )
             if not spec:
                 self.notify_error(
                     ValueError("Reconnect the drive containing this training instance.")
@@ -242,6 +246,7 @@ class QueueActions:
     def update_enabled(self, *_):
         if not hasattr(self, "queue_table"):
             return
+        self.refresh_recovery_notice()
         self._sync_settings_audio()
         self.export_status.setVisible(bool(self.export_status.text()))
         active, present = self.busy(), self.workspace is not None
@@ -364,8 +369,19 @@ class QueueActions:
             state == "queued" or running and state != "stopping"
         )
         exporting = getattr(self, "export_worker", None) is not None
+        from .recovery import is_blocked
+
+        recovery_blocked = bool(
+            self.job
+            and (
+                is_blocked(self.job / "spec.json")
+                or is_blocked(self.job / "progress.json")
+                or training.job_progress(self.job).get("recovery_required")
+            )
+        )
         resumable = (
-            state in FINISHED - {"completed", "needs_captures"}
+            not recovery_blocked
+            and state in FINISHED - {"completed", "needs_captures"}
             and not running
             and not exporting
         )
@@ -382,7 +398,11 @@ class QueueActions:
         self.capture_round_button.setEnabled(state == "needs_captures" and not active)
         self.capture_round_button.setVisible(state == "needs_captures")
         self.models_button.setEnabled(bool(entry))
-        spec = read_json(self.job / "spec.json", {}) if self.job else {}
+        spec = (
+            read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
+            if self.job
+            else {}
+        )
         extension = training.intermediate_export_extension(spec) if spec else ".nam"
         self.export_best_button.setText(
             "Export best PNAM" if extension == ".pnam" else "Export best NAM"
@@ -406,6 +426,10 @@ class QueueActions:
             enabled = self.mode.currentData() == "active_learning" and not active
             self.rounds.setEnabled(enabled)
             self.additions.setEnabled(enabled)
+        if is_blocked(self.queue_controller.store.path):
+            self.train_button.setEnabled(False)
+            if not self.queue_controller.active_id:
+                self.queue_start_button.setEnabled(False)
 
     def closeEvent(self, event):
         self._closing_settings_audio = True

@@ -131,8 +131,11 @@ class TrainingQueue:
         return source / "training" / "queue-data"
 
     def _edit(self, operation):
+        from .recovery import require_resolved
+
         with self.lock:
             data = read_json(self.path, {"version": 1, "entries": []})
+            require_resolved(self.path)
             result = operation(data["entries"])
             atomic_write_json(self.path, data)
             return result
@@ -242,8 +245,10 @@ class TrainingQueue:
             state = progress.get("status", "interrupted")
             if state in ACTIVE:
                 state = "interrupted"
-            spec = read_json(specfile, {})
+            spec = read_json(specfile, {}, tolerate_corrupt=True)
             manifest = read_json(job / "instance.json", {})
+            if not spec:
+                state = "failed"
             entry = dict(
                 id=uuid.uuid4().hex,
                 job=str(job),
@@ -313,8 +318,11 @@ class TrainingQueue:
         self._edit(edit)
 
     def remove(self, identifier):
+        from .recovery import require_resolved
+
         with self.lock:
             data = read_json(self.path, {"version": 1, "entries": []})
+            require_resolved(self.path)
             entries = data["entries"]
             entry = next(e for e in entries if e["id"] == identifier)
             if entry["state"] in ACTIVE:
@@ -387,12 +395,23 @@ class TrainingQueue:
         atomic_write_json(
             workspace.directory / "training" / "current.json", {"directory": str(job)}
         )
+        from .recovery import ensure_resume_checkpoint
+
+        ensure_resume_checkpoint(job)
         checkpoint = job / f"resume-{training.job_progress(job).get('member', 0)}.ckpt"
         if checkpoint.exists() or training.legacy_checkpoint(
             job, training.job_progress(job).get("member", 0)
         ):
             training.make_job(workspace, resume=True)
         else:
+            saved_progress = training.job_progress(job)
+            if (
+                saved_progress.get("completed_epoch", saved_progress.get("epoch", 0))
+                > 0
+            ):
+                raise ValueError(
+                    "No resumable checkpoint is available. The instance and recordings have been kept; restore a checkpoint backup or use Retrain explicitly."
+                )
             # Pausing before the first complete epoch can safely restart this same instance.
             atomic_write_json(job / "command.json", {})
             spec["learning"]["train_dataloader"][

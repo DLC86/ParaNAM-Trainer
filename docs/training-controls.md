@@ -44,8 +44,9 @@ capture or ensemble member has its own displayed history.
 ## Advanced training settings
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** can be set
-independently. **Hypernetwork learning-rate preset** defaults to **Follow
-learning-rate preset**, preserving the shared schedule. Select Manual, the
+independently. **Follow learning-rate preset** preserves a shared schedule.
+The current HyperA2 preset starts with a separate control-scaled hypernetwork
+schedule. Select Manual, the
 original A2 cadence, the control-scaled cadence, or A2 Slow independently to
 give the hypernetwork a different clock. Manual hypernetwork scheduling uses
 its own **Hypernetwork LR Decay** once per epoch; A2 presets use optimizer
@@ -69,10 +70,10 @@ initial rates and 0.994 reduction factor, but applies a reduction every
 the factor, regardless of its number of positions. Thus two knobs and zero,
 one or two switches yield 2×, 4× or 8×; three knobs and one or two switches yield
 6× or 12×. Switch-only models use one as their knob multiplier.
-New projects use this LR preset with HyperWaveNet and 100 epochs; the initial
-LRs are 0.004 (audio) and 0.0004 (hypernetwork), as when selecting the LR preset
-manually. Batch defaults to the HyperWaveNet recipe’s 32. Previously saved
-projects retain their settings. Already-created jobs retain their frozen update
+New projects use HyperA2, 100 epochs and batch 16, with audio LR 0.004 and
+hypernetwork LR 0.0004. Audio uses the original 62-update A2 cadence; the
+hypernetwork uses this control-scaled cadence. Previously saved projects retain
+their settings. Already-created jobs retain their frozen update
 interval and scheduler state, including the older control-count formula.
 In Follow mode, both the audio and hypernetwork LR follow the selected schedule. The preview and
 saved job specification show the multiplier, actual update interval, reduction
@@ -87,7 +88,7 @@ The interval is not rounded to a fixed number of updates: reductions occur at
 `ceil(k × 62 × n)` for each reduction k, preserving fractional progress across
 updates and checkpoint resume. For two knobs and no switches, for example, the
 interval averages 87.68124 updates, with reductions at 88, 176, 264, 351, … .
-The existing control-based preset remains the new-project default. Saved jobs
+The control-based preset remains the HyperA2 hypernetwork default. Saved jobs
 retain their scheduler and counter; changing presets requires a new instance.
 
 Control-based scaling is an optional heuristic for optimization, not a guarantee
@@ -101,8 +102,8 @@ updates per epoch, the average equivalent per-epoch multiplier and final rates f
 the chosen epoch budget. A large parametric dataset can undergo many reference
 epochs inside one project epoch, so keeping 200 project epochs can produce a very
 small final LR. This preset matches a cadence; it does not automatically choose
-an optimal duration or guarantee equal accuracy. Manual per-epoch decay is the
-default and remains available. Rate preferences and the calculated schedule are
+an optimal duration or guarantee equal accuracy. Manual per-epoch decay
+remains available. Rate preferences and the calculated schedule are
 frozen into each independent job.
 
 **Hypernetwork weight mode** selects Full or Low rank independently of
@@ -119,8 +120,9 @@ when any gradient is nonfinite, preserving weights and optimizer moments.
 Disabling the latter skips the scan completely. The settings are independent:
 neither a low LR nor clipping guarantees the absence of nonfinite gradients.
 
-The defaults retain 0.4.3 behavior: both protections enabled for HyperA2, with
-clipping norm 1.0; both disabled for static A2. Preferences are saved separately
+The current HyperA2 preset disables both protections (the stored clipping limit
+remains 1.0). HyperWaveNet enables both, with clipping norm 1.0; static A2 keeps
+its existing defaults. Older saved projects retain their own choices. Preferences are saved separately
 for static and parametric modes and recorded in each job's spec. Changing a
 recipe, an LR or gradient controls requires a new run. Jobs using the reserved
 validation-audio protocol can resume with matching settings and optimizer state.
@@ -139,12 +141,19 @@ topologies, validation and compilation settings are common to both recipes.
 | Hypernetwork LR | 0.0004 | 0.002 |
 | Optimizer | Adam | AdamW |
 | Batch size | 16 | 32 |
-| Generated deltas | Full, all tensors | Low rank, rank 2; dilated convolution kernels excluded |
+| Generated deltas | Low rank, rank 2; dilated convolution kernels excluded | Low rank, rank 2; dilated convolution kernels excluded |
 | Hypernetwork hidden layer / activation | 16 / LeakyReLU | 16 / LeakyReLU |
-| Full/Lite branch loss reduction | Sum | Mean |
-| Clipping / NaN/Inf protection | 1.0 / enabled | 1.0 / enabled |
+| Full/Lite branch loss reduction | Mean | Mean |
+| Clipping / NaN/Inf protection | Disabled / disabled (limit stored as 1.0) | 1.0 / enabled |
 | NY / MRSTFT weight | 8192 / 0.0005 | 8192 / 0.0005 |
 | LR decay / weight decay | 0.994 / 3.17e-7 | 0.994 / 3.17e-7 |
+| Audio LR schedule | A2, every 62 updates | Manual, per epoch |
+| Hypernetwork LR schedule | A2, every `62 × knobs × 2^switches` updates | Follow |
+| cuDNN benchmark / deterministic algorithms | Disabled / disabled | Enabled / disabled |
+
+HyperA2 now reproduces all advanced fields of the saved 06/11 02:52 training,
+with its preset label changed to HyperA2. Existing jobs retain their saved label
+and effective settings; no preset migration is applied to them.
 
 The HyperWaveNet settings were verified against Phillip Self's
 [capture exporter](https://github.com/phillipmself/neural-amp-modeler-parametric/blob/a3684411076be69dab53505df14922487697f2cf/nam/capture/export.py)

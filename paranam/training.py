@@ -59,10 +59,14 @@ def legacy_checkpoint(job, member):
     if key in _legacy_checkpoint_cache:
         return _legacy_checkpoint_cache[key]
     import torch
+    import zipfile
 
     candidates = []
     for path in files:
         try:
+            with zipfile.ZipFile(path) as archive:
+                if archive.testzip() is not None:
+                    continue
             state = torch.load(path, map_location="cpu", weights_only=False)
             epoch = int(state["epoch"])
             processed = state["loops"]["fit_loop"]["epoch_progress"]["current"][
@@ -87,6 +91,14 @@ def job_can_resume(workspace, job):
     if spec.get("evaluation_protocol") != PROTOCOL:
         return False
     progress = job_progress(job)
+    from .recovery import is_blocked
+
+    if (
+        progress.get("recovery_required")
+        or is_blocked(Path(job) / "progress.json")
+        or is_blocked(Path(job) / "spec.json")
+    ):
+        return False
     saved_options = spec.get("preferences", {}).get("advanced_training")
     safety_keys = (
         "gradient_clipping",
@@ -227,6 +239,8 @@ def make_job(workspace, resume=False, job_directory=None):
         raise ValueError("Complete every planned capture before training.")
     root = workspace.directory / "training"
     root.mkdir(exist_ok=True)
+    if resume:
+        job_progress(current_job(workspace.directory))
     with FileLock(str(root / "worker.lock"), timeout=0):
         if resume:
             job = current_job(workspace.directory)
@@ -240,6 +254,10 @@ def make_job(workspace, resume=False, job_directory=None):
                     "Start a new training run to reserve the initial and final validation audio. "
                     "Older checkpoints already learned those segments; existing captures can be reused."
                 )
+            if job:
+                from .recovery import ensure_resume_checkpoint
+
+                ensure_resume_checkpoint(job, lock_held=True)
             if not job_can_resume(workspace, job):
                 raise ValueError(
                     "The saved checkpoint does not match this project's current captures/settings."
@@ -975,6 +993,11 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
         def action(self):
             return read_json(job / "command.json", {}).get("action")
 
+        def on_fit_start(self, trainer, module):
+            from .checkpoints import install_durable_checkpoint_io
+
+            install_durable_checkpoint_io(trainer)
+
         def on_train_start(self, trainer, module):
             import torch
 
@@ -989,6 +1012,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             batches = int(batches) if math.isfinite(batches) else None
             shared.setdefault("member_train_batches", {})[str(member)] = batches
             self.write(
+                recovery_required=False,
                 device=str(module.device),
                 device_name=device_name,
                 optimizer=spec["model"]["optimizer"].get(

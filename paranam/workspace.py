@@ -44,12 +44,32 @@ DEFAULTS = {
 }
 
 
-def read_json(path: Path, default=None):
+def read_json(path: Path, default=None, *, tolerate_corrupt=False):
+    path = Path(path)
     for attempt in range(10):
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
+            from .recovery import validate_document, accept_valid
+
+            data = validate_document(path, json.loads(path.read_text(encoding="utf-8")))
+            accept_valid(path)
+            return data
+        except FileNotFoundError as error:
+            has_backup = path.with_name(path.name + ".bak").is_file()
+            has_checkpoint = (
+                path.name == "progress.json"
+                and (path.parent / "resume-0.ckpt").is_file()
+            )
+            if has_backup or has_checkpoint:
+                from .recovery import recover_json
+
+                return recover_json(
+                    path, error, default, tolerate_corrupt=tolerate_corrupt
+                )
             return default
+        except (ValueError, UnicodeError) as error:
+            from .recovery import recover_json
+
+            return recover_json(path, error, default, tolerate_corrupt=tolerate_corrupt)
         except PermissionError:
             if attempt == 9:
                 raise
@@ -67,6 +87,7 @@ def control_from_dict(data):
 class Workspace:
     def __init__(self, directory: Path):
         self.directory = Path(directory).resolve()
+        read_json(self.directory / "capture_project.json")
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
@@ -132,18 +153,10 @@ class Workspace:
         workspace = cls(directory)
         from .recipes import training_preset, preset_batch_size
 
-        options = training_preset("HyperWaveNet")
-        # Same result as selecting HyperWaveNet, then the scaled A2 LR preset.
-        options.update(
-            rate_preset="a2_controls",
-            learning_rate=0.004,
-            hypernetwork_learning_rate=0.0004,
-            lr_decay=0.994,
-        )
         workspace.preferences.update(
             epochs=100,
-            batch_size=preset_batch_size("HyperWaveNet"),
-            advanced_parametric=options,
+            batch_size=preset_batch_size("HyperA2"),
+            advanced_parametric=training_preset("HyperA2"),
         )
         workspace.save()
         return workspace

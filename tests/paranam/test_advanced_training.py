@@ -8,7 +8,21 @@ def ready(ws):
     for entry in ws.project.entries:
         target = ws.directory / entry.y_path
         target.parent.mkdir(exist_ok=True)
-        target.write_bytes(b"recorded audio")
+        options = ws.training_options()
+        scheduled = options.get("rate_preset", "manual") != "manual" or options.get(
+            "hypernetwork_rate_preset", "follow"
+        ) not in ("manual", "follow")
+        target.unlink(missing_ok=True)
+        if scheduled:
+            import os, shutil
+
+            source = ws.directory / ws.project.input_for_split(entry.split)
+            try:
+                os.link(source, target)
+            except OSError:
+                shutil.copyfile(source, target)
+        else:
+            target.write_bytes(b"recorded capture placeholder")
         entry.status, entry.delay = "captured", 0
     ws.save()
 

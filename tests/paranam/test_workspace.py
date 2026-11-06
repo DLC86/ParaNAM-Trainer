@@ -62,6 +62,7 @@ def test_controls_only_switches_validate_with_independent_fixed_audio(workspace)
 
 def test_import_keeps_existing_project_plan_counts(workspace):
     (workspace.directory / "paranam.json").unlink()
+    (workspace.directory / "paranam.json.bak").unlink(missing_ok=True)
     reopened = Workspace(workspace.directory)
     assert reopened.preferences["n_train"] == 2
     assert reopened.preferences["n_validation"] == 1

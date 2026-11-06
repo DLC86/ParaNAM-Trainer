@@ -300,7 +300,10 @@ def test_independent_presets_preview_and_edits_are_saved(window, workspace):
     assert not window.advanced_fields["lr_decay"].isEnabled()
 
 
-def test_real_training_restores_two_lightning_scheduler_states(workspace, monkeypatch):
+@pytest.mark.parametrize("zeroed_progress", [False, True])
+def test_real_training_restores_two_lightning_scheduler_states(
+    workspace, monkeypatch, zeroed_progress
+):
     import torch
     from nam.capture.project import atomic_write_json
     from nam.train.parametric import _ParametricLightningModule
@@ -332,6 +335,14 @@ def test_real_training_restores_two_lightning_scheduler_states(workspace, monkey
     assert training.job_progress(job)["status"] == "paused"
     paused = torch.load(job / "resume-0.ckpt", map_location="cpu", weights_only=False)
     assert len(paused["lr_schedulers"]) == 2
+    if zeroed_progress:
+        import hashlib
+
+        digest = hashlib.sha256((job / "resume-0.ckpt").read_bytes()).digest()
+        (job / "progress.json").write_bytes(b"\0" * 15098)
+        recovered = training.job_progress(job)
+        assert recovered["completed_epoch"] == 1 and recovered["restart_epoch"] == 2
+        assert hashlib.sha256((job / "resume-0.ckpt").read_bytes()).digest() == digest
     assert training.make_job(workspace, resume=True) == job
     training.run_job(job)
     assert training.job_progress(job)["status"] == "completed"
