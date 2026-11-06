@@ -121,7 +121,7 @@ def test_scaled_preset_preview_and_selection_are_saved(
     schedule = workspace_update_schedule(workspace)
     assert f"Cadence multiplier: {expected:g}×" in window.rate_preview.text()
     if preset == "a2_slow":
-        assert selector.currentText() == "Control-normalized / √2"
+        assert selector.currentText() == "A2 Slow"
         assert "(knobs × 2^switches) / √2" in window.rate_preview.text()
     assert (
         f"every {schedule['decay_steps']:.8g} optimizer updates"

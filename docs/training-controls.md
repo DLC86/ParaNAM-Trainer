@@ -49,7 +49,7 @@ capture or ensemble member has its own displayed history.
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
 editable and have separate scheduler selectors. New HyperA2 projects use
-**Dataset-normalized** for both, starting at 0.004 and 0.0004 with decay 0.994.
+**A2 Dataset-normalized** for both, starting at 0.004 and 0.0004 with decay 0.994.
 All other HyperA2 advanced values retain the requested 06/11 02:52 recipe.
 Batch size defaults to 16 and the epoch budget to 100.
 
@@ -60,8 +60,8 @@ The two new presets replace the control-count-based choices:
 
 | Preset | Discrete reduction interval | Example: S = 100 × R |
 | --- | --- | --- |
-| Dataset-normalized | `R × (S/R) = S` | 6,200 updates |
-| Dataset-normalized √ | `R × sqrt(S/R)` | 620 updates |
+| A2 Dataset-normalized | `R × (S/R) = S` | 6,200 updates |
+| A2 Dataset-normalized √ | `R × sqrt(S/R)` | 620 updates |
 
 Each reduction multiplies the selected group's LR by 0.994. Linear normalization
 therefore applies one reduction per complete dataset epoch. For 100 epochs,
@@ -91,14 +91,20 @@ normalization is not recomputed mid-training. Changing a preset requires a new
 training instance. No schedule guarantees better validation ESR or generalization;
 normalization trades faster decay for a comparable progression per dataset epoch.
 
-The earlier update/control presets are restored under consistent names:
+The restored update/control cadences use this fixed selector order:
 
-| Current name | Earlier name | Reduction interval |
-| --- | --- | --- |
-| Update-based | Original A2 cadence | 62 updates |
-| Control-normalized | Controls-scaled A2 | `62 × max(1, knobs) × 2^switches` |
-| Control-normalized / √2 | A2 Slow | `62 × max(1, knobs) × 2^switches / sqrt(2)` |
+| Name | Reduction interval |
+| --- | --- |
+| A2 Cadence | 62 updates |
+| A2 Slow | `62 × max(1, knobs) × 2^switches / sqrt(2)` |
+| A2 Slower | `62 × max(1, knobs) × 2^switches` |
+| A2 Dataset-normalized √ | `62 × sqrt(S/62)` |
+| A2 Dataset-normalized | `S` |
+| Manual / per-epoch decay | One epoch; editable gamma |
 
+Hypernetwork Follow remains available after those choices. The order is fixed,
+not recalculated from dataset size. A2 Slow retains the previous division by
+sqrt(2), rather than taking the square root of the control factor.
 They are independently selectable for the audio network and hypernetwork,
 alongside both Dataset-normalized choices, Manual and hypernetwork Follow.
 The serialized IDs remain `a2_updates`, `a2_controls` and `a2_slow`: loading a
@@ -158,8 +164,8 @@ topologies, validation and compilation settings are common to both recipes.
 | Clipping / NaN/Inf protection | Disabled / disabled (limit stored as 1.0) | 1.0 / enabled |
 | NY / MRSTFT weight | 8192 / 0.0005 | 8192 / 0.0005 |
 | LR decay / weight decay | 0.994 / 3.17e-7 | 0.994 / 3.17e-7 |
-| Audio LR schedule | Dataset-normalized, every S updates | Manual, per epoch |
-| Hypernetwork LR schedule | Dataset-normalized, every S updates | Follow |
+| Audio LR schedule | A2 Dataset-normalized, every S updates | Manual, per epoch |
+| Hypernetwork LR schedule | A2 Dataset-normalized, every S updates | Follow |
 | cuDNN benchmark / deterministic algorithms | Disabled / disabled | Enabled / disabled |
 
 HyperA2 retains the advanced fields of the saved 06/11 02:52 training,

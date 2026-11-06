@@ -156,7 +156,7 @@ def test_independent_presets_preview_and_edits_are_saved(window, workspace):
     hyper.setCurrentIndex(hyper.findData("a2_dataset_sqrt"))
     hyper.activated.emit(hyper.currentIndex())
     assert "Independent LR schedules" in window.rate_preview.text()
-    assert "Hypernetwork: Dataset-normalized √" in window.rate_preview.text()
+    assert "Hypernetwork: A2 Dataset-normalized √" in window.rate_preview.text()
     assert (
         Workspace(workspace.directory).training_options()["hypernetwork_rate_preset"]
         == "a2_dataset_sqrt"

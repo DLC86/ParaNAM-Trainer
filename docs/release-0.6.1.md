@@ -1,11 +1,13 @@
 # ParaNAM Trainer 0.6.1
 
-- Restored all previous learning-rate cadences with descriptive names:
-  Update-based (original A2, every 62 updates), Control-normalized
-  (`62 × max(1, knobs) × 2^switches`), and Control-normalized / √2
-  (the former A2 Slow). These are independently selectable for the audio network
-  and hypernetwork alongside Dataset-normalized, Dataset-normalized √, Manual
-  and hypernetwork Follow. New-project defaults remain Dataset-normalized.
+- Restored the original update/control cadences and use this fixed order in both
+  LR selectors: A2 Cadence, A2 Slow, A2 Slower, A2 Dataset-normalized √,
+  A2 Dataset-normalized, then Manual. Hypernetwork Follow remains available below.
+  Intervals are respectively `62`, `62 × F / sqrt(2)`, `62 × F`,
+  `62 × sqrt(S/62)`, and `S` optimizer updates, where
+  `F = max(1, knobs) × 2^switches` and S is complete updates per training epoch.
+  A2 Slow keeps its previous formula; it does not use sqrt(F). Initial LR values
+  remain editable and new-project defaults remain A2 Dataset-normalized.
 - Removed the 0.6.0 block on jobs using the earlier preset IDs. IDs, effective
   settings, frozen scheduler intervals, optimizer state and checkpoint counters
   are preserved on resume. No training is automatically restarted or migrated.

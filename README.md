@@ -173,13 +173,13 @@ MRSTFT Weight, Weight Decay and the parametric hypernetwork options. The HyperWa
 reference HyperWaveNet recipe initializes its batch and settings separately.
 
 **Learning-rate preset** and **Hypernetwork learning-rate preset** now offer
-**Dataset-normalized** and **Dataset-normalized √**, independently. They multiply
+**A2 Dataset-normalized** and **A2 Dataset-normalized √**, independently. They multiply
 the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `S`
 is the complete updates per project training epoch after validation audio is
 excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
 shows actual counts, intervals and final rates. Manual per-epoch decay and Follow
-for the hypernetwork remain available. The original cadences are also available as **Update-based**, **Control-normalized**,
-and **Control-normalized / √2**. Stored preset identifiers and checkpoint clocks
+for the hypernetwork remain available. The original cadences are also available as **A2 Cadence**, **A2 Slow**,
+and **A2 Slower**. Stored preset identifiers and checkpoint clocks
 are preserved, so older jobs can resume with their original learning-rate behavior.
 
 New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 retains

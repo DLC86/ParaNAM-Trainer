@@ -9,11 +9,11 @@ DATASET_RATE_PRESETS = ("a2_dataset", "a2_dataset_sqrt")
 CONTROL_RATE_PRESETS = ("a2_updates", "a2_controls", "a2_slow")
 UPDATE_RATE_PRESETS = (*CONTROL_RATE_PRESETS, *DATASET_RATE_PRESETS)
 RATE_PRESET_LABELS = {
-    "a2_updates": "Update-based",
-    "a2_controls": "Control-normalized",
-    "a2_slow": "Control-normalized / √2",
-    "a2_dataset": "Dataset-normalized",
-    "a2_dataset_sqrt": "Dataset-normalized √",
+    "a2_updates": "A2 Cadence",
+    "a2_slow": "A2 Slow",
+    "a2_controls": "A2 Slower",
+    "a2_dataset_sqrt": "A2 Dataset-normalized √",
+    "a2_dataset": "A2 Dataset-normalized",
 }
 
 

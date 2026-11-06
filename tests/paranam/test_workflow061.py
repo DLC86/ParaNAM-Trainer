@@ -10,6 +10,38 @@ from paranam.workspace import read_json
 from tests.paranam.test_workflow055 import ready_audio
 
 
+def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
+    ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="a2_updates",
+        hypernetwork_rate_preset="a2_controls",
+        learning_rate=0.003,
+        hypernetwork_learning_rate=0.001,
+    )
+    window._attach(workspace)
+    order = [
+        "a2_updates",
+        "a2_slow",
+        "a2_controls",
+        "a2_dataset_sqrt",
+        "a2_dataset",
+        "manual",
+    ]
+    for batch in (4, 2):
+        window.batch_size.setValue(batch)
+        for key in ("rate_preset", "hypernetwork_rate_preset"):
+            field = window.advanced_fields[key]
+            expected = order + (["follow"] if key == "hypernetwork_rate_preset" else [])
+            assert [field.itemData(i) for i in range(field.count())] == expected
+        assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
+        assert (
+            window.advanced_fields["hypernetwork_rate_preset"].currentData()
+            == "a2_controls"
+        )
+        assert window.advanced_fields["learning_rate"].value() == 0.003
+        assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.001
+
+
 def test_retrain_and_start_queue_restore_paused_old_recipe(
     workspace, tmp_path, qapp, monkeypatch
 ):

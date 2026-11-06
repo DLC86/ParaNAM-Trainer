@@ -798,13 +798,14 @@ class WizardWindow(
         advanced_form.insertRow(0, "Preset", preset)
         preset.activated.connect(self.apply_training_preset)
         rate_preset = QComboBox()
-        rate_preset.addItem("Manual / per-epoch decay", "manual")
         from .recipes import RATE_PRESET_LABELS
 
         for key, title in RATE_PRESET_LABELS.items():
             rate_preset.addItem(title, key)
+        rate_preset.addItem("Manual / per-epoch decay", "manual")
+        rate_preset.setCurrentIndex(rate_preset.findData("manual"))
         rate_preset.setToolTip(
-            "Update-based: 62 updates. Control-normalized: 62 × knobs × 2^switches; / √2 divides that interval by √2. "
+            "A2 Cadence: 62 updates. A2 Slow: 62 × knobs × 2^switches / √2. A2 Slower: 62 × knobs × 2^switches. "
             "Dataset-normalized: A2 interval × (dataset updates / reference updates), or its square root. "
             "Uses complete training batches after validation audio is excluded; validation captures are not counted."
         )
@@ -812,11 +813,12 @@ class WizardWindow(
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
         rate_preset.activated.connect(self.apply_rate_preset)
         hyper_rate_preset = QComboBox()
-        hyper_rate_preset.addItem("Follow learning-rate preset", "follow")
         for index in range(rate_preset.count()):
             hyper_rate_preset.addItem(
                 rate_preset.itemText(index), rate_preset.itemData(index)
             )
+        hyper_rate_preset.addItem("Follow learning-rate preset", "follow")
+        hyper_rate_preset.setCurrentIndex(hyper_rate_preset.findData("follow"))
         hyper_rate_preset.setToolTip(
             "Follow keeps the existing shared cadence. Select a separate preset to decay only the hypernetwork at a different pace."
         )
