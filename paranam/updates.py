@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QProgressBar,
+    QPlainTextEdit,
 )
 
 from . import __version__
@@ -264,6 +265,8 @@ class UpdateActions:
             self.update_blink.stop()
             self.update_led.hide()
             return
+        if self._update_dialog is not None and self.update_info["tag"] != info["tag"]:
+            self._update_dialog.reject()
         self.update_info = info
         self.settings.setValue("known_update", json.dumps({"tag": info["tag"]}))
         self.update_led.setToolTip(
@@ -273,6 +276,7 @@ class UpdateActions:
         self.update_blink.start()
         self._blink_update_led()
         if self._update_dialog is not None:
+            self._update_notes.setPlainText(info["notes"])
             self._update_install_button.setEnabled(
                 info["asset"] is not None and self.update_download_worker is None
             )
@@ -284,7 +288,7 @@ class UpdateActions:
         self.update_led.setStyleSheet(
             "color: "
             + ("#ef4444" if self._update_blink_on else "#555555")
-            + "; border: none; background: transparent;"
+            + "; border: none; background: transparent; padding: 0; font-size: 13px; border-radius: 0;"
         )
 
     def show_update_notice(self):
@@ -305,11 +309,12 @@ class UpdateActions:
         text.setWordWrap(True)
         text.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(text)
-        notes = QLabel(self.update_info["notes"][:4500])
-        notes.setTextFormat(Qt.TextFormat.PlainText)
-        notes.setWordWrap(True)
-        # Keep lengthy release notes on GitHub, so the notification fits small screens.
+        notes = QPlainTextEdit()
+        notes.setReadOnly(True)
+        notes.setPlainText(self.update_info["notes"])
+        notes.setMinimumHeight(160)
         notes.setMaximumHeight(260)
+        self._update_notes = notes
         layout.addWidget(notes)
         progress = QProgressBar()
         progress.hide()

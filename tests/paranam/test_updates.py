@@ -112,6 +112,14 @@ def test_dismiss_persists_for_that_release_but_led_and_new_release_remain(window
     style = window.update_led.styleSheet()
     window._blink_update_led()
     assert window.update_led.styleSheet() != style
+    window._update_blink_on = False
+    window._blink_update_led()
+    led = window.update_led.grab().toImage()
+    assert any(
+        led.pixelColor(x, y).red() > 150 and led.pixelColor(x, y).green() < 100
+        for x in range(led.width())
+        for y in range(led.height())
+    )
     window._update_dialog.reject()
     assert window.settings.value("dismissed_update_tag") == info["tag"]
     window._update_checked(info)
