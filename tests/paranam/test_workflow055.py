@@ -128,6 +128,7 @@ def test_a2_cadence_counts_real_batches_and_preserves_optimizer_step_decay(works
 
 def test_rate_preset_preview_persists_and_updates_with_batch(window, workspace):
     ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_updates")
     window._attach(workspace)
     selector = window.advanced_fields["rate_preset"]
     selector.setCurrentIndex(selector.findData("a2_updates"))

@@ -14,7 +14,12 @@ def requested_settings():
             encoding="utf-8"
         )
     )
-    return {**saved, "hypernetwork_recipe": "HyperA2"}
+    return {
+        **saved,
+        "hypernetwork_recipe": "HyperA2",
+        "rate_preset": "a2_dataset",
+        "hypernetwork_rate_preset": "a2_dataset",
+    }
 
 
 def test_hypera2_preset_matches_every_saved_0252_advanced_field():
@@ -64,11 +69,12 @@ def test_0252_architecture_optimizer_safety_flags_and_both_decay_clocks(workspac
     assert spec["model"]["hypernet_lr_scale"] == 0.1
     assert spec["model"]["loss"]["training_recipe"] == "legacy"
     assert spec["model"]["loss"]["mrstft_weight"] == 0.0005
+    steps = spec["preferences"]["rate_schedule"]["audio"]["steps_per_epoch"]
     assert spec["model"]["lr_scheduler"] == {
         "class": "IndependentGroupLR",
         "kwargs": {
-            "audio": {"interval": "step", "step_size": 62, "gamma": 0.994},
-            "hypernetwork": {"interval": "step", "step_size": 248, "gamma": 0.994},
+            "audio": {"interval": "step", "step_size": steps, "gamma": 0.994},
+            "hypernetwork": {"interval": "step", "step_size": steps, "gamma": 0.994},
         },
     }
     assert "gradient_clip_val" not in spec["learning"]["trainer"]

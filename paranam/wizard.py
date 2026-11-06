@@ -782,12 +782,11 @@ class WizardWindow(
         preset.activated.connect(self.apply_training_preset)
         rate_preset = QComboBox()
         rate_preset.addItem("Manual / per-epoch decay", "manual")
-        rate_preset.addItem("A2 — same cadence per optimizer update", "a2_updates")
-        rate_preset.addItem("A2 — slower (knobs × 2^switches)", "a2_controls")
-        rate_preset.addItem("A2 Slow", "a2_slow")
+        rate_preset.addItem("Dataset-normalized", "a2_dataset")
+        rate_preset.addItem("Dataset-normalized √", "a2_dataset_sqrt")
         rate_preset.setToolTip(
-            "The controls-scaled preset keeps the A2 reduction factor but multiplies "
-            "the number of updates between reductions by knobs × 2^switches. A2 Slow divides that factor by √2."
+            "A2 interval × (dataset updates / reference updates), or its square root. "
+            "Uses complete training batches after validation audio is excluded; validation captures are not counted."
         )
         self.advanced_fields["rate_preset"] = rate_preset
         advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
@@ -1062,6 +1061,14 @@ class WizardWindow(
         for key, field in self.advanced_fields.items():
             field.blockSignals(True)
             if isinstance(field, QComboBox):
+                if key in ("rate_preset", "hypernetwork_rate_preset"):
+                    from .recipes import LEGACY_RATE_PRESETS
+
+                    for index in reversed(range(field.count())):
+                        if field.itemData(index) in LEGACY_RATE_PRESETS:
+                            field.removeItem(index)
+                    if options[key] in LEGACY_RATE_PRESETS:
+                        field.addItem(LEGACY_RATE_PRESETS[options[key]], options[key])
                 field.setCurrentIndex(max(0, field.findData(options[key])))
             elif isinstance(field, QCheckBox):
                 field.setChecked(options[key])
@@ -1095,6 +1102,8 @@ class WizardWindow(
             "a2_updates",
             "a2_controls",
             "a2_slow",
+            "a2_dataset",
+            "a2_dataset_sqrt",
         ):
             for key, value in (
                 ("learning_rate", 0.004),
@@ -1145,6 +1154,8 @@ class WizardWindow(
             "a2_updates",
             "a2_controls",
             "a2_slow",
+            "a2_dataset",
+            "a2_dataset_sqrt",
         )
         self.advanced_fields["lr_decay"].setEnabled(not matched)
         self.advanced_fields["lr_decay"].setToolTip(
@@ -1169,8 +1180,14 @@ class WizardWindow(
                         "rate_preset" if name == "audio" else "hypernetwork_rate_preset"
                     )
                     preset_name = self.advanced_fields[field_name].currentText()
+                    accounting = (
+                        f" Dataset: {schedule['steps_per_epoch']} complete updates/epoch; "
+                        f"A2 reference: {schedule['reference_steps']}; ratio {schedule['dataset_reference_ratio']:.8g}."
+                        if "dataset_reference_ratio" in schedule
+                        else ""
+                    )
                     descriptions.append(
-                        f"{name.title()}: {preset_name}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs."
+                        f"{name.title()}: {preset_name}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs.{accounting}"
                     )
                 self.rate_preview.setText(
                     "Independent LR schedules.\n" + "\n".join(descriptions)
@@ -1189,6 +1206,8 @@ class WizardWindow(
                 "a2_updates": "original A2 cadence",
                 "a2_controls": "knobs × 2^switches",
                 "a2_slow": "(knobs × 2^switches) / √2",
+                "a2_dataset": "dataset updates / reference updates",
+                "a2_dataset_sqrt": "√(dataset updates / reference updates)",
             }[self.advanced_fields["rate_preset"].currentData()]
             self.rate_preview.setText(
                 f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "

@@ -114,6 +114,7 @@ def test_scaled_preset_preview_and_selection_are_saved(
     workspace.draft_controls.append(SwitchSpec("Bright", ("Off", "On")).to_dict())
     workspace.preferences.update(n_train=4, n_validation=2)
     ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(rate_preset=preset)
     window._attach(workspace)
     selector = window.advanced_fields["rate_preset"]
     selector.setCurrentIndex(selector.findData(preset))
@@ -121,7 +122,7 @@ def test_scaled_preset_preview_and_selection_are_saved(
     schedule = workspace_update_schedule(workspace)
     assert f"Cadence multiplier: {expected:g}×" in window.rate_preview.text()
     if preset == "a2_slow":
-        assert selector.currentText() == "A2 Slow"
+        assert selector.currentText() == "Legacy: A2 Slow"
         assert "(knobs × 2^switches) / √2" in window.rate_preview.text()
     assert (
         f"every {schedule['decay_steps']:.8g} optimizer updates"
@@ -129,6 +130,8 @@ def test_scaled_preset_preview_and_selection_are_saved(
     )
     assert not window.advanced_fields["lr_decay"].isEnabled()
     assert Workspace(workspace.directory).training_options()["rate_preset"] == preset
+    workspace.preferences["advanced_parametric"]["rate_preset"] = "a2_updates"
+    window.load_advanced_options()
     selector.setCurrentIndex(selector.findData("a2_updates"))
     selector.activated.emit(selector.currentIndex())
     assert workspace_update_schedule(workspace)["cadence_multiplier"] == 1
@@ -279,12 +282,15 @@ def test_follow_setting_keeps_legacy_job_fingerprint(workspace):
 
 def test_independent_presets_preview_and_edits_are_saved(window, workspace):
     ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="a2_controls", hypernetwork_rate_preset="a2_slow"
+    )
     window._attach(workspace)
     hyper = window.advanced_fields["hypernetwork_rate_preset"]
     hyper.setCurrentIndex(hyper.findData("a2_slow"))
     hyper.activated.emit(hyper.currentIndex())
     assert "Independent LR schedules" in window.rate_preview.text()
-    assert "Hypernetwork: A2 Slow" in window.rate_preview.text()
+    assert "Hypernetwork: Legacy: A2 Slow" in window.rate_preview.text()
     assert (
         Workspace(workspace.directory).training_options()["hypernetwork_rate_preset"]
         == "a2_slow"

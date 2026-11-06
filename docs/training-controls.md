@@ -43,68 +43,56 @@ capture or ensemble member has its own displayed history.
 
 ## Advanced training settings
 
-The base **Learning Rate** and **Hypernetwork Learning Rate** can be set
-independently. **Follow learning-rate preset** preserves a shared schedule.
-The current HyperA2 preset starts with a separate control-scaled hypernetwork
-schedule. Select Manual, the
-original A2 cadence, the control-scaled cadence, or A2 Slow independently to
-give the hypernetwork a different clock. Manual hypernetwork scheduling uses
-its own **Hypernetwork LR Decay** once per epoch; A2 presets use optimizer
-updates. The preview shows the two intervals and final rates separately.
-Selecting a hypernetwork preset initializes only its own rate/decay; changing
-the main preset leaves an independently configured hypernetwork rate intact.
-Hypernetwork controls apply only to parametric training.
+The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
+editable and have separate scheduler selectors. New HyperA2 projects use
+**Dataset-normalized** for both, starting at 0.004 and 0.0004 with decay 0.994.
+All other HyperA2 advanced values retain the requested 06/11 02:52 recipe.
+Batch size defaults to 16 and the epoch budget to 100.
 
-The optional **A2 — same cadence per optimizer update** learning-rate preset
-starts at audio LR 0.004 and hypernetwork LR 0.0004. Both rates remain editable.
-It uses one bundled standard capture as reference, with the official 10-second /
-final-nine-second split, NY 8192 and batch 16: 62 complete updates per reference
-epoch. A step-based scheduler multiplies both rates by 0.994 every 62 optimizer
-updates. Its counter is stored in checkpoints and restored on resume; it is not
-reset at parametric epoch boundaries. Changing Batch Size or NY changes how many
-updates a project epoch contains, without changing that reference cadence.
+Let `S` be the number of complete optimizer updates in one project training
+epoch and `R` the bundled static A2 reference (62 updates: standard input,
+NY 8192, batch 16, initial 10 seconds and final 9 seconds excluded).
+The two new presets replace the control-count-based choices:
 
-The **A2 — slower (knobs × 2^switches)** variant retains the reference,
-initial rates and 0.994 reduction factor, but applies a reduction every
-`62 × n` optimizer updates, where `n = knobs × 2^switches`. Each switch doubles
-the factor, regardless of its number of positions. Thus two knobs and zero,
-one or two switches yield 2×, 4× or 8×; three knobs and one or two switches yield
-6× or 12×. Switch-only models use one as their knob multiplier.
-New projects use HyperA2, 100 epochs and batch 16, with audio LR 0.004 and
-hypernetwork LR 0.0004. Audio uses the original 62-update A2 cadence; the
-hypernetwork uses this control-scaled cadence. Previously saved projects retain
-their settings. Already-created jobs retain their frozen update
-interval and scheduler state, including the older control-count formula.
-In Follow mode, both the audio and hypernetwork LR follow the selected schedule. The preview and
-saved job specification show the multiplier, actual update interval, reduction
-count and final rates. Resume restores the scheduler counter; changing the
-preset requires a new training instance.
+| Preset | Discrete reduction interval | Example: S = 100 × R |
+| --- | --- | --- |
+| Dataset-normalized | `R × (S/R) = S` | 6,200 updates |
+| Dataset-normalized √ | `R × sqrt(S/R)` | 620 updates |
 
-**A2 Slow** uses `n = (knobs × 2^switches) / √2`. Initial rates and decay
-match the other A2 presets. Both rates are reduced by 0.994 every `62 × n`
-optimizer updates on average. For two knobs, zero/one/two switches give factors
-about 1.414×/2.828×/5.657×. One knob and no switches gives about 0.707×.
-The interval is not rounded to a fixed number of updates: reductions occur at
-`ceil(k × 62 × n)` for each reduction k, preserving fractional progress across
-updates and checkpoint resume. For two knobs and no switches, for example, the
-interval averages 87.68124 updates, with reductions at 88, 176, 264, 351, … .
-The control-based preset remains the HyperA2 hypernetwork default. Saved jobs
-retain their scheduler and counter; changing presets requires a new instance.
+Each reduction multiplies the selected group's LR by 0.994. Linear normalization
+therefore applies one reduction per complete dataset epoch. For 100 epochs,
+initial rates 0.004/0.0004 become approximately 0.002191/0.0002191 when both groups
+use linear normalization. The square-root variant decays faster than the linear
+variant for datasets larger than the reference, and slower for smaller datasets.
+The audio and hypernetwork can select different modes, or **Manual / per-epoch
+decay**, whose decay value remains editable separately for each group.
+**Follow learning-rate preset** shares the main group's cadence and decay.
+Choosing a preset resets only that group's initial rate and decay; initial rates
+remain editable. Hypernetwork options apply only to parametric training.
+Static A2 scheduling is unchanged.
 
-Control-based scaling is an optional heuristic for optimization, not a guarantee
-of better validation or generalization. A large capture set and a long epoch
-budget can still make the final rates very small; inspect the preview before
-starting a run. Manual and the original A2 cadence remain selectable.
+The accounting reads WAV headers and mirrors the real training loader: cropping,
+initial/final validation exclusion, receptive-field context, delay alignment,
+NY and complete batches dropped separately for each capture. Validation captures
+do not enter S. Thus captures with different useful durations, batch sizes or NY
+are accounted for through optimizer updates, rather than raw WAV duration or the
+number of knobs/switches. The preview reports each group's interval, reference,
+complete updates per epoch, ratio and final LR. Empty/incomplete training batches
+produce a clear error rather than a guessed schedule.
 
-The preview reads WAV headers and counts actual complete batches separately for
-each capture, including context, trimming and alignment. It shows audio duration,
-updates per epoch, the average equivalent per-epoch multiplier and final rates for
-the chosen epoch budget. A large parametric dataset can undergo many reference
-epochs inside one project epoch, so keeping 200 project epochs can produce a very
-small final LR. This preset matches a cadence; it does not automatically choose
-an optimal duration or guarantee equal accuracy. Manual per-epoch decay
-remains available. Rate preferences and the calculated schedule are
-frozen into each independent job.
+Fractional intervals retain their remainder: reduction k occurs at
+`ceil(k × interval)`. Both independent counters are saved in checkpoints and
+restored on resume. Generated jobs freeze the calculated interval; scheduler
+normalization is not recomputed mid-training. Changing a preset requires a new
+training instance. No schedule guarantees better validation ESR or generalization;
+normalization trades faster decay for a comparable progression per dataset epoch.
+
+Old projects and jobs keep their saved choices and effective clocks. When an old
+project uses an earlier scheduler, its selector displays a **Legacy:** entry:
+original A2 (`62`), control-scaled (`62 × knobs × 2^switches`), or A2 Slow
+(`62 × knobs × 2^switches / sqrt(2)`). These choices are retained for compatibility
+and do not appear as new choices in a fresh project. No old run, checkpoint,
+queue entry or project is automatically migrated to a new schedule.
 
 **Hypernetwork weight mode** selects Full or Low rank independently of
 **Condition dilated convolution kernels on knobs**. All four combinations are supported.
@@ -147,12 +135,13 @@ topologies, validation and compilation settings are common to both recipes.
 | Clipping / NaN/Inf protection | Disabled / disabled (limit stored as 1.0) | 1.0 / enabled |
 | NY / MRSTFT weight | 8192 / 0.0005 | 8192 / 0.0005 |
 | LR decay / weight decay | 0.994 / 3.17e-7 | 0.994 / 3.17e-7 |
-| Audio LR schedule | A2, every 62 updates | Manual, per epoch |
-| Hypernetwork LR schedule | A2, every `62 × knobs × 2^switches` updates | Follow |
+| Audio LR schedule | Dataset-normalized, every S updates | Manual, per epoch |
+| Hypernetwork LR schedule | Dataset-normalized, every S updates | Follow |
 | cuDNN benchmark / deterministic algorithms | Disabled / disabled | Enabled / disabled |
 
-HyperA2 now reproduces all advanced fields of the saved 06/11 02:52 training,
-with its preset label changed to HyperA2. Existing jobs retain their saved label
+HyperA2 retains the advanced fields of the saved 06/11 02:52 training,
+with the subsequently requested dataset-normalized audio/hypernetwork schedules
+and its preset label changed to HyperA2. Existing jobs retain their saved label
 and effective settings; no preset migration is applied to them.
 
 The HyperWaveNet settings were verified against Phillip Self's

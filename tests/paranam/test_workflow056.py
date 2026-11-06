@@ -438,7 +438,7 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert fresh.preferences["epochs"] == 100
     assert fresh.training_batch_size() == 16
     assert options["hypernetwork_recipe"] == "HyperA2"
-    assert options["rate_preset"] == "a2_updates"
+    assert options["rate_preset"] == "a2_dataset"
     assert options["optimizer"] == "Adam"
     assert options["hypernetwork_mode"] == "low_rank"
     assert not options["condition_dilated_convolutions"]
@@ -447,7 +447,7 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     window._attach(fresh)
     assert window.epochs.value() == 100
     assert window.advanced_fields["hypernetwork_recipe"].currentData() == "HyperA2"
-    assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
+    assert window.advanced_fields["rate_preset"].currentData() == "a2_dataset"
     fresh.preferences.update(
         epochs=250,
         batch_size=16,

@@ -321,16 +321,18 @@ def make_job(workspace, resume=False, job_directory=None):
             "a2_updates",
             "a2_controls",
             "a2_slow",
+            "a2_dataset",
+            "a2_dataset_sqrt",
         ):
-            raise ValueError(
-                "Choose Manual, A2 cadence, A2 controls-scaled cadence or A2 Slow as the learning-rate preset"
-            )
+            raise ValueError("Choose a listed learning-rate preset")
         if options.get("hypernetwork_rate_preset", "follow") not in (
             "follow",
             "manual",
             "a2_updates",
             "a2_controls",
             "a2_slow",
+            "a2_dataset",
+            "a2_dataset_sqrt",
         ):
             raise ValueError("Choose a listed hypernetwork learning-rate preset")
         hyper_decay = options.get("hypernetwork_lr_decay", options["lr_decay"])
@@ -449,6 +451,8 @@ def make_job(workspace, resume=False, job_directory=None):
             "a2_updates",
             "a2_controls",
             "a2_slow",
+            "a2_dataset",
+            "a2_dataset_sqrt",
         ):
             from .recipes import a2_update_schedule, rate_cadence_multiplier
 
@@ -464,11 +468,17 @@ def make_job(workspace, resume=False, job_directory=None):
                 cadence_multiplier=rate_cadence_multiplier(
                     workspace.project, options["rate_preset"]
                 ),
+                normalization=(
+                    options["rate_preset"]
+                    if options["rate_preset"] in ("a2_dataset", "a2_dataset_sqrt")
+                    else None
+                ),
             )
             model["lr_scheduler"] = {
                 "class": (
                     "UpdateCadenceLR"
-                    if options["rate_preset"] == "a2_slow"
+                    if options["rate_preset"]
+                    in ("a2_slow", "a2_dataset", "a2_dataset_sqrt")
                     else "StepLR"
                 ),
                 "kwargs": {

@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.5.9 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.5.9-preview)**
+**[Download ParaNAM Trainer 0.6.0 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.0-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -172,27 +172,21 @@ manual decay controls for the audio network and hypernetwork, NY, Fit MRSTFT,
 MRSTFT Weight, Weight Decay and the parametric hypernetwork options. The HyperWaveNet preset uses **AdamW**. HyperA2 and static A2 use batch 16 by default; selecting the
 reference HyperWaveNet recipe initializes its batch and settings separately.
 
-The optional **A2 — same cadence per optimizer update** learning-rate preset uses
-dataset/window counts and batch size to match the reference A2 decay cadence.
-Its preview shows update counts and the resulting final learning rates.
-The **A2 — slower (knobs × 2^switches)** variant keeps the same reduction
-factor, with `n = knobs × 2^switches`: two knobs and no switches give 2×;
-two knobs and one switch give 4×; two knobs and two switches give 8×.
-**A2 Slow** divides that factor by √2: `(knobs × 2^switches) / √2`.
-For example, two knobs and no switches give approximately 1.414×. Fractional
-update progress is retained across reductions and checkpoint resume.
-Switch position counts do not enter the formula. For switch-only models,
-the knob multiplier is one. Both initial rates remain editable.
-New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 now
-reproduces the advanced settings saved in the 06/11 02:52 training: Adam,
-audio/hypernetwork LR 0.004/0.0004, original A2 audio cadence, and control-scaled
-hypernetwork cadence. It uses rank-2 deltas, excludes dilated convolution kernels,
-and disables clipping, NaN/Inf scanning and cuDNN benchmark.
-Saved projects and existing training instances keep their settings.
-**Hypernetwork learning-rate preset** can Follow the main schedule or select a
-separate cadence (HyperA2 starts control-scaled). Decay audio and hypernetwork at different
-rates; Manual hypernetwork decay has its own per-epoch multiplier. The preview
-shows each schedule and final LR separately. Saved jobs restore both counters.
+**Learning-rate preset** and **Hypernetwork learning-rate preset** now offer
+**Dataset-normalized** and **Dataset-normalized √**, independently. They multiply
+the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `S`
+is the complete updates per project training epoch after validation audio is
+excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
+shows actual counts, intervals and final rates. Manual per-epoch decay and Follow
+for the hypernetwork remain available. Existing projects display their saved
+older scheduler as a Legacy entry and retain its behavior on resume.
+
+New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 retains
+the requested 06/11 02:52 advanced configuration (Adam, audio/hypernetwork LR
+0.004/0.0004, rank-2 deltas, dilated convolution kernels excluded, clipping,
+NaN/Inf scanning and cuDNN benchmark off), with the subsequently requested linear
+dataset-normalized schedule for both rates. Initial rates remain editable.
+Existing projects and training instances keep their settings and both counters.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 
@@ -297,6 +291,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.6.0 changes](docs/release-0.6.0.md)
 - [0.5.9 changes](docs/release-0.5.9.md)
 - [0.5.8 changes](docs/release-0.5.8.md)
 - [0.5.7 changes](docs/release-0.5.7.md)

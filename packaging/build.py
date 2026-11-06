@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.5.9"
+VERSION = "0.6.0"
 
 
 def run(*args):

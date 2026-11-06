@@ -5,6 +5,13 @@ from pathlib import Path
 
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
+DATASET_RATE_PRESETS = ("a2_dataset", "a2_dataset_sqrt")
+LEGACY_RATE_PRESETS = {
+    "a2_updates": "Legacy: A2 per-update cadence",
+    "a2_controls": "Legacy: A2 knobs × 2^switches",
+    "a2_slow": "Legacy: A2 Slow",
+}
+
 
 def control_cadence_multiplier(project):
     """Each switch doubles the knob-based cadence; switch positions are irrelevant."""
@@ -23,14 +30,14 @@ def rate_cadence_multiplier(project, preset):
 def training_preset(name):
     if name not in ("HyperA2", "HyperWaveNet"):
         raise ValueError(f"Unknown training preset: {name}")
-    # HyperA2 reproduces the saved 2026-11-06 02:52 training recipe. The name
-    # selects a starting configuration; every effective option is stored in jobs.
+    # Start from the saved 2026-11-06 02:52 recipe, with the subsequently
+    # requested dataset-normalized clocks. Every effective option is stored in jobs.
     hyper_a2 = name == "HyperA2"
     return dict(
-        rate_preset="a2_updates" if hyper_a2 else "manual",
+        rate_preset="a2_dataset" if hyper_a2 else "manual",
         cudnn_benchmark=not hyper_a2,
         deterministic_training=False,
-        hypernetwork_rate_preset="a2_controls" if hyper_a2 else "follow",
+        hypernetwork_rate_preset="a2_dataset" if hyper_a2 else "follow",
         hypernetwork_lr_decay=0.994,
         hypernetwork_recipe=name,
         hypernetwork_mode="low_rank",
@@ -66,6 +73,7 @@ def a2_update_schedule(
     reference_gamma=0.994,
     *,
     cadence_multiplier=1,
+    normalization=None,
 ):
     """Match the official single-standard-capture A2 decay per optimizer update.
 
@@ -73,6 +81,8 @@ def a2_update_schedule(
     drop-last sampler. The reference always uses bundled standard audio, NY=8192,
     batch=16 and the official 10s / final-9s split, independent of custom inputs.
     cadence_multiplier spaces the same discrete reductions farther apart.
+    Dataset normalization instead scales by actual complete updates/reference
+    updates, linearly or by its square root. It never counts validation captures.
     """
     import soundfile as sf
     from nam.capture.export import (
@@ -139,18 +149,31 @@ def a2_update_schedule(
         total_seconds += count / x.samplerate
     if steps < 1:
         raise ValueError("Apply a capture plan before calculating the A2 cadence")
-    interval = reference_steps * cadence_multiplier
+    if normalization not in (None, *DATASET_RATE_PRESETS):
+        raise ValueError("Unknown dataset cadence normalization")
+    ratio = steps / reference_steps
+    if normalization is not None:
+        cadence_multiplier = (
+            ratio if normalization == "a2_dataset" else math.sqrt(ratio)
+        )
+    interval = (
+        steps if normalization == "a2_dataset" else reference_steps * cadence_multiplier
+    )
     decay_steps = int(interval) if float(interval).is_integer() else interval
     reductions = math.floor(steps * epochs / decay_steps)
     factor = reference_gamma**reductions
     return dict(
         protocol=(
-            "a2-standard-update-cadence-fractional-v1"
-            if not float(interval).is_integer()
+            f"{normalization}-update-cadence-v1"
+            if normalization
             else (
-                "a2-standard-update-cadence-v1"
-                if cadence_multiplier == 1
-                else "a2-standard-update-cadence-scaled-v1"
+                "a2-standard-update-cadence-fractional-v1"
+                if not float(interval).is_integer()
+                else (
+                    "a2-standard-update-cadence-v1"
+                    if cadence_multiplier == 1
+                    else "a2-standard-update-cadence-scaled-v1"
+                )
             )
         ),
         reference_steps=reference_steps,
@@ -160,6 +183,7 @@ def a2_update_schedule(
         reference_ny=8192,
         reference_gamma=reference_gamma,
         steps_per_epoch=steps,
+        **({"dataset_reference_ratio": ratio} if normalization else {}),
         training_seconds=total_seconds,
         gamma_epoch=math.exp(math.log(reference_gamma) * steps / decay_steps),
         final_learning_rate=learning_rate * factor,
@@ -192,6 +216,11 @@ def workspace_update_schedule(workspace):
         options["lr_decay"],
         cadence_multiplier=rate_cadence_multiplier(
             project, options.get("rate_preset", "a2_updates")
+        ),
+        normalization=(
+            options["rate_preset"]
+            if options["rate_preset"] in DATASET_RATE_PRESETS
+            else None
         ),
     )
 
@@ -234,6 +263,7 @@ def rate_group_schedule(
         rate,
         gamma,
         cadence_multiplier=rate_cadence_multiplier(project, preset),
+        normalization=preset if preset in DATASET_RATE_PRESETS else None,
     )
     return dict(
         schedule,
