@@ -8,6 +8,8 @@ version = "0.5.8"
 description = "Self-contained ParaNAM capture and HyperA2 training wizard"
 authors = [
     {name = "Steven Atkinson", email = "steven@atkinson.mn"},
+    {name = "Phillip Self"},
+    {name = "DLC86"},
 ]
 readme = "README.md"
 license = {file = "LICENSE"}

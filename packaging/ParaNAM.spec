@@ -6,6 +6,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 
 root = Path(SPECPATH).parent
 data = [(str(root / "LICENSE"), "licenses"),
+        (str(root / "CREDITS.md"), "licenses"),
+        (str(root / "nam/_dependencies/auraloss/LICENSE"), "licenses/auraloss"),
         (str(root / "THIRD_PARTY_NOTICES.md"), "licenses")]
 for package in ("nam", "paranam", "pytorch_lightning", "lightning_fabric", "librosa", "scipy", "torchmetrics"):
     data += collect_data_files(package)

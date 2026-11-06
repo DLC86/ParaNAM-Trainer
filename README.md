@@ -13,6 +13,20 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
+## Credits
+
+ParaNAM Trainer builds on **[Phillip Self](https://github.com/phillipmself)**'s
+[parametric trainer](https://github.com/phillipmself/neural-amp-modeler-parametric),
+including its capture workflow, parametric models and hypernetwork implementation,
+and **[Steven Atkinson](https://github.com/sdatkinson)**'s
+[Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler).
+Native playback also derives from Phillip Self's NAM Parametric Plugin and
+NeuralAmpModelerCoreParametric. This fork's desktop application and extensions
+are maintained by [DLC86](https://github.com/DLC86).
+
+See [CREDITS.md](CREDITS.md) for contributors and component-specific attribution,
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for licenses and asset sources.
+
 ## Install
 
 Choose the package for your computer from the linked release:
