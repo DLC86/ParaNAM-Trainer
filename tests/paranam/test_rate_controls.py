@@ -169,7 +169,7 @@ def test_independent_presets_preview_and_edits_are_saved(window, workspace):
     hyper.setCurrentIndex(hyper.findData("manual"))
     hyper.activated.emit(hyper.currentIndex())
     assert window.advanced_fields["hypernetwork_lr_decay"].isEnabled()
-    assert not window.advanced_fields["lr_decay"].isEnabled()
+    assert window.advanced_fields["lr_decay"].isEnabled()
 
 
 @pytest.mark.parametrize("old_presets", [False, True])

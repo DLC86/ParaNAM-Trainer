@@ -177,8 +177,8 @@ reference HyperWaveNet recipe initializes its batch and settings separately.
 the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `S`
 is the complete updates per project training epoch after validation audio is
 excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
-shows actual counts, intervals and final rates. Manual per-epoch decay and Follow
-for the hypernetwork remain available. The original cadences are also available as **A2 Cadence**, **A2 Slow**,
+shows actual counts, intervals and final rates. Manual per-epoch decay remains available. Both decay values are editable for
+every preset and changing a cadence keeps the values entered in their fields. The original cadences are also available as **A2 Cadence**, **A2 Slow**,
 and **A2 Slower**. Stored preset identifiers and checkpoint clocks
 are preserved, so older jobs can resume with their original learning-rate behavior.
 

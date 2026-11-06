@@ -133,9 +133,9 @@ def test_rate_preset_preview_persists_and_updates_with_batch(window, workspace):
     selector = window.advanced_fields["rate_preset"]
     selector.setCurrentIndex(selector.findData("a2_dataset"))
     selector.activated.emit(selector.currentIndex())
-    assert not window.advanced_fields["lr_decay"].isEnabled()
+    assert window.advanced_fields["lr_decay"].isEnabled()
     assert "reference" in window.rate_preview.text()
-    assert "After 2 epochs" in window.rate_preview.text()
+    assert "after 2 epochs" in window.rate_preview.text()
     first = window.rate_preview.text()
     window.batch_size.setValue(2)
     assert window.rate_preview.text() != first

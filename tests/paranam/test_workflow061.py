@@ -10,6 +10,96 @@ from paranam.workspace import read_json
 from tests.paranam.test_workflow055 import ready_audio
 
 
+@pytest.mark.parametrize(
+    "preset", ["a2_updates", "a2_slow", "a2_controls", "a2_dataset_sqrt", "a2_dataset"]
+)
+def test_all_presets_use_editable_independent_decay_values(window, workspace, preset):
+    from nam.train.parametric import _ParametricLightningModule
+
+    ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="manual",
+        hypernetwork_rate_preset="manual",
+        lr_decay=0.9,
+        hypernetwork_lr_decay=0.8,
+    )
+    window._attach(workspace)
+    for key in ("rate_preset", "hypernetwork_rate_preset"):
+        selector = window.advanced_fields[key]
+        assert selector.findData("follow") == -1
+        selector.setCurrentIndex(selector.findData(preset))
+        selector.activated.emit(selector.currentIndex())
+    assert window.advanced_fields["lr_decay"].isEnabled()
+    assert window.advanced_fields["hypernetwork_lr_decay"].isEnabled()
+    assert window.advanced_fields["lr_decay"].value() == 0.9
+    assert window.advanced_fields["hypernetwork_lr_decay"].value() == 0.8
+    assert "multiply LR by 0.9" in window.rate_preview.text()
+    assert "multiply LR by 0.8" in window.rate_preview.text()
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    descriptions = spec["preferences"]["rate_schedule"]
+    assert descriptions["audio"]["gamma"] == 0.9
+    assert descriptions["hypernetwork"]["gamma"] == 0.8
+    module = _ParametricLightningModule.init_from_config(spec["model"])
+    optimizers, schedulers = module.configure_optimizers()
+    optimizer = optimizers[0]
+    initial = [group["lr"] for group in optimizer.param_groups]
+    for step in range(1, 131):
+        optimizer.step()
+        for schedule in schedulers:
+            schedule["scheduler"].step()
+        for group, rate, description in zip(
+            optimizer.param_groups, initial, descriptions.values()
+        ):
+            assert group["lr"] == pytest.approx(
+                rate
+                * description["gamma"] ** math.floor(step / description["step_size"])
+            )
+
+
+def test_legacy_follow_is_not_visible_and_keeps_old_fingerprint_until_edited(
+    window, workspace
+):
+    ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="a2_controls",
+        hypernetwork_rate_preset="follow",
+        lr_decay=0.97,
+        hypernetwork_lr_decay=0.8,
+    )
+    workspace.save()
+    fingerprint = workspace.fingerprint()
+    window._attach(workspace)
+    assert window.advanced_fields["hypernetwork_rate_preset"].findData("follow") == -1
+    assert (
+        window.advanced_fields["hypernetwork_rate_preset"].currentData()
+        == "a2_controls"
+    )
+    assert window.advanced_fields["hypernetwork_lr_decay"].value() == 0.97
+    window.save_preferences()
+    assert workspace.fingerprint() == fingerprint
+    window.advanced_fields["hypernetwork_lr_decay"].setValue(0.8)
+    assert workspace.training_options()["hypernetwork_rate_preset"] == "a2_controls"
+    assert workspace.training_options()["hypernetwork_lr_decay"] == 0.8
+    assert workspace.training_options()["lr_decay"] == 0.97
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    assert spec["model"]["lr_scheduler"]["kwargs"]["audio"]["gamma"] == 0.97
+    assert spec["model"]["lr_scheduler"]["kwargs"]["hypernetwork"]["gamma"] == 0.8
+
+
+@pytest.mark.parametrize("gamma", [0.0, 1.0])
+def test_preset_decay_limits_are_supported(workspace, gamma):
+    ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="a2_dataset",
+        hypernetwork_rate_preset="a2_dataset",
+        lr_decay=gamma,
+        hypernetwork_lr_decay=gamma,
+    )
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    for schedule in spec["preferences"]["rate_schedule"].values():
+        assert schedule["gamma"] == gamma and schedule["gamma_epoch"] == gamma
+
+
 def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
     ready_audio(workspace)
     workspace.preferences["advanced_parametric"] = dict(
@@ -31,7 +121,7 @@ def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
         window.batch_size.setValue(batch)
         for key in ("rate_preset", "hypernetwork_rate_preset"):
             field = window.advanced_fields[key]
-            expected = order + (["follow"] if key == "hypernetwork_rate_preset" else [])
+            expected = order
             assert [field.itemData(i) for i in range(field.count())] == expected
         assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
         assert (

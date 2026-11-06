@@ -39,7 +39,7 @@ def training_preset(name):
         rate_preset="a2_dataset" if hyper_a2 else "manual",
         cudnn_benchmark=not hyper_a2,
         deterministic_training=False,
-        hypernetwork_rate_preset="a2_dataset" if hyper_a2 else "follow",
+        hypernetwork_rate_preset="a2_dataset" if hyper_a2 else "manual",
         hypernetwork_lr_decay=0.994,
         hypernetwork_recipe=name,
         hypernetwork_mode="low_rank",
@@ -94,9 +94,9 @@ def a2_update_schedule(
     )
     from .signals import asset_path
 
-    if batch_size < 1 or ny < 1 or epochs < 1 or not 0 < reference_gamma <= 1:
+    if batch_size < 1 or ny < 1 or epochs < 1 or not 0 <= reference_gamma <= 1:
         raise ValueError(
-            "The A2 cadence preset requires positive batch, NY and epochs, and 0 < decay <= 1"
+            "The A2 cadence preset requires positive batch, NY and epochs, and 0 <= decay <= 1"
         )
     if (
         isinstance(cadence_multiplier, bool)
@@ -187,7 +187,11 @@ def a2_update_schedule(
         steps_per_epoch=steps,
         **({"dataset_reference_ratio": ratio} if normalization else {}),
         training_seconds=total_seconds,
-        gamma_epoch=math.exp(math.log(reference_gamma) * steps / decay_steps),
+        gamma_epoch=(
+            math.exp(math.log(reference_gamma) * steps / decay_steps)
+            if reference_gamma
+            else 0.0
+        ),
         final_learning_rate=learning_rate * factor,
         final_hypernetwork_learning_rate=hypernetwork_learning_rate * factor,
         equivalent_a2_epochs=steps * epochs / reference_steps,

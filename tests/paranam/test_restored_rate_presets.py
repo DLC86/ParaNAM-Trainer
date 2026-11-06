@@ -119,20 +119,20 @@ def test_scaled_preset_preview_and_selection_are_saved(
     selector.setCurrentIndex(selector.findData(preset))
     selector.activated.emit(selector.currentIndex())
     schedule = workspace_update_schedule(workspace)
-    assert f"Cadence multiplier: {expected:g}×" in window.rate_preview.text()
+    assert schedule["cadence_multiplier"] == pytest.approx(expected)
     if preset == "a2_slow":
         assert selector.currentText() == "A2 Slow"
-        assert "(knobs × 2^switches) / √2" in window.rate_preview.text()
+        assert "A2 Slow:" in selector.toolTip()
     assert (
         f"every {schedule['decay_steps']:.8g} optimizer updates"
         in window.rate_preview.text()
     )
-    assert not window.advanced_fields["lr_decay"].isEnabled()
+    assert window.advanced_fields["lr_decay"].isEnabled()
     assert Workspace(workspace.directory).training_options()["rate_preset"] == preset
     selector.setCurrentIndex(selector.findData("a2_updates"))
     selector.activated.emit(selector.currentIndex())
     assert workspace_update_schedule(workspace)["cadence_multiplier"] == 1
-    assert "original A2 update cadence" in window.rate_preview.text()
+    assert "Audio: A2 Cadence" in window.rate_preview.text()
 
 
 @pytest.mark.parametrize("factor", [0, -1, True, "1", None, float("nan"), float("inf")])

@@ -37,7 +37,7 @@ def test_static_hides_hypernetwork_fields_and_labels(window, workspace):
     window.load_advanced_options("parametric")
     assert all(layout.isRowVisible(field) for field in fields)
     assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.0004
-    assert not window.advanced_fields["hypernetwork_lr_decay"].isEnabled()
+    assert window.advanced_fields["hypernetwork_lr_decay"].isEnabled()
 
 
 def test_charts_keep_epoch_positions_and_hover_fixed(qapp):

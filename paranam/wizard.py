@@ -817,10 +817,9 @@ class WizardWindow(
             hyper_rate_preset.addItem(
                 rate_preset.itemText(index), rate_preset.itemData(index)
             )
-        hyper_rate_preset.addItem("Follow learning-rate preset", "follow")
-        hyper_rate_preset.setCurrentIndex(hyper_rate_preset.findData("follow"))
+        hyper_rate_preset.setCurrentIndex(hyper_rate_preset.findData("manual"))
         hyper_rate_preset.setToolTip(
-            "Follow keeps the existing shared cadence. Select a separate preset to decay only the hypernetwork at a different pace."
+            "Choose the hypernetwork cadence independently. Each reduction uses the editable Hypernetwork LR Decay value."
         )
         self.advanced_fields["hypernetwork_rate_preset"] = hyper_rate_preset
         advanced_form.insertRow(
@@ -1079,7 +1078,11 @@ class WizardWindow(
         self.save_preferences()
 
     def load_advanced_options(self, kind=None):
-        options = self.workspace.training_options(kind)
+        options = dict(self.workspace.training_options(kind))
+        if options["hypernetwork_rate_preset"] == "follow":
+            # Display legacy shared schedules as their explicit effective values.
+            options["hypernetwork_rate_preset"] = options["rate_preset"]
+            options["hypernetwork_lr_decay"] = options["lr_decay"]
         for key, field in self.advanced_fields.items():
             field.blockSignals(True)
             if isinstance(field, QComboBox):
@@ -1119,20 +1122,10 @@ class WizardWindow(
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
-            for key, value in (
-                ("learning_rate", 0.004),
-                ("lr_decay", 0.994),
-            ):
+            for key, value in (("learning_rate", 0.004),):
                 self.advanced_fields[key].blockSignals(True)
                 self.advanced_fields[key].setValue(value)
                 self.advanced_fields[key].blockSignals(False)
-            if (
-                self.advanced_fields["hypernetwork_rate_preset"].currentData()
-                == "follow"
-            ):
-                self.advanced_fields["hypernetwork_learning_rate"].blockSignals(True)
-                self.advanced_fields["hypernetwork_learning_rate"].setValue(0.0004)
-                self.advanced_fields["hypernetwork_learning_rate"].blockSignals(False)
         self.save_preferences()
 
     def apply_hypernetwork_rate_preset(self, *_):
@@ -1142,10 +1135,7 @@ class WizardWindow(
             "follow",
             "manual",
         ):
-            for key, value in (
-                ("hypernetwork_learning_rate", 0.0004),
-                ("hypernetwork_lr_decay", 0.994),
-            ):
+            for key, value in (("hypernetwork_learning_rate", 0.0004),):
                 field = self.advanced_fields[key]
                 field.blockSignals(True)
                 field.setValue(value)
@@ -1161,9 +1151,7 @@ class WizardWindow(
         self.advanced_fields["rate_preset"].setEnabled(parametric)
         hyper_preset = self.advanced_fields["hypernetwork_rate_preset"].currentData()
         self.advanced_fields["hypernetwork_rate_preset"].setEnabled(parametric)
-        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(
-            parametric and hyper_preset == "manual"
-        )
+        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(parametric)
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
@@ -1171,9 +1159,9 @@ class WizardWindow(
             "a2_dataset",
             "a2_dataset_sqrt",
         )
-        self.advanced_fields["lr_decay"].setEnabled(not matched)
+        self.advanced_fields["lr_decay"].setEnabled(True)
         self.advanced_fields["lr_decay"].setToolTip(
-            "Reference A2-epoch multiplier. The preview shows its cadence in optimizer updates and the equivalent multiplier per project epoch."
+            "Editable learning-rate multiplier applied at each reduction of the selected cadence."
             if matched
             else "Exponential learning-rate multiplier after each epoch."
         )
@@ -1975,6 +1963,7 @@ class WizardWindow(
             prefs[key] = field.value()
         previous_type = prefs["capture_type"]
         next_type = self.capture_kind.currentData()
+        old_options = self.workspace.training_options(previous_type)
         batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
         prefs[batch_key] = self.batch_size.value()
         prefs["advanced_" + previous_type] = {
@@ -1987,6 +1976,15 @@ class WizardWindow(
             )
             for key, field in self.advanced_fields.items()
         }
+        advanced = prefs["advanced_" + previous_type]
+        if (
+            old_options["hypernetwork_rate_preset"] == "follow"
+            and advanced["hypernetwork_rate_preset"] == advanced["rate_preset"]
+            and advanced["hypernetwork_lr_decay"] == advanced["lr_decay"]
+        ):
+            # Keep the old fingerprint only while the visible settings are exactly
+            # equivalent. Any separate edit immediately becomes independent.
+            advanced["hypernetwork_rate_preset"] = "follow"
         if previous_type != next_type:
             next_key = "static_batch_size" if next_type == "static" else "batch_size"
             self.batch_size.blockSignals(True)
