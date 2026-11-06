@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.6.0 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.0-preview)**
+**[Download ParaNAM Trainer 0.6.1 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.1-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -178,8 +178,9 @@ the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `
 is the complete updates per project training epoch after validation audio is
 excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
 shows actual counts, intervals and final rates. Manual per-epoch decay and Follow
-for the hypernetwork remain available. The original A2, control-scaled A2 and A2 Slow choices have been removed.
-Jobs using them cannot resume after upgrading; use Retrain with a new preset.
+for the hypernetwork remain available. The original cadences are also available as **Update-based**, **Control-normalized**,
+and **Control-normalized / √2**. Stored preset identifiers and checkpoint clocks
+are preserved, so older jobs can resume with their original learning-rate behavior.
 
 New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 retains
 the requested 06/11 02:52 advanced configuration (Adam, audio/hypernetwork LR
@@ -292,6 +293,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.6.1 changes](docs/release-0.6.1.md)
 - [0.6.0 changes](docs/release-0.6.0.md)
 - [0.5.9 changes](docs/release-0.5.9.md)
 - [0.5.8 changes](docs/release-0.5.8.md)

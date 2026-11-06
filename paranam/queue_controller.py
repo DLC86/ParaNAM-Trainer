@@ -171,16 +171,6 @@ class QueueController(QObject):
             self.guard.release()
             self.changed.emit()
             return
-        from .recipes import uses_removed_rate_preset, REMOVED_RATE_MESSAGE
-
-        if uses_removed_rate_preset(spec):
-            self.store.update(
-                entry["id"], state="interrupted", error=REMOVED_RATE_MESSAGE
-            )
-            self.active_id = None
-            self.guard.release()
-            self.changed.emit()
-            return
         process = QProcess(self)
         process.setWorkingDirectory(spec["project"])
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)

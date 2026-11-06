@@ -38,7 +38,9 @@ The chart below the log has **Full ESR chart** and **Lite ESR chart** tabs. Each
 shows Validation ESR (solid blue) and Train ESR (dashed orange) for its own model
 size at each completed epoch, on a labelled logarithmic axis. The horizontal axis
 is fixed to the job's planned total epochs, including before the first epoch;
-adding points does not change their horizontal spacing. Lower values are better. Missing or
+adding points does not change their horizontal spacing. The initial logarithmic
+Y range is 0.005–0.5 for both charts. Values inside that range do not rescale it;
+values outside expand the necessary side in logarithmic decades to include them. Lower values are better. Missing or
 nonfinite values break a curve rather than becoming a misleading point. History
 is saved with progress and checkpoints and survives pause/resume. Each static
 capture or ensemble member has its own displayed history.
@@ -89,11 +91,25 @@ normalization is not recomputed mid-training. Changing a preset requires a new
 training instance. No schedule guarantees better validation ESR or generalization;
 normalization trades faster decay for a comparable progression per dataset epoch.
 
-The original A2, control-scaled A2 and A2 Slow presets have been removed.
-Old project settings using them select Dataset-normalized when preparing a new
-training. Existing jobs using a removed preset cannot resume or launch in 0.6.0;
-use Retrain with the new choices. Their recordings, history and checkpoints are
-kept, and completed best checkpoints remain available for export.
+The earlier update/control presets are restored under consistent names:
+
+| Current name | Earlier name | Reduction interval |
+| --- | --- | --- |
+| Update-based | Original A2 cadence | 62 updates |
+| Control-normalized | Controls-scaled A2 | `62 × max(1, knobs) × 2^switches` |
+| Control-normalized / √2 | A2 Slow | `62 × max(1, knobs) × 2^switches / sqrt(2)` |
+
+They are independently selectable for the audio network and hypernetwork,
+alongside both Dataset-normalized choices, Manual and hypernetwork Follow.
+The serialized IDs remain `a2_updates`, `a2_controls` and `a2_slow`: loading a
+saved project does not rename/migrate its effective settings or reset initial
+rates. Resume retains the job's frozen interval and both checkpoint counters,
+including jobs prepared with earlier control-count formulas. Existing capture,
+architecture and evaluation-protocol compatibility checks still apply.
+The 0.6.0 exclusion has been removed. Resuming a paused queue can therefore
+continue its earlier paused instance before newly retrained jobs. Retrain restores
+the effective frozen advanced configuration, taking precedence over stale editor
+preferences. New-project defaults remain Dataset-normalized for both groups.
 
 In static capture mode, hypernetwork-specific fields and their labels are hidden,
 including the parametric recipe selector, LR/preset/decay, weight mode/rank,
@@ -148,7 +164,7 @@ topologies, validation and compilation settings are common to both recipes.
 
 HyperA2 retains the advanced fields of the saved 06/11 02:52 training,
 with the subsequently requested dataset-normalized audio/hypernetwork schedules
-and its preset label changed to HyperA2. Old jobs retain their saved label and files; removed-scheduler jobs cannot resume.
+and its preset label changed to HyperA2. Old jobs retain their saved labels, files and original scheduler settings on resume.
 
 The HyperWaveNet settings were verified against Phillip Self's
 [capture exporter](https://github.com/phillipmself/neural-amp-modeler-parametric/blob/a3684411076be69dab53505df14922487697f2cf/nam/capture/export.py)

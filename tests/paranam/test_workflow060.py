@@ -4,44 +4,9 @@ import pytest
 
 from nam.capture.project import atomic_write_json
 from paranam import training
-from paranam.recipes import REMOVED_RATE_PRESETS, training_preset
+from paranam.recipes import training_preset
 from paranam.workspace import Workspace, read_json
 from tests.paranam.test_queue import small_ready
-
-
-@pytest.mark.parametrize("preset", sorted(REMOVED_RATE_PRESETS))
-@pytest.mark.parametrize("key", ["rate_preset", "hypernetwork_rate_preset"])
-def test_removed_schedules_cannot_resume_or_launch(
-    workspace, tmp_path, preset, key, qapp
-):
-    from paranam.queue_controller import QueueController
-
-    small_ready(workspace)
-    controller = QueueController(tmp_path / "queue")
-    entry = controller.store.add(workspace)
-    job = Path(entry["job"])
-    spec = read_json(job / "spec.json")
-    spec["preferences"]["advanced_training"][key] = preset
-    atomic_write_json(job / "spec.json", spec)
-    checkpoint = job / "resume-0.ckpt"
-    checkpoint.write_bytes(b"preserve existing checkpoint")
-    original_spec = (job / "spec.json").read_bytes()
-    frozen = Workspace(Path(spec["project"]))
-    assert not training.job_can_resume(frozen, job)
-    controller.store.update(entry["id"], state="paused")
-    with pytest.raises(ValueError, match="removed in 0.6.0"):
-        controller.store.prepare_resume(entry["id"])
-    with pytest.raises(ValueError, match="removed in 0.6.0"):
-        training.make_job(frozen, resume=True)
-    with pytest.raises(ValueError, match="removed in 0.6.0"):
-        training.run_job(job)
-    controller.store.update(entry["id"], state="queued")
-    controller.enabled = True
-    controller.tick()
-    assert controller.process is None and controller.active_id is None
-    assert controller.store.get(entry["id"])["state"] == "interrupted"
-    assert checkpoint.read_bytes() == b"preserve existing checkpoint"
-    assert (job / "spec.json").read_bytes() == original_spec
 
 
 def test_static_hides_hypernetwork_fields_and_labels(window, workspace):

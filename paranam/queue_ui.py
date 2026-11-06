@@ -379,17 +379,8 @@ class QueueActions:
                 or training.job_progress(self.job).get("recovery_required")
             )
         )
-        from .recipes import uses_removed_rate_preset
-
-        removed_schedule = bool(
-            self.job
-            and uses_removed_rate_preset(
-                read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
-            )
-        )
         resumable = (
-            not removed_schedule
-            and not recovery_blocked
+            not recovery_blocked
             and state in FINISHED - {"completed", "needs_captures"}
             and not running
             and not exporting

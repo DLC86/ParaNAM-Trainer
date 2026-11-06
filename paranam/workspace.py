@@ -501,11 +501,6 @@ class Workspace:
         options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
         options.setdefault("hypernetwork_rate_preset", "follow")
         options.setdefault("hypernetwork_lr_decay", options["lr_decay"])
-        from .recipes import REMOVED_RATE_PRESETS
-
-        for key in ("rate_preset", "hypernetwork_rate_preset"):
-            if options[key] in REMOVED_RATE_PRESETS:
-                options[key] = "a2_dataset"
         hyper_a2 = options["hypernetwork_recipe"] == "HyperA2"
         options.setdefault("hypernetwork_mode", "full" if hyper_a2 else "low_rank")
         options.setdefault("hypernetwork_rank", 2)

@@ -59,6 +59,23 @@ class ESRChart(QWidget):
         plot = self.plot_rect()
         return plot.left() + (epoch - 1) / max(1, self.epoch_limit() - 1) * plot.width()
 
+    def esr_limits(self):
+        lower, upper = 0.005, 0.5
+        values = [
+            max(float(entry[key]), 1e-12)
+            for entry in self.history
+            for key in (self.model_size, f"train_{self.model_size}")
+            if entry.get(key) is not None
+            and math.isfinite(entry[key])
+            and entry[key] >= 0
+        ]
+        if values:
+            if min(values) < lower:
+                lower *= 10 ** math.floor(math.log10(min(values) / lower))
+            if max(values) > upper:
+                upper *= 10 ** math.ceil(math.log10(max(values) / upper))
+        return lower, upper
+
     def displayed_entry(self):
         if not self.history:
             return {}
@@ -126,12 +143,8 @@ class ESRChart(QWidget):
                 Qt.AlignmentFlag.AlignCenter,
                 "The curves appear after the first validation epoch.",
             )
-            values = [1.0]
-        bottom, top = math.floor(math.log10(min(values))), math.ceil(
-            math.log10(max(values))
-        )
-        if bottom == top:
-            bottom -= 1
+        lower, upper = self.esr_limits()
+        bottom, top = math.log10(lower), math.log10(upper)
         plot = self.plot_rect()
         last_epoch = self.epoch_limit()
 
@@ -145,7 +158,7 @@ class ESRChart(QWidget):
             )
 
         if self.hover_epoch is not None:
-            x = point(self.hover_epoch, values[0]).x()
+            x = self.epoch_x(self.hover_epoch)
             painter.setPen(QPen(QColor("#cccccc"), 1, Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
 

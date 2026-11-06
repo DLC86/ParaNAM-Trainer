@@ -61,7 +61,7 @@ bundle = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=False,
 if sys.platform == "darwin":
     app = BUNDLE(bundle, name="ParaNAM Trainer.app", bundle_identifier="com.dlc86.paranamtrainer",
                  icon=str(root / "packaging" / "icon.icns"),
-                 info_plist={"CFBundleShortVersionString":"0.6.0", "CFBundleVersion":"0.6.0",
+                 info_plist={"CFBundleShortVersionString":"0.6.1", "CFBundleVersion":"0.6.1",
                              "NSMicrophoneUsageDescription":"Record your rig and timing loopback to create an amp model.",
                              "NSHighResolutionCapable":True})
 

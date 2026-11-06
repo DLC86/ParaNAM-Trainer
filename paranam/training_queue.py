@@ -188,6 +188,11 @@ class TrainingQueue:
         saved = copy.deepcopy(spec.get("preferences", {}))
         for key in ("rate_schedule", "_queue_source_project"):
             saved.pop(key, None)
+        effective = saved.pop("advanced_training", None)
+        if isinstance(effective, dict):
+            saved["advanced_" + saved.get("capture_type", entry["kind"])] = (
+                copy.deepcopy(effective)
+            )
         workspace.preferences.update(saved)
         workspace.preferences["custom_input"] = source_input
         snapshot = Workspace(Path(spec["project"]))
@@ -354,10 +359,6 @@ class TrainingQueue:
             raise ValueError(
                 "This instance's files are unavailable. Reconnect its project drive before resuming."
             )
-        from .recipes import uses_removed_rate_preset, REMOVED_RATE_MESSAGE
-
-        if uses_removed_rate_preset(spec):
-            raise ValueError(REMOVED_RATE_MESSAGE)
         workspace = Workspace(Path(spec["project"]))
         from .evaluation import PROTOCOL
 

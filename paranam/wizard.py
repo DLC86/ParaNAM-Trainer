@@ -799,10 +799,13 @@ class WizardWindow(
         preset.activated.connect(self.apply_training_preset)
         rate_preset = QComboBox()
         rate_preset.addItem("Manual / per-epoch decay", "manual")
-        rate_preset.addItem("Dataset-normalized", "a2_dataset")
-        rate_preset.addItem("Dataset-normalized √", "a2_dataset_sqrt")
+        from .recipes import RATE_PRESET_LABELS
+
+        for key, title in RATE_PRESET_LABELS.items():
+            rate_preset.addItem(title, key)
         rate_preset.setToolTip(
-            "A2 interval × (dataset updates / reference updates), or its square root. "
+            "Update-based: 62 updates. Control-normalized: 62 × knobs × 2^switches; / √2 divides that interval by √2. "
+            "Dataset-normalized: A2 interval × (dataset updates / reference updates), or its square root. "
             "Uses complete training batches after validation audio is excluded; validation captures are not counted."
         )
         self.advanced_fields["rate_preset"] = rate_preset
@@ -1108,6 +1111,9 @@ class WizardWindow(
         if not self.workspace or self._loading:
             return
         if self.advanced_fields["rate_preset"].currentData() in (
+            "a2_updates",
+            "a2_controls",
+            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         ):
@@ -1157,6 +1163,9 @@ class WizardWindow(
             parametric and hyper_preset == "manual"
         )
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
+            "a2_updates",
+            "a2_controls",
+            "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
         )
@@ -1206,6 +1215,9 @@ class WizardWindow(
 
             schedule = workspace_update_schedule(self.workspace)
             formula = {
+                "a2_updates": "original A2 update cadence",
+                "a2_controls": "knobs × 2^switches",
+                "a2_slow": "(knobs × 2^switches) / √2",
                 "a2_dataset": "dataset updates / reference updates",
                 "a2_dataset_sqrt": "√(dataset updates / reference updates)",
             }[self.advanced_fields["rate_preset"].currentData()]

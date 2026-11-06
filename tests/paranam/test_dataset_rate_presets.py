@@ -109,7 +109,7 @@ def test_independent_dataset_clocks_restore_exactly(workspace, audio, hyper):
                 schedule["scheduler"].load_state_dict(state)
 
 
-def test_new_choices_replace_removed_presets_in_old_project(window, workspace):
+def test_new_choices_and_restored_presets_preserve_old_project(window, workspace):
     ready_audio(workspace)
     workspace.preferences["advanced_parametric"] = training_preset("HyperA2")
     window._attach(workspace)
@@ -117,7 +117,7 @@ def test_new_choices_replace_removed_presets_in_old_project(window, workspace):
         selector = window.advanced_fields[key]
         assert selector.findData("a2_dataset") >= 0
         assert selector.findData("a2_dataset_sqrt") >= 0
-        assert selector.findData("a2_controls") == -1
+        assert selector.findData("a2_controls") >= 0
         assert selector.currentData() == "a2_dataset"
     assert "Independent LR schedules" in window.rate_preview.text()
     hyper = window.advanced_fields["hypernetwork_rate_preset"]
@@ -137,8 +137,10 @@ def test_new_choices_replace_removed_presets_in_old_project(window, workspace):
     assert workspace.fingerprint() == before
     for key in ("rate_preset", "hypernetwork_rate_preset"):
         selector = window.advanced_fields[key]
-        assert selector.currentData() == "a2_dataset"
+        assert selector.currentData() == (
+            "a2_updates" if key == "rate_preset" else "a2_controls"
+        )
         assert all(
-            selector.findData(old) == -1
+            selector.findData(old) >= 0
             for old in ("a2_updates", "a2_controls", "a2_slow")
         )

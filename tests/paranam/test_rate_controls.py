@@ -172,9 +172,10 @@ def test_independent_presets_preview_and_edits_are_saved(window, workspace):
     assert not window.advanced_fields["lr_decay"].isEnabled()
 
 
+@pytest.mark.parametrize("old_presets", [False, True])
 @pytest.mark.parametrize("zeroed_progress", [False, True])
 def test_real_training_restores_two_lightning_scheduler_states(
-    workspace, monkeypatch, zeroed_progress
+    workspace, monkeypatch, zeroed_progress, old_presets
 ):
     import torch
     from nam.capture.project import atomic_write_json
@@ -183,6 +184,13 @@ def test_real_training_restores_two_lightning_scheduler_states(
 
     job = tiny_job(workspace, monkeypatch)
     spec = read_json(job / "spec.json")
+    if old_presets:
+        workspace.preferences["advanced_parametric"].update(
+            rate_preset="a2_updates", hypernetwork_rate_preset="a2_controls"
+        )
+        workspace.save()
+        spec["preferences"]["advanced_training"] = workspace.training_options()
+        spec["fingerprint"] = workspace.fingerprint()
     # Accelerated diagnostic clocks let a two-epoch test cross both boundaries.
     spec["model"]["lr_scheduler"] = {
         "class": "IndependentGroupLR",
