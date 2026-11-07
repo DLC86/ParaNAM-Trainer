@@ -1,10 +1,12 @@
 # Build on the target OS; all Python/Qt/Torch dependencies live inside this bundle.
 import os
 import sys
+import runpy
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 root = Path(SPECPATH).parent
+VERSION = runpy.run_path(str(root / "paranam" / "__init__.py"))["__version__"]
 data = [(str(root / "LICENSE"), "licenses"),
         (str(root / "CREDITS.md"), "licenses"),
         (str(root / "nam/_dependencies/auraloss/LICENSE"), "licenses/auraloss"),
@@ -61,7 +63,7 @@ bundle = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=False,
 if sys.platform == "darwin":
     app = BUNDLE(bundle, name="ParaNAM Trainer.app", bundle_identifier="com.dlc86.paranamtrainer",
                  icon=str(root / "packaging" / "icon.icns"),
-                 info_plist={"CFBundleShortVersionString":"0.6.3", "CFBundleVersion":"0.6.3",
+                 info_plist={"CFBundleShortVersionString":VERSION, "CFBundleVersion":VERSION,
                              "NSMicrophoneUsageDescription":"Record your rig and timing loopback to create an amp model.",
                              "NSHighResolutionCapable":True})
 

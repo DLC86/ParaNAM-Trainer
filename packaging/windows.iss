@@ -7,10 +7,14 @@
 #ifndef Flavor
   #define Flavor "CPU"
 #endif
+#ifndef AppVersion
+  #error AppVersion must be supplied by packaging/build.py
+#endif
 [Setup]
 AppId={{95150E04-60A8-43D8-A3C0-0FB244A1A128}
 AppName=ParaNAM Trainer
-AppVersion=0.6.3
+AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 AppPublisher=DLC86
 DefaultDirName={localappdata}\Programs\ParaNAM Trainer
 DefaultGroupName=ParaNAM Trainer
@@ -18,7 +22,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputRoot}
-OutputBaseFilename=ParaNAM-Trainer-0.6.3-Windows-x64-Setup
+OutputBaseFilename=ParaNAM-Trainer-{#AppVersion}-Windows-x64-Setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

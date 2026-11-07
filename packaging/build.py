@@ -5,12 +5,14 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
+import runpy
 import shutil
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.7.0"
+VERSION = runpy.run_path(str(ROOT / "paranam" / "__init__.py"))["__version__"]
 
 
 def run(*args):
@@ -71,6 +73,16 @@ def main():
         )
     else:
         executable = bundle / "ParaNAM Trainer"
+    if sys.platform == "darwin":
+        with (executable.parents[1] / "Info.plist").open("rb") as stream:
+            metadata = plistlib.load(stream)
+        if any(
+            metadata.get(key) != VERSION
+            for key in ("CFBundleVersion", "CFBundleShortVersionString")
+        ):
+            raise RuntimeError(
+                "macOS bundle version does not match the application version"
+            )
     # Test the frozen bundle, not the developer's Python environment.
     smoke = ROOT / "build" / "bundle-smoke.json"
     from validate_bundle import (
@@ -116,8 +128,15 @@ def main():
             f"/DBuildRoot={bundle}",
             f"/DOutputRoot={installers}",
             f"/DFlavor={args.flavor}",
+            f"/DAppVersion={VERSION}",
             "packaging/windows.iss",
         )
+        if not (
+            installers / f"ParaNAM-Trainer-{VERSION}-Windows-x64-Setup.exe"
+        ).is_file():
+            raise RuntimeError(
+                "Windows installer version does not match the application version"
+            )
     elif sys.platform == "darwin":
         stage = ROOT / "build" / ("dmg-" + arch)
         stage.mkdir(exist_ok=True)
