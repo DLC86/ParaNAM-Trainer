@@ -1152,6 +1152,17 @@ class CaptureSession:
         """
         # Resolved before anything is played: a project whose recorded timebase cannot be
         # honoured is refused now rather than after the user has sat through a capture.
+        from .output_gain import volume_control
+
+        if (
+            entry.split != "gain"
+            and volume_control(self.project) is not None
+            and self.project.output_gain_state.get("status") != "ready"
+        ):
+            raise CaptureSessionError(
+                "Finish clean output-volume calibration before recording neural captures. "
+                "If calibration fails, change Volume to a normal neural knob and regenerate the plan."
+            )
         lead = self._alignment_lead()
 
         x, sample_rate = self._input_for_split(entry.split)

@@ -136,6 +136,31 @@ def test_neural_plan_fixes_volume_at_maximum():
     assert all(e.params["Volume"] == 10 for e in train + validation)
 
 
+def test_volume_calibration_is_saved_first_and_blocks_manual_neural_capture(tmp_path):
+    from nam.capture.project import CaptureEntryModel
+    from nam.capture.session import CaptureSession, CaptureSessionError
+
+    project = volume_project()
+    neural = CaptureEntryModel(
+        index=0,
+        split="train",
+        params={"Tone": 5, "Volume": 10},
+        y_path="captures/train.wav",
+    )
+    project.entries = [neural]
+    initialize_calibration(project)
+    assert project.entries[-1] is neural
+    assert all(e.split == "gain" for e in project.entries[:-1])
+    assert project.entries[0].params["Volume"] == 10
+    session = CaptureSession(project, tmp_path, recorder=object())
+    for state in ("measuring", "failed"):
+        project.output_gain_state["status"] = state
+        with pytest.raises(
+            CaptureSessionError, match="Finish clean output-volume calibration"
+        ):
+            session.capture_entry(neural)
+
+
 def test_muted_volume_minimum_can_be_recorded_without_loopback(tmp_path):
     from nam.capture.session import CaptureSession
     from tests.capture.test_session import _FakeRecorder

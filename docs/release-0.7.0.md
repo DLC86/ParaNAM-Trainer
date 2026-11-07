@@ -17,6 +17,8 @@
   are requested where needed, up to 65 curve positions. A second control context
   checks that attenuation is independent of the other controls. Waveform/taper
   failures preserve recordings and block training until corrected or replanned.
+  Calibration is the first phase of the saved plan, including any adaptive extra
+  points. Neural captures are blocked until it passes, including manual selection.
   Maximum-volume references are recorded first. A silent minimum is measured as
   a noise-floor clip, without requiring timing alignment or a loopback. Audible
   captures retain timing checks; an explicitly configured loopback must work.

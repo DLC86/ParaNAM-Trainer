@@ -70,7 +70,12 @@ def _append(project, positions, context, phase):
         "gain", "gain", specs, rows, index_offset=index, filename_start=first
     )
     for p in planned:
-        project.entries.append(
+        insert_at = next(
+            (i for i, e in enumerate(project.entries) if e.split != "gain"),
+            len(project.entries),
+        )
+        project.entries.insert(
+            insert_at,
             CaptureEntryModel(
                 index=p.index,
                 split="gain",
@@ -82,7 +87,7 @@ def _append(project, positions, context, phase):
                         "context": "max" if context == _context(project) else "check",
                     }
                 },
-            )
+            ),
         )
     return len(planned)
 
@@ -130,6 +135,16 @@ def initialize_calibration(project):
         "round": 0,
         "tolerance_db": TOLERANCE_DB,
     }
+    # Calibration is a real first phase of the saved plan, not just a UI sort.
+    references = [
+        e
+        for e in project.entries
+        if e.split == "gain" and e.params[control.name] == control.max
+    ]
+    reference_paths = {e.y_path for e in references}
+    project.entries = references + [
+        e for e in project.entries if e.y_path not in reference_paths
+    ]
 
 
 def _signal(project, root, entry):
