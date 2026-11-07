@@ -297,6 +297,9 @@ def export_parametric(
         temporary_hooks.append(
             _make_parametric_scale_hook(model, scale=1.0 / output_scale)
         )
+    temporary_hooks.sort(
+        key=lambda hook: bool(getattr(hook, "is_output_gain_hook", False))
+    )
     model.export_model_dict_post_hooks = temporary_hooks
     try:
         model.export(

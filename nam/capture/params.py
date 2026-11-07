@@ -56,6 +56,9 @@ class KnobSpec:
     default: _Optional[float] = None
     avoid_zero: bool = False
     is_gain: bool = False
+    avoid_max: bool = False
+    sampling_bias: str = "linear"
+    clean_volume: bool = False
 
     def __post_init__(self):
         if not str(self.name).strip():
@@ -103,6 +106,20 @@ class KnobSpec:
             object.__setattr__(self, "default", default)
         object.__setattr__(self, "avoid_zero", bool(self.avoid_zero))
         object.__setattr__(self, "is_gain", bool(self.is_gain))
+        if self.sampling_bias not in ("linear", "lower", "upper"):
+            raise ValueError("Choose uniform, lower-half or upper-half sampling")
+        if self.clean_volume and (self.avoid_max or self.is_gain):
+            raise ValueError(
+                "Clean output volume requires its maximum reference and cannot be Gain/Drive or Avoid max"
+            )
+        if self.avoid_max and not any(
+            self.min <= self.max - k * self.step < self.max
+            and (not self.avoid_zero or self.max - k * self.step != 0)
+            for k in (1, 2)
+        ):
+            raise ValueError(
+                "No usable knob positions remain after Avoid max/Avoid zero"
+            )
 
     def to_param_spec(self) -> _ParamSpec:
         return _ParamSpec(
@@ -113,6 +130,9 @@ class KnobSpec:
             type="continuous",
             step=self.step,
             avoid_zero=self.avoid_zero,
+            avoid_max=self.avoid_max,
+            sampling_bias=self.sampling_bias,
+            clean_volume=self.clean_volume,
         )
 
     def to_dict(self) -> dict[str, _Any]:
@@ -124,6 +144,13 @@ class KnobSpec:
             "default": self.default,
             "avoid_zero": self.avoid_zero,
             "is_gain": self.is_gain,
+            **({"avoid_max": True} if self.avoid_max else {}),
+            **(
+                {"sampling_bias": self.sampling_bias}
+                if self.sampling_bias != "linear"
+                else {}
+            ),
+            **({"clean_volume": True} if self.clean_volume else {}),
         }
 
     @classmethod
@@ -142,6 +169,9 @@ class KnobSpec:
             default=config.get("default"),
             avoid_zero=config.get("avoid_zero", False),
             is_gain=config.get("is_gain", False),
+            avoid_max=config.get("avoid_max", False),
+            sampling_bias=config.get("sampling_bias", "linear"),
+            clean_volume=config.get("clean_volume", False),
         )
 
 
@@ -152,9 +182,12 @@ class SwitchSpec:
     name: str
     enum_names: tuple[str, ...]
     default: int = 0
+    planning_mode: str = "complex"
 
     def __post_init__(self):
         object.__setattr__(self, "name", str(self.name).strip())
+        if self.planning_mode not in ("complex", "simple"):
+            raise ValueError("Choose Complex Switch or Simple Switch")
         if isinstance(self.enum_names, (str, bytes)):
             raise ValueError("Switch positions must be a sequence of names")
         labels = tuple(str(label).strip() for label in self.enum_names)
@@ -175,6 +208,7 @@ class SwitchSpec:
             self.default,
             type="switch",
             enum_names=self.enum_names,
+            simple_switch=self.planning_mode == "simple",
         )
 
     def to_dict(self) -> dict[str, _Any]:
@@ -183,6 +217,7 @@ class SwitchSpec:
             "name": self.name,
             "enum_names": list(self.enum_names),
             "default": self.default,
+            **({"planning_mode": "simple"} if self.planning_mode == "simple" else {}),
         }
 
 
@@ -196,15 +231,35 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
     every state is captured once and there are no held-out settings for validation.
     These are sampling heuristics, not an accuracy guarantee.
     """
-    n_knobs = sum(isinstance(control, KnobSpec) for control in controls)
+    active = [c for c in controls if not getattr(c, "clean_volume", False)]
+    n_knobs = sum(
+        isinstance(c, KnobSpec)
+        or (isinstance(c, SwitchSpec) and c.planning_mode == "simple")
+        for c in active
+    )
     combinations = _math.prod(
-        len(c.enum_names) for c in controls if isinstance(c, SwitchSpec)
+        len(c.enum_names)
+        for c in active
+        if isinstance(c, SwitchSpec) and c.planning_mode == "complex"
     )
-    return (
-        max(1, 15 * n_knobs) * combinations,
-        (min(max(8, 4 * n_knobs), 24) if n_knobs else 0) * combinations,
-        combinations,
+    train = max(
+        1,
+        15 * n_knobs,
+        max(
+            (
+                len(c.enum_names)
+                for c in active
+                if isinstance(c, SwitchSpec) and c.planning_mode == "simple"
+            ),
+            default=1,
+        ),
     )
+    validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
+    if active and all(isinstance(c, SwitchSpec) for c in active):
+        capacity = _math.prod(len(c.enum_names) for c in active) // combinations
+        train = min(train, capacity)
+        validation = min(validation, max(0, capacity - train))
+    return train * combinations, validation * combinations, combinations
 
 
 def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
@@ -225,6 +280,8 @@ def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
                 f"Duplicate knob name: {knob.name!r} collides with {seen[key]!r}"
             )
         seen[key] = knob.name
+    if sum(getattr(c, "clean_volume", False) for c in knobs) > 1:
+        raise ValueError("At most one Clean output volume is supported")
     gain_names = [knob.name for knob in knobs if knob.is_gain]
     if len(gain_names) > 2:
         raise ValueError(

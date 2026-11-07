@@ -6,6 +6,11 @@ or imply endorsement by the original authors.
 
 ## Original NAM and parametric work
 
+The **Truncated (Phillip Self)** input includes Phillip Self's original
+`inputTrunc.wav` from the [training-inputs-v1 release](https://github.com/phillipmself/neural-amp-modeler-parametric/releases/tag/training-inputs-v1).
+ParaNAM adds the bundled NAM standard validation prefix/tail without changing
+the original 38-second training audio. Exact hashes are in `paranam/assets/manifest.json`.
+
 | Author / project | Contribution used by this application |
 | --- | --- |
 | **[Phillip Self](https://github.com/phillipmself)** — [neural-amp-modeler-parametric](https://github.com/phillipmself/neural-amp-modeler-parametric) | Original parametric trainer, hypernetwork/conditioning implementation, parametric model families, capture/planning and active-learning foundations. ParaNAM was created from DLC86's `Knobs+Switch` derivative of this project. |

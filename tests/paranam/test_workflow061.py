@@ -106,7 +106,7 @@ def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
         hypernetwork_learning_rate=0.001,
     )
     window._attach(workspace)
-    order = ["manual", "a2_updates", "cosine_budget"]
+    order = ["manual", "a2_updates"]
     for batch in (4, 2):
         window.batch_size.setValue(batch)
         for key in ("rate_preset", "hypernetwork_rate_preset"):

@@ -81,7 +81,11 @@ def snapshot_workspace(workspace, root):
             else (
                 "input_tts_v11.wav"
                 if preferences["input_mode"] == "tts"
-                else "input_custom.wav"
+                else (
+                    "input_trunc.wav"
+                    if preferences["input_mode"] == "trunc"
+                    else "input_custom.wav"
+                )
             )
         ),
     )

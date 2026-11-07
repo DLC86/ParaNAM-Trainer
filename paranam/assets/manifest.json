@@ -25,5 +25,23 @@
     "frames": 14400000,
     "channels": 1,
     "seconds": 300.0
+  },
+  {
+    "file": "inputTrunc.wav",
+    "source": "https://github.com/phillipmself/neural-amp-modeler-parametric/releases/download/training-inputs-v1/inputTrunc.wav",
+    "sha256": "1e0959e8ffe2f26585994dd87e06e5109d237cee65321ad8450908f0c156491e",
+    "sample_rate": 48000,
+    "frames": 1824000,
+    "channels": 1,
+    "seconds": 38.0
+  },
+  {
+    "file": "input-trunc-with-validation.wav",
+    "source": "Derived from inputTrunc.wav, with the bundled standard first 10 s and final 9 s",
+    "sha256": "ec759f13fb522d3240b64ec7e233cbdd1b344330afff7be31df61ef4cf6d6f33",
+    "sample_rate": 48000,
+    "frames": 2736000,
+    "channels": 1,
+    "seconds": 57.0
   }
 ]

@@ -375,6 +375,24 @@ class ControlDialog(QDialog):
             ("", self.gain),
         ):
             knob_form.addRow(label, field)
+        self.avoid_max = QCheckBox("Avoid max")
+        knob_form.addRow("", self.avoid_max)
+        self.sampling_bias = QComboBox()
+        self.sampling_bias.addItem("Uniform range", "linear")
+        self.sampling_bias.addItem("Most change heard in the lower half", "lower")
+        self.sampling_bias.addItem("Most change heard in the upper half", "upper")
+        knob_form.addRow("Capture density", self.sampling_bias)
+        self.clean_volume = QCheckBox("Clean output volume (measured attenuation)")
+        self.clean_volume.setToolTip(
+            "Train at maximum volume and measure a separate short-signal attenuation curve. Use only for an output attenuator that does not change tone or distortion."
+        )
+        knob_form.addRow("", self.clean_volume)
+        self.switch_mode = QComboBox()
+        self.switch_mode.addItem(
+            "Complex Switch — separate plan for every state", "complex"
+        )
+        self.switch_mode.addItem("Simple Switch — one discrete LHS dimension", "simple")
+        switch_form.addWidget(self.switch_mode)
         row = QHBoxLayout()
         self.count = QSpinBox()
         self.count.setRange(2, 1024)
@@ -405,6 +423,11 @@ class ControlDialog(QDialog):
                 spin.setValue(value)
             self.avoid_zero.setChecked(control.avoid_zero)
             self.gain.setChecked(control.is_gain)
+            self.avoid_max.setChecked(control.avoid_max)
+            self.sampling_bias.setCurrentIndex(
+                self.sampling_bias.findData(control.sampling_bias)
+            )
+            self.clean_volume.setChecked(control.clean_volume)
         elif isinstance(control, SwitchSpec):
             self.kind.setCurrentIndex(1)
             self.count.setValue(len(control.enum_names))
@@ -412,13 +435,16 @@ class ControlDialog(QDialog):
                 self.positions.setItem(i, 0, QTableWidgetItem(label))
             self._default_names()
             self.switch_default.setCurrentIndex(control.default)
+            self.switch_mode.setCurrentIndex(
+                self.switch_mode.findData(control.planning_mode)
+            )
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.resize(470, 440)
+        self.resize(600, 610)
 
     def resize_positions(self, n):
         old = self.positions.rowCount()
@@ -447,6 +473,7 @@ class ControlDialog(QDialog):
                         for i in range(self.positions.rowCount())
                     ),
                     self.switch_default.currentIndex(),
+                    self.switch_mode.currentData(),
                 )
             else:
                 self.result_control = KnobSpec(
@@ -457,6 +484,9 @@ class ControlDialog(QDialog):
                     self.default.value(),
                     self.avoid_zero.isChecked(),
                     self.gain.isChecked(),
+                    avoid_max=self.avoid_max.isChecked(),
+                    sampling_bias=self.sampling_bias.currentData(),
+                    clean_volume=self.clean_volume.isChecked(),
                 )
         except ValueError as error:
             QMessageBox.warning(self, "Check control settings", str(error))

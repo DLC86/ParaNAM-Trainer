@@ -96,6 +96,8 @@ def _capture_grid_values(spec: _ParamSpec, default_step: float) -> list[float]:
         # Match quantize_to_capture_grid: zero is never a reachable capture setting for
         # an avoid-zero knob, so the enumeration fallback must not offer it either.
         values.discard(0.0)
+    if getattr(spec, "avoid_max", False):
+        values.discard(round(spec.max, 6))
     return sorted(values)
 
 
@@ -243,12 +245,20 @@ def sample_unique_settings(
         # coordinates preserves the other Latin strata before grid quantization.
         raw = _np.asarray(raw).copy()
         for column, spec in enumerate(specs):
+            if spec.type == "switch":
+                value = spec.enum_names.index(anchor[spec.name])
+                matching = _np.flatnonzero(raw[:, column] == value)
+                if len(matching):
+                    row = int(matching[0])
+                    raw[0, column], raw[row, column] = raw[row, column], raw[0, column]
+                else:
+                    raw[0, column] = value
+                continue
             value = float(anchor[spec.name])
             width = spec.max - spec.min
-            strata = _np.minimum(
-                n - 1, ((raw[:, column] - spec.min) / width * n).astype(int)
-            )
-            target = min(n - 1, int((value - spec.min) / width * n))
+            inverse = lambda v: _inverse_bias((v - spec.min) / width, spec)
+            strata = _np.minimum(n - 1, (inverse(raw[:, column]) * n).astype(int))
+            target = min(n - 1, int(inverse(value) * n))
             row = int(_np.flatnonzero(strata == target)[0])
             raw[0, column], raw[row, column] = raw[row, column], raw[0, column]
             raw[0, column] = value
@@ -433,7 +443,10 @@ def _scale_continuous_samples(
     widths = _np.asarray(
         [spec.max - spec.min for spec in continuous_specs], dtype=_np.float64
     )
-    return mins + unit_samples * widths
+    biased = unit_samples.copy()
+    for column, spec in enumerate(continuous_specs):
+        biased[:, column] = _apply_bias(biased[:, column], spec)
+    return mins + biased * widths
 
 
 def _stratified_switch_assignments(
@@ -492,6 +505,22 @@ def sample_raw_settings(
     full_grid: bool = False,
 ) -> list[_np.ndarray]:
     specs = tuple(specs)
+    if any(spec.type == "switch" and spec.simple_switch for spec in specs):
+        if full_grid:
+            raise ValueError(
+                "Simple switches use LHS dimensions, not switch-grid replication"
+            )
+        unit = latin_hypercube_unit(n, len(specs), seed=seed)
+        raw = _np.empty_like(unit)
+        for i, spec in enumerate(specs):
+            raw[:, i] = (
+                _np.minimum(
+                    spec.num_inputs - 1, _np.floor(unit[:, i] * spec.num_inputs)
+                )
+                if spec.type == "switch"
+                else spec.min + _apply_bias(unit[:, i], spec) * (spec.max - spec.min)
+            )
+        return list(raw)
     continuous_specs = tuple(spec for spec in specs if spec.type == "continuous")
     rng = _np.random.default_rng(seed)
     continuous_seed = int(rng.integers(0, 2**32))
@@ -588,6 +617,24 @@ def plan_captures(
     if n_validation < 0:
         raise ValueError(f"n_validation must be non-negative; got {n_validation}")
     specs = tuple(knob.to_param_spec() for knob in knobs)
+    clean = [c for c in knobs if getattr(c, "clean_volume", False)]
+    if clean:
+        inner = tuple(c for c in knobs if c is not clean[0])
+        if not inner:
+            raise ValueError(
+                "Parametric capture needs another tone/drive/switch control besides clean volume"
+            )
+        t, v = plan_captures(
+            inner, n_train=n_train, n_validation=n_validation, seed=seed
+        )
+        fixed = {clean[0].name: clean[0].max}
+        merged = lambda entries: [
+            {s.name: ({**e.params, **fixed})[s.name] for s in specs} for e in entries
+        ]
+        return _planned_from_params(
+            "lhs", "train", specs, merged(t)
+        ), _planned_from_params("val_lhs", "validation", specs, merged(v))
+
     if any(
         spec.type != "switch" and spec.avoid_zero and spec.default == 0
         for spec in specs
@@ -596,6 +643,15 @@ def plan_captures(
             "Choose a non-zero default for controls with Avoid zero enabled: every new plan includes the default setting"
         )
 
+    if any(
+        spec.type != "switch" and spec.avoid_max and spec.default == spec.max
+        for spec in specs
+    ):
+        raise ValueError(
+            "Choose a default below maximum for controls with Avoid max enabled"
+        )
+    if any(spec.type == "switch" and spec.simple_switch for spec in specs):
+        return _plan_simple_switches(knobs, specs, n_train, n_validation, seed)
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
         continuous = [
@@ -759,6 +815,55 @@ def corner_settings(
     min/max) don't repeat a setting.
     """
     specs = tuple(specs)
+    if any(s.clean_volume for s in specs):
+        active = tuple(s for s in specs if not s.clean_volume)
+        gains = (
+            ()
+            if gain_index is None
+            else ((gain_index,) if isinstance(gain_index, int) else tuple(gain_index))
+        )
+        inner_gains = tuple(sum(not s.clean_volume for s in specs[:i]) for i in gains)
+        corners = corner_settings(
+            active, gain_index=inner_gains, default_step=default_step
+        )
+        return [
+            {s.name: (s.max if s.clean_volume else row[s.name]) for s in specs}
+            for row in corners
+        ]
+    if any(spec.type == "switch" and spec.simple_switch for spec in specs):
+        continuous = tuple(spec for spec in specs if spec.type != "switch")
+        complex_switches = tuple(
+            spec for spec in specs if spec.type == "switch" and not spec.simple_switch
+        )
+        simple = tuple(
+            spec for spec in specs if spec.type == "switch" and spec.simple_switch
+        )
+        gains = (
+            ()
+            if gain_index is None
+            else ((gain_index,) if isinstance(gain_index, int) else tuple(gain_index))
+        )
+        inner_gains = tuple(sum(s.type != "switch" for s in specs[:i]) for i in gains)
+        corners = (
+            corner_settings(
+                continuous, gain_index=inner_gains, default_step=default_step
+            )
+            if continuous
+            else [{}]
+        )
+        count = max(len(corners), max(s.num_inputs for s in simple))
+        categories = sample_raw_settings(simple, count, seed=0)
+        settings = []
+        for combo in _itertools.product(*(s.enum_names for s in complex_switches)):
+            fixed = dict(zip((s.name for s in complex_switches), combo))
+            for i in range(count):
+                values = {
+                    **corners[i % len(corners)],
+                    **fixed,
+                    **_decode_named_params(categories[i], simple),
+                }
+                settings.append({s.name: values[s.name] for s in specs})
+        return settings
     if any(spec.type == "switch" for spec in specs):
         continuous = tuple(spec for spec in specs if spec.type != "switch")
         switches = tuple(spec for spec in specs if spec.type == "switch")
@@ -800,16 +905,11 @@ def corner_capture_count(
     """How many distinct corner captures ``knobs`` will produce."""
     knobs = _validate_knobs(knobs)
     specs = tuple(knob.to_param_spec() for knob in knobs)
-    continuous = tuple(spec for spec in specs if spec.type != "switch")
-    gain = _gain_knob_index(knobs)
-    continuous_gain = tuple(
-        sum(spec.type != "switch" for spec in specs[:index]) for index in gain
-    )
     return len(
         corner_settings(
-            continuous, gain_index=continuous_gain, default_step=default_step
+            specs, gain_index=_gain_knob_index(knobs), default_step=default_step
         )
-    ) * _math.prod(spec.num_inputs for spec in specs if spec.type == "switch")
+    )
 
 
 def plan_corner_captures(
@@ -871,3 +971,75 @@ def plan_corner_captures(
         filename_start=filename_start,
     )
     return planned, skipped
+
+
+def _apply_bias(unit, spec):
+    bias = getattr(spec, "sampling_bias", "linear")
+    if bias == "lower":
+        return _np.expm1(_np.log(9) * unit) / 8
+    if bias == "upper":
+        return 1 - _np.expm1(_np.log(9) * (1 - unit)) / 8
+    return unit
+
+
+def _inverse_bias(unit, spec):
+    bias = getattr(spec, "sampling_bias", "linear")
+    if bias == "lower":
+        return _np.log1p(8 * unit) / _np.log(9)
+    if bias == "upper":
+        return 1 - _np.log1p(8 * (1 - unit)) / _np.log(9)
+    return unit
+
+
+def _plan_simple_switches(controls, specs, n_train, n_validation, seed):
+    complex_specs = tuple(
+        s for s in specs if s.type == "switch" and not s.simple_switch
+    )
+    names = [s.name for s in specs]
+    if complex_specs:
+        inner = tuple(
+            c for c in controls if c.name not in {s.name for s in complex_specs}
+        )
+        combinations = list(_itertools.product(*(s.enum_names for s in complex_specs)))
+        count = len(combinations)
+        if n_train < count or (n_validation and n_validation < count):
+            raise ValueError(
+                f"Cover all {count} Complex Switch combinations in each split"
+            )
+        train, val = [], []
+        for i, combo in enumerate(combinations):
+            fixed = dict(zip((s.name for s in complex_specs), combo))
+            t, v = plan_captures(
+                inner,
+                n_train=n_train // count + (i < n_train % count),
+                n_validation=n_validation // count + (i < n_validation % count),
+                seed=(seed + i * 104729) % 2**32,
+            )
+            train.extend(
+                {name: ({**e.params, **fixed})[name] for name in names} for e in t
+            )
+            val.extend(
+                {name: ({**e.params, **fixed})[name] for name in names} for e in v
+            )
+    else:
+        corners = {
+            _settings_key(p, specs)
+            for p in corner_settings(specs, gain_index=_gain_knob_index(controls))
+        }
+        anchor = {
+            s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
+            for s in specs
+        }
+        train, val = plan_unique_splits(
+            specs,
+            n_train=n_train,
+            n_validation=n_validation,
+            seed=seed,
+            default_step=_DEFAULT_KNOB_STEP,
+            validation_exclude=corners,
+            anchor=anchor,
+        )
+    return (
+        _planned_from_params("lhs", "train", specs, sort_settings(train, names)),
+        _planned_from_params("val_lhs", "validation", specs, sort_settings(val, names)),
+    )

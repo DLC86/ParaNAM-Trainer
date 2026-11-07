@@ -24,7 +24,7 @@ def verify_assets():
     return records
 
 
-def install_signals(directory, include_tts=False):
+def install_signals(directory, include_tts=False, include_trunc=False):
     verify_assets()
     signals = [
         ("standard.wav", "input_standard.wav"),
@@ -32,6 +32,8 @@ def install_signals(directory, include_tts=False):
     ]
     if include_tts:
         signals.append(("tts-input-v11.wav", "input_tts_v11.wav"))
+    if include_trunc:
+        signals.append(("input-trunc-with-validation.wav", "input_trunc.wav"))
     for asset, target in signals:
         destination = Path(directory) / target
         source = asset_path(asset)

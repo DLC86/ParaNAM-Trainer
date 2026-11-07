@@ -125,6 +125,12 @@ def order_captures(entries, controls):
     pending = [e for e in entries if e.status != "captured"]
     if not pending or not controls:
         return completed + pending
+    gain = [e for e in pending if e.split == "gain"]
+    normal = [e for e in pending if e.split != "gain"]
+    if gain and normal:
+        return order_captures(completed + gain, controls) + order_captures(
+            normal, controls
+        )
     anchor = _point(completed[-1].params, controls) if completed else None
     knob_mask = tuple(not isinstance(c, SwitchSpec) for c in controls)
     groups = {}

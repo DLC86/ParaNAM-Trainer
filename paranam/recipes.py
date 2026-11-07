@@ -246,22 +246,6 @@ def rate_group_schedule(
         if hypernetwork and not follow
         else options["lr_decay"]
     )
-    if preset == "cosine_budget":
-        accounting = a2_update_schedule(
-            data, directory, batch_size, options["ny"], epochs, rate, rate
-        )
-        total_steps = accounting["steps_per_epoch"] * epochs
-        return dict(
-            preset=preset,
-            kind="cosine_budget",
-            interval="step",
-            total_steps=total_steps,
-            warmup_steps=0.02 * total_steps,
-            steps_per_epoch=accounting["steps_per_epoch"],
-            minimum_factor=0.01,
-            initial_learning_rate=rate,
-            final_learning_rate=0.01 * rate,
-        )
     if preset == "manual":
         return dict(
             preset=preset,

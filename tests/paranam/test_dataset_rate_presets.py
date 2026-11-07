@@ -123,7 +123,6 @@ def test_new_choices_and_restored_presets_preserve_old_project(window, workspace
         assert [selector.itemData(i) for i in range(selector.count())] == [
             "manual",
             "a2_updates",
-            "cosine_budget",
         ]
     assert window.advanced_fields["rate_preset"].currentData() == "manual"
     assert (

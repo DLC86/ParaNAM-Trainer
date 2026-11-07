@@ -13,11 +13,13 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
-## 0.6.3 beta branch
+## 0.7.0 preview
 
-This branch adds independent **Cosine (whole budget)** schedules, denser held-out
-validation and **ESR_worst**. The beta release remains in draft; the public stable
-download above stays on 0.6.2. See [beta changes](docs/release-0.6.3-beta.md).
+The upcoming preview adds Simple/Complex Switch capture planning, biased knob
+sampling, Avoid max, measured clean output volume and **Truncated (Phillip Self)**
+input. It retains denser held-out validation and **ESR_worst** from the draft beta;
+the experimental Cosine schedules have been removed. The preview does not replace
+Latest. See [0.7.0 changes](docs/release-0.7.0.md).
 
 ## Credits
 

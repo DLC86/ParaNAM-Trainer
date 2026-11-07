@@ -126,6 +126,8 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
     """
     splits: dict[str, list[dict[str, _Any]]] = {"train": [], "validation": []}
     for entry in project.captured_entries():
+        if entry.split not in splits:
+            continue
         window = project.window_for_split(entry.split)
         splits[entry.split].append(
             {
@@ -133,7 +135,18 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
                 "y_path": entry.y_path,
                 "delay": 0 if entry.delay is None else entry.delay,
                 **(
-                    {"params": dict(entry.params)}
+                    {
+                        "params": {
+                            k: v
+                            for k, v in entry.params.items()
+                            if k
+                            not in {
+                                c.name
+                                for c in project.control_specs()
+                                if getattr(c, "clean_volume", False)
+                            }
+                        }
+                    }
                     if project.capture_type != "static"
                     else {}
                 ),
@@ -248,6 +261,8 @@ def concat_wavenet_channels(num_params: int) -> int:
 def _training_param_specs(project: CaptureProject) -> list[dict[str, _Any]]:
     params = []
     for knob in project.knob_specs():
+        if getattr(knob, "clean_volume", False):
+            continue
         spec = knob.to_param_spec().to_dict()
         # enum_names is a switch-only field; continuous-only projects don't carry it.
         if spec["type"] != "switch":

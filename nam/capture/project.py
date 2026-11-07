@@ -194,6 +194,9 @@ class KnobModel(_BaseModel):
     default: _Optional[float] = None
     avoid_zero: bool = False
     is_gain: bool = False
+    avoid_max: bool = False
+    sampling_bias: str = "linear"
+    clean_volume: bool = False
 
     def to_knob_spec(self) -> KnobSpec:
         return KnobSpec(
@@ -204,6 +207,9 @@ class KnobModel(_BaseModel):
             default=self.default,
             avoid_zero=self.avoid_zero,
             is_gain=self.is_gain,
+            avoid_max=self.avoid_max,
+            sampling_bias=self.sampling_bias,
+            clean_volume=self.clean_volume,
         )
 
     @classmethod
@@ -218,9 +224,12 @@ class SwitchModel(_BaseModel):
     name: str
     enum_names: list[str]
     default: int = 0
+    planning_mode: str = "complex"
 
     def to_knob_spec(self) -> SwitchSpec:
-        return SwitchSpec(self.name, tuple(self.enum_names), self.default)
+        return SwitchSpec(
+            self.name, tuple(self.enum_names), self.default, self.planning_mode
+        )
 
 
 class WindowModel(_BaseModel):
@@ -352,7 +361,7 @@ class CaptureEntryModel(_BaseModel):
     capture_id: _Optional[str] = None
     capture_name: _Optional[str] = None
     user_metadata: dict[str, _Any] = _Field(default_factory=dict)
-    split: Literal["train", "validation"]
+    split: Literal["train", "validation", "gain"]
     params: dict[str, float | str]
     y_path: str
     status: Literal["pending", "captured"] = "pending"
@@ -432,6 +441,8 @@ class CaptureProject(_BaseModel):
     # bumping it would refuse every project made by an earlier release; this field is
     # additive, which is what lets those projects open and carry on untouched.
     created_with_version: _Optional[str] = None
+    output_gain: _Optional[dict[str, _Any]] = None
+    output_gain_state: dict[str, _Any] = _Field(default_factory=dict)
 
     def knob_specs(self) -> tuple[ControlSpec, ...]:
         return tuple(knob.to_knob_spec() for knob in self.knobs)
@@ -450,10 +461,12 @@ class CaptureProject(_BaseModel):
     def captured_entries(self) -> list[CaptureEntryModel]:
         return [entry for entry in self.entries if entry.status == "captured"]
 
-    def input_for_split(self, split: Literal["train", "validation"]) -> str:
+    def input_for_split(self, split: Literal["train", "validation", "gain"]) -> str:
         return self.train_input if split == "train" else self.validation_input
 
-    def window_for_split(self, split: Literal["train", "validation"]) -> WindowModel:
+    def window_for_split(
+        self, split: Literal["train", "validation", "gain"]
+    ) -> WindowModel:
         return self.train_window if split == "train" else self.validation_window
 
 

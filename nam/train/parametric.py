@@ -673,6 +673,7 @@ class _ParametricLightningModule(_LightningModule):
         loss_config=None,
         hypernet_lr_scale=1.0,
         check_nonfinite_gradients=True,
+        output_gain=None,
     ):
         super().__init__(
             net,
@@ -687,6 +688,10 @@ class _ParametricLightningModule(_LightningModule):
             raise ValueError("hypernet_lr_scale must be finite and positive")
         if hypernet_lr_scale != 1.0 and not isinstance(net, _HyperA2):
             raise ValueError("hypernet_lr_scale requires HyperA2")
+        if output_gain is not None:
+            from ..capture.output_gain import OutputGainExportHook
+
+            net.export_model_dict_post_hooks.append(OutputGainExportHook(output_gain))
         self._hypernet_lr_scale = float(hypernet_lr_scale)
         self._mel_mrstft = None
         # Fail here rather than on the first training step: a net that conditions on the
@@ -707,6 +712,7 @@ class _ParametricLightningModule(_LightningModule):
             config.get("loss", {})
         )
         parsed["hypernet_lr_scale"] = config.get("hypernet_lr_scale", 1.0)
+        parsed["output_gain"] = config.get("output_gain")
         parsed["check_nonfinite_gradients"] = config.get(
             "check_nonfinite_gradients", True
         )
@@ -895,17 +901,13 @@ class _ParametricLightningModule(_LightningModule):
         if self._scheduler_config is None:
             return optimizer
         if independent_rates:
-            from ._lr_scheduler import GroupUpdateCadenceLR, GroupBudgetCosineLR
+            from ._lr_scheduler import GroupUpdateCadenceLR
 
             schedulers = []
             for index, name in enumerate(("audio", "hypernetwork")):
                 schedule = self._scheduler_config["kwargs"][name]
-                scheduler = (
-                    GroupBudgetCosineLR(optimizer, index, schedule["total_steps"])
-                    if schedule.get("kind") == "cosine_budget"
-                    else GroupUpdateCadenceLR(
-                        optimizer, index, schedule["step_size"], schedule["gamma"]
-                    )
+                scheduler = GroupUpdateCadenceLR(
+                    optimizer, index, schedule["step_size"], schedule["gamma"]
                 )
                 schedulers.append(
                     dict(

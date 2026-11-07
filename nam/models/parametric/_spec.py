@@ -7,7 +7,6 @@ from dataclasses import dataclass as _dataclass
 from typing import Any as _Any
 from typing import Optional as _Optional
 
-
 _CONTINUOUS = "continuous"
 _SWITCH = "switch"
 # Signed min-max scaling maps the user-facing range [min, max] to [-1, 1].
@@ -58,6 +57,11 @@ class ParamSpec:
     # against gain/drive knobs that mute the rig at zero and destabilize training. Like
     # ``step``, it has no effect on normalization or training.
     avoid_zero: bool = False
+    # Capture-only metadata. Deliberately absent from exported model dictionaries.
+    avoid_max: bool = False
+    sampling_bias: str = "linear"
+    simple_switch: bool = False
+    clean_volume: bool = False
 
     def __post_init__(self):
         if not self.name:

@@ -325,7 +325,6 @@ def make_job(workspace, resume=False, job_directory=None):
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
         if options.get("rate_preset", "manual") not in (
-            "cosine_budget",
             "manual",
             "a2_updates",
             "a2_controls",
@@ -335,7 +334,6 @@ def make_job(workspace, resume=False, job_directory=None):
         ):
             raise ValueError("Choose a listed learning-rate preset")
         if options.get("hypernetwork_rate_preset", "follow") not in (
-            "cosine_budget",
             "follow",
             "manual",
             "a2_updates",
@@ -373,6 +371,8 @@ def make_job(workspace, resume=False, job_directory=None):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
+            if workspace.project.output_gain:
+                model["output_gain"] = workspace.project.output_gain
             if options["hypernetwork_recipe"] not in ("HyperA2", "HyperWaveNet"):
                 raise ValueError(
                     "Choose HyperA2 or HyperWaveNet as the training preset"
@@ -431,7 +431,6 @@ def make_job(workspace, resume=False, job_directory=None):
         reserve_validation_audio(data)
         if not is_static and (
             options.get("hypernetwork_rate_preset", "follow") != "follow"
-            or options["rate_preset"] == "cosine_budget"
         ):
             from .recipes import rate_group_schedule
 
@@ -451,12 +450,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 "class": "IndependentGroupLR",
                 "kwargs": {
                     name: {
-                        key: schedule[key]
-                        for key in (
-                            ("kind", "interval", "total_steps")
-                            if schedule.get("kind") == "cosine_budget"
-                            else ("interval", "step_size", "gamma")
-                        )
+                        key: schedule[key] for key in ("interval", "step_size", "gamma")
                     }
                     for name, schedule in schedules.items()
                 },
@@ -1300,9 +1294,13 @@ def _propose_captures(workspace, job, spec, shared):
     from nam.data import wav_to_np
     from nam.train.parametric import _ParametricLightningModule, _get_parametric_net
 
-    specs = tuple(c.to_param_spec() for c in workspace.project.control_specs())
+    controls = workspace.project.control_specs()
+    volume = next((c for c in controls if getattr(c, "clean_volume", False)), None)
+    specs = tuple(c.to_param_spec() for c in controls if c is not volume)
     existing = {
-        _settings_key(e.params, specs): e.params for e in workspace.project.entries
+        _settings_key(e.params, specs): e.params
+        for e in workspace.project.entries
+        if e.split in ("train", "validation")
     }
     excluded = set(existing)
     available = _grid_capacity(specs, default_step=0.5) - sum(
@@ -1366,6 +1364,9 @@ def _propose_captures(workspace, job, spec, shared):
         candidates[int(i)]
         for i in np.argsort(scores)[::-1][: spec["preferences"]["additions"]]
     ]
+    if volume is not None:
+        selected = [{**params, volume.name: volume.max} for params in selected]
+        specs = tuple(c.to_param_spec() for c in controls)
     offset = 1 + max(
         (e.index for e in workspace.project.entries_for_split("train")), default=-1
     )

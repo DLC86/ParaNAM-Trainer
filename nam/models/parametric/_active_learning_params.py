@@ -44,7 +44,9 @@ def decode_named_params(
     specs = tuple(specs)
     raw = _torch.as_tensor(raw)
     if raw.ndim != 1:
-        raise ValueError(f"Expected raw params to have shape (P,); got {tuple(raw.shape)}")
+        raise ValueError(
+            f"Expected raw params to have shape (P,); got {tuple(raw.shape)}"
+        )
     if raw.shape[0] != len(specs):
         raise ValueError(
             f"Expected raw params length {len(specs)}; got trailing dimension {raw.shape[0]}"
@@ -102,7 +104,9 @@ def switch_combinations(specs: _Sequence[_ParamSpec]) -> list[tuple[int, ...]]:
     if len(switch_cardinalities) == 0:
         return [()]
     return list(
-        _itertools.product(*(range(cardinality) for cardinality in switch_cardinalities))
+        _itertools.product(
+            *(range(cardinality) for cardinality in switch_cardinalities)
+        )
     )
 
 
@@ -161,7 +165,10 @@ def assemble_raw_params(
         # should compensate (e.g. large-|z| restart inits) and Task 6 may snap near-boundary
         # suggestions to the bound when emitting user-unit proposals.
         width = spec.max - spec.min
-        columns.append(spec.min + width * _torch.sigmoid(z[..., continuous_col : continuous_col + 1]))
+        columns.append(
+            spec.min
+            + width * _torch.sigmoid(z[..., continuous_col : continuous_col + 1])
+        )
         continuous_col += 1
 
     # Concatenate per-spec column blocks (never in-place index assignment) so autograd
@@ -272,6 +279,18 @@ def quantize_to_capture_grid(
         snapped = _torch.clamp(_torch.round(raw_col / step) * step, spec.min, spec.max)
         if getattr(spec, "avoid_zero", False):
             snapped = _nudge_off_zero(snapped, raw_col, spec.min, spec.max, step)
+        if getattr(spec, "avoid_max", False):
+            # Same zero-origin grid as the normal quantizer; never offer max.
+            replacement = max(spec.min, (_math.ceil(spec.max / step) - 1) * step)
+            if getattr(spec, "avoid_zero", False) and replacement == 0:
+                replacement = max(spec.min, replacement - step)
+            if replacement >= spec.max or (
+                getattr(spec, "avoid_zero", False) and replacement == 0
+            ):
+                raise ValueError(f"No usable capture positions for {spec.name!r}")
+            snapped = _torch.where(
+                snapped >= spec.max, _torch.full_like(snapped, replacement), snapped
+            )
         quantized[..., i] = snapped
     return quantized
 

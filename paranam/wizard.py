@@ -585,6 +585,7 @@ class WizardWindow(
         self.signal_mode = QComboBox()
         self.signal_mode.addItem("Standard — bundled TONE3000 sweep", "standard")
         self.signal_mode.addItem("TTS input v11 — bundled", "tts")
+        self.signal_mode.addItem("Truncated (Phillip Self)", "trunc")
         self.signal_mode.addItem(
             "Custom — choose a training WAV from this computer", "custom"
         )
@@ -805,6 +806,7 @@ class WizardWindow(
                 field.setSingleStep(0.001 if key != "weight_decay" else 1e-7)
             field.setRange(low, high)
             field.setValue(initial)
+            field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
             field.valueChanged.connect(self.save_preferences)
@@ -837,15 +839,14 @@ class WizardWindow(
         for field in (rate_preset, hyper_rate_preset):
             field.addItem("per epoch", "manual")
             field.addItem("per 62 optimizer updates (A2 cadence)", "a2_updates")
-            field.addItem("Cosine (whole budget)", "cosine_budget")
             field.setToolTip(
                 "Cadence of this network's LR Decay. Legacy resumes retain the original checkpoint clock."
             )
         self.advanced_fields["rate_preset"] = rate_preset
         self.advanced_fields["hypernetwork_rate_preset"] = hyper_rate_preset
         for value_key, selector in (
-            ("learning_rate", rate_preset),
-            ("hypernetwork_learning_rate", hyper_rate_preset),
+            ("lr_decay", rate_preset),
+            ("hypernetwork_lr_decay", hyper_rate_preset),
         ):
             value = self.advanced_fields[value_key]
             caption = advanced_form.labelForField(value).text()
@@ -855,12 +856,14 @@ class WizardWindow(
                 removed.labelItem.widget().hide()
                 removed.labelItem.widget().deleteLater()
             pair = QWidget()
+            pair.setObjectName("rateCadenceRow")
+            pair.setStyleSheet("QWidget#rateCadenceRow { background: transparent; }")
             pair_layout = QHBoxLayout(pair)
             pair_layout.setContentsMargins(0, 0, 0, 0)
             pair_layout.addWidget(value)
             pair_layout.addWidget(selector)
             advanced_form.insertRow(row_index, caption, pair)
-            if value_key == "hypernetwork_learning_rate":
+            if value_key == "hypernetwork_lr_decay":
                 self.hypernetwork_rate_row = pair
         rate_preset.activated.connect(self.save_preferences)
         hyper_rate_preset.activated.connect(self.save_preferences)
@@ -870,7 +873,7 @@ class WizardWindow(
         self.preset_description = label("", "muted")
         advanced_form.addRow(self.preset_description)
         self.advanced_fields["hypernetwork_learning_rate"].setToolTip(
-            "Independent learning rate for the knob-to-weight network. Choose its own decay cadence beside the learning rate. Parametric training only."
+            "Independent learning rate for the knob-to-weight network. Choose its own cadence beside Hypernetwork LR Decay. Parametric training only."
         )
         self.advanced_fields["learning_rate"].setToolTip(
             "Learning rate for the base audio-network weights."
@@ -1165,9 +1168,7 @@ class WizardWindow(
         self.advanced_fields["rate_preset"].setEnabled(parametric)
         hyper_preset = self.advanced_fields["hypernetwork_rate_preset"].currentData()
         self.advanced_fields["hypernetwork_rate_preset"].setEnabled(parametric)
-        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(
-            parametric and hyper_preset != "cosine_budget"
-        )
+        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(parametric)
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
@@ -1175,9 +1176,7 @@ class WizardWindow(
             "a2_dataset",
             "a2_dataset_sqrt",
         )
-        self.advanced_fields["lr_decay"].setEnabled(
-            self.advanced_fields["rate_preset"].currentData() != "cosine_budget"
-        )
+        self.advanced_fields["lr_decay"].setEnabled(True)
         self.advanced_fields["lr_decay"].setToolTip(
             "Editable learning-rate multiplier applied at each reduction of the selected cadence."
             if matched
@@ -1207,13 +1206,6 @@ class WizardWindow(
                         "rate_preset" if name == "audio" else "hypernetwork_rate_preset"
                     )
                     preset_name = self.advanced_fields[field_name].currentText()
-                    if schedule.get("kind") == "cosine_budget":
-                        descriptions.append(
-                            f"{name.title()}: Cosine (whole budget); linear warmup for the first 2% ({schedule['warmup_steps']:.8g} updates), then cosine to 1% LR. "
-                            f"Frozen budget: {schedule['total_steps']} optimizer updates ({schedule['steps_per_epoch']} per epoch). "
-                            f"Peak LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e}. LR Decay is not used."
-                        )
-                        continue
                     accounting = (
                         f" Dataset: {schedule['steps_per_epoch']} complete updates/epoch; "
                         f"A2 reference: {schedule['reference_steps']}; ratio {schedule['dataset_reference_ratio']:.8g}."
@@ -1273,7 +1265,7 @@ class WizardWindow(
             "condition_dilated_convolutions",
             "branch_loss_reduction",
         ):
-            if key in ("hypernetwork_learning_rate", "hypernetwork_rate_preset"):
+            if key in ("hypernetwork_lr_decay", "hypernetwork_rate_preset"):
                 continue
             self.advanced_panel.layout().setRowVisible(
                 self.advanced_fields[key], parametric
@@ -1888,7 +1880,11 @@ class WizardWindow(
             if isinstance(c, SwitchSpec):
                 cells = (
                     c.name,
-                    "Switch",
+                    (
+                        "Simple Switch"
+                        if c.planning_mode == "simple"
+                        else "Complex Switch"
+                    ),
                     " / ".join(c.enum_names),
                     c.enum_names[c.default],
                 )
@@ -1897,7 +1893,16 @@ class WizardWindow(
                     c.name,
                     "Knob",
                     f"{c.min:g} … {c.max:g}  ·  step {c.step:g}"
-                    + ("  ·  Gain/Drive" if c.is_gain else ""),
+                    + ("  ·  Gain/Drive" if c.is_gain else "")
+                    + ("  ·  Clean volume" if c.clean_volume else "")
+                    + ("  ·  Avoid zero" if c.avoid_zero else "")
+                    + ("  ·  Avoid max" if c.avoid_max else "")
+                    + (
+                        {
+                            "lower": "  ·  Lower-half density",
+                            "upper": "  ·  Upper-half density",
+                        }.get(c.sampling_bias, "")
+                    ),
                     f"{c.default:g}",
                 )
             for col, value in enumerate(cells):
@@ -1975,12 +1980,12 @@ class WizardWindow(
             self.recommendation.setText("Add at least one control to build a plan.")
             return
         train, val, combinations = capture_recommendations(controls)
-        if all(isinstance(c, SwitchSpec) for c in controls):
-            val = combinations
+        if all(isinstance(c, SwitchSpec) for c in controls) and val == 0:
+            val = train
         count = corner_capture_count(controls)
         self.recommendation.setText(
             f"Suggested: {train} training + {val} validation captures, plus up to {count} corners.\n"
-            f"{combinations} switch combination(s). Each enabled split must cover every combination. Counts are starting guidelines, not an accuracy guarantee."
+            f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts are starting guidelines, not an accuracy guarantee."
         )
         if autofill:
             self.n_train.setValue(train)
@@ -2463,6 +2468,35 @@ class WizardWindow(
             self.notify_error(error)
 
     def _capture_done(self, qa):
+        if self.workspace and self.session:
+            self.workspace.project = self.session.project
+            last = next(
+                (
+                    e
+                    for e in self.workspace.project.entries
+                    if e.y_path == getattr(self, "_recorded_capture_path", None)
+                ),
+                None,
+            )
+            if last is not None and last.split == "gain":
+                from nam.capture.output_gain import advance_calibration
+                from nam.capture.project import save_project
+
+                try:
+                    added = advance_calibration(
+                        self.workspace.project, self.workspace.directory
+                    )
+                    if added:
+                        self.capture_status.setText(
+                            f"Volume calibration: {added} additional short measurements planned"
+                        )
+                except ValueError as error:
+                    self.workspace.project.output_gain = None
+                    self.workspace.project.output_gain_state.update(
+                        status="failed", message=str(error)
+                    )
+                    self.notify_error(str(error))
+                save_project(self.workspace.project, self.workspace.directory)
         reports = qa if isinstance(qa, list) else [qa]
         self.capture_progress.setValue(100)
         self.capture_status.setText(f"Saved {len(reports)} signal recording(s)")

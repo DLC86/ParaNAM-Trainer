@@ -743,6 +743,7 @@ class CaptureSession:
                     self._write_wav(path, playback * self._send_gain(), sample_rate)
 
     def _input_for_split(self, split: str) -> tuple[_np.ndarray, int]:
+        split = "validation" if split == "gain" else split
         if split not in self._inputs:
             self.load_inputs()
         assert self.project.sample_rate is not None

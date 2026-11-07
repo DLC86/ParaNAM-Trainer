@@ -79,7 +79,10 @@ def read_json(path: Path, default=None, *, tolerate_corrupt=False):
 def control_from_dict(data):
     if data.get("type") == "switch":
         return SwitchSpec(
-            data["name"], tuple(data["enum_names"]), data.get("default", 0)
+            data["name"],
+            tuple(data["enum_names"]),
+            data.get("default", 0),
+            data.get("planning_mode", "complex"),
         )
     return KnobSpec.from_dict(data)
 
@@ -270,6 +273,12 @@ class Workspace:
             if not (self.directory / "input_tts_v11.wav").is_file():
                 install_signals(self.directory, include_tts=True)
             return "input_tts_v11.wav"
+        if self.preferences["input_mode"] == "trunc":
+            from .signals import install_signals
+
+            if not (self.directory / "input_trunc.wav").is_file():
+                install_signals(self.directory, include_trunc=True)
+            return "input_trunc.wav"
         relative = self.preferences.get("custom_input")
         if not relative or not (self.directory / relative).is_file():
             raise ValueError(
@@ -386,7 +395,9 @@ class Workspace:
             prefs.pop("pending_calibration", None)
             self.save()
             return replacement
-        switches_only = all(isinstance(c, SwitchSpec) for c in controls)
+        switches_only = all(isinstance(c, SwitchSpec) for c in controls) and prefs[
+            "n_train"
+        ] == __import__("math").prod(len(c.enum_names) for c in controls)
         validation_count = prefs["n_validation"]
         if validation_count < 1:
             raise ValueError(
@@ -440,6 +451,9 @@ class Workspace:
         replacement.include_initial_corners = prefs["corners"]
         if prefs["corners"]:
             add_corner_captures(replacement)
+        from nam.capture.output_gain import initialize_calibration
+
+        initialize_calibration(replacement)
         self.archive_captures()
         from .signals import install_signals
 
@@ -461,6 +475,13 @@ class Workspace:
         )
 
     def training_ready(self):
+        from nam.capture.output_gain import volume_control
+
+        if (
+            volume_control(self.project)
+            and self.project.output_gain_state.get("status") != "ready"
+        ):
+            return False
         if self.preferences["capture_level_dbfs"] != self.project.capture_level_dbfs:
             return False
         if not self.project.entries or not self.validation_matches():
@@ -549,6 +570,11 @@ class Workspace:
             ),
             "metadata": self.project.user_metadata,
             "controls": [c.to_dict() for c in self.project.control_specs()],
+            **(
+                {"output_gain": self.project.output_gain}
+                if self.project.output_gain
+                else {}
+            ),
             "data": build_data_config(self.project),
             "calibration": [
                 (
