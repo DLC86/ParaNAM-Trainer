@@ -205,9 +205,7 @@ def advance_calibration(project, root):
     reference = _signal(project, root, reference_entry)
     minimum = min(main, key=lambda e: e.params[control.name])
     minimum_signal = _signal(project, root, minimum)
-    noise = (
-        float(np.mean(minimum_signal**2)) if minimum.params[control.name] == 0 else 0
-    )
+    noise = float(np.mean(minimum_signal**2))
     # A minimum which is itself audible must not mask a non-scalar waveform.
     if noise > float(np.mean(reference**2)) * 1e-6:
         noise = 0

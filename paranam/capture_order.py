@@ -127,6 +127,15 @@ def order_captures(entries, controls):
         return completed + pending
     gain = [e for e in pending if e.split == "gain"]
     normal = [e for e in pending if e.split != "gain"]
+    volume = next((c for c in controls if getattr(c, "clean_volume", False)), None)
+    if volume is not None:
+        references = [e for e in gain if e.params.get(volume.name) == volume.max]
+        if references and len(references) < len(pending):
+            reference_paths = {e.y_path for e in references}
+            rest = [e for e in pending if e.y_path not in reference_paths]
+            return order_captures(completed + references, controls) + order_captures(
+                rest, controls
+            )
     if gain and normal:
         return order_captures(completed + gain, controls) + order_captures(
             normal, controls

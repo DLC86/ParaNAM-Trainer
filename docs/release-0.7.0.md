@@ -17,6 +17,9 @@
   are requested where needed, up to 65 curve positions. A second control context
   checks that attenuation is independent of the other controls. Waveform/taper
   failures preserve recordings and block training until corrected or replanned.
+  Maximum-volume references are recorded first. A silent minimum is measured as
+  a noise-floor clip, without requiring timing alignment or a loopback. Audible
+  captures retain timing checks; an explicitly configured loopback must work.
   The 0.25 dB target is checked at measured positions, not a guarantee between
   arbitrary physical pot positions. At least one other neural control is required.
 - Clean volume is stored in a ParametricOutputGain wrapper and applied after

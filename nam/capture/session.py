@@ -281,7 +281,14 @@ def audit_captures(
 
     audits: list[CaptureAudit] = []
     expected = -alignment_lead(project)
-    entries = project.captured_entries()
+    entries = [
+        e
+        for e in project.captured_entries()
+        if not (
+            e.split == "gain"
+            and e.user_metadata.get("output_gain", {}).get("silent_minimum")
+        )
+    ]
     for index, entry in enumerate(entries):
         if cancel is not None and cancel():
             from .audio import CaptureCancelled
@@ -1196,7 +1203,20 @@ class CaptureSession:
             end_latency=end_latency,
         )
 
-        if (
+        silent_volume = not loopback_used and self._silent_volume_minimum(entry, y)
+        if silent_volume:
+            # This clip measures the noise floor, not neural fitting data. A muted
+            # output has no timing information and does not need sample alignment.
+            qa.impulse_detected = None
+            qa.end_timing_detected = None
+            qa.clock_drift_samples = None
+            qa.peak_delay = None
+            qa.blip_delays = []
+            qa.end_delay = None
+            delay = None
+            qa.messages = []
+            entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
+        if not silent_volume and (
             not latency.ok
             or not end_latency.ok
             or qa.clock_drift_samples is None
@@ -1259,6 +1279,65 @@ class CaptureSession:
         _save_project(self.project, self.project_dir)
         _update_data_json(self.project, self.project_dir)
         return qa
+
+    def _silent_volume_minimum(self, entry, y):
+        """Allow timing-free noise-floor measurement only at a verified quiet minimum.
+
+        A captured maximum in the SAME control context/stream must already exist.
+        A missing return at an ordinary setting can never bypass the timing checks.
+        """
+        if entry.split != "gain" or not len(y) or not _np.isfinite(y).all():
+            return False
+        from .output_gain import volume_control
+
+        volume = volume_control(self.project)
+        if volume is None or entry.params.get(volume.name) != volume.min:
+            return False
+        reference = next(
+            (
+                e
+                for e in self.project.entries
+                if e.split == "gain"
+                and e.status == "captured"
+                and e.params.get(volume.name) == volume.max
+                and e.stream_config == self.project.audio.stream_fingerprint()
+                and all(
+                    e.params.get(k) == v
+                    for k, v in entry.params.items()
+                    if k != volume.name
+                )
+                and e.qa is not None
+                and e.qa.end_timing_detected is True
+            ),
+            None,
+        )
+        if reference is None:
+            return False
+        import soundfile as sf
+
+        signal, rate = sf.read(self.project_dir / reference.y_path, always_2d=True)
+        if (
+            rate != self.project.sample_rate
+            or signal.shape[1] != 1
+            or not _np.isfinite(signal).all()
+        ):
+            return False
+        energy = float(_np.mean(signal**2))
+        noise = float(_np.mean(y * y))
+        if energy <= 1e-12 or noise >= energy * 1e-6:
+            return False
+        if noise == 0:
+            return True
+        # A very quiet but coherent response is still signal, not a mute. Reject
+        # it here so it must pass the ordinary timing/loopback checks.
+        from scipy.signal import correlate
+
+        reference_signal = signal[:, 0]
+        correlation = correlate(y, reference_signal, method="fft")
+        coherence = float(_np.max(_np.abs(correlation))) / _np.sqrt(
+            float(_np.sum(y * y) * _np.sum(reference_signal**2))
+        )
+        return coherence < 0.1
 
     def recover_captured_from_disk(
         self,

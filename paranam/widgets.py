@@ -384,7 +384,7 @@ class ControlDialog(QDialog):
         knob_form.addRow("Capture density", self.sampling_bias)
         self.clean_volume = QCheckBox("Clean output volume (measured attenuation)")
         self.clean_volume.setToolTip(
-            "Train at maximum volume and measure a separate short-signal attenuation curve. Use only for an output attenuator that does not change tone or distortion."
+            "Train at maximum volume and measure a separate short-signal attenuation curve. Use only for an output attenuator that does not change tone or distortion. Record the maximum-volume references first; a silent minimum measures noise and does not require timing alignment."
         )
         knob_form.addRow("", self.clean_volume)
         self.switch_mode = QComboBox()

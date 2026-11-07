@@ -136,6 +136,39 @@ def test_neural_plan_fixes_volume_at_maximum():
     assert all(e.params["Volume"] == 10 for e in train + validation)
 
 
+def test_muted_volume_minimum_can_be_recorded_without_loopback(tmp_path):
+    from nam.capture.session import CaptureSession
+    from tests.capture.test_session import _FakeRecorder
+    from paranam.capture_order import order_captures
+
+    project = volume_project()
+    initialize_calibration(project)
+    project.audio.loopback_input_channel = None
+    project.audio.loopback_output_channel = None
+    signal = np.random.default_rng(32).normal(0, 0.1, 48000).astype(np.float32)
+    for path in (project.train_input, project.validation_input):
+        sf.write(tmp_path / path, signal, 48000, subtype="FLOAT")
+    recorder = _FakeRecorder(480, noise=0)
+    session = CaptureSession(project, tmp_path, recorder=recorder)
+    ordered = order_captures(project.entries, project.control_specs())
+    assert ordered[0].params["Volume"] == 10
+    reference = next(e for e in ordered if e.params == {"Tone": 10, "Volume": 10})
+    session.capture_entry(reference)
+    minimum = next(e for e in ordered if e.params == {"Tone": 10, "Volume": 0})
+    recorder.gain = 0
+    recorder.noise = 1e-5
+    qa = session.capture_entry(minimum)
+    assert minimum.status == "captured" and qa.end_timing_detected is None
+    assert minimum.user_metadata["output_gain"]["silent_minimum"]
+    assert not qa.messages
+    assert not session._silent_volume_minimum(minimum, signal * 0.0001)
+    ordinary = next(e for e in project.entries if e.params["Volume"] == 5)
+    assert not session._silent_volume_minimum(ordinary, np.zeros(48000))
+    from nam.capture.session import audit_captures
+
+    assert minimum.y_path not in {a.y_path for a in audit_captures(project, tmp_path)}
+
+
 def test_truncated_input_preserves_original_and_standard_validation(tmp_path):
     from paranam.signals import asset_path, install_signals
     from paranam.workspace import Workspace

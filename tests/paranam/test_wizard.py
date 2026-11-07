@@ -150,7 +150,7 @@ def test_switch_coverage_recommendations_and_signal_selection(window, workspace)
     window.refresh_recommendation(True)
     assert window.n_train.value() == 90
     assert window.n_validation.value() == 48
-    assert "6 switch" in window.recommendation.text()
+    assert "6 Complex Switch" in window.recommendation.text()
     assert not window.custom_button.isEnabled()
     window.signal_mode.setCurrentIndex(window.signal_mode.findData("custom"))
     assert window.custom_button.isEnabled()
