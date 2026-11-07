@@ -15,7 +15,9 @@ select the playback size later in a compatible player.
 
 ## 0.7.0 preview
 
-The upcoming preview adds Simple/Complex Switch capture planning, biased knob
+[Download the 0.7.0 preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.7.0-preview).
+
+This preview adds Simple/Complex Switch capture planning, biased knob
 sampling, Avoid max, measured clean output volume and **Truncated (Phillip Self)**
 input. It retains denser held-out validation and **ESR_worst** from the draft beta;
 the experimental Cosine schedules have been removed. The preview does not replace

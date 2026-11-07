@@ -48,17 +48,15 @@ capture or ensemble member has its own displayed history.
 ## Advanced training settings
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
-editable. Beside each value, select **per epoch** or **per 62 optimizer updates
+editable. Beside each respective **decay** field, select **per epoch** or **per 62 optimizer updates
 (A2 cadence)** for its editable decay. These choices replace the former presets.
-Changing a cadence leaves initial LR and decay values unchanged. The beta adds
-**Cosine (whole budget)** independently for both groups. It uses a linear warmup
-from zero to the configured LR over 2% of the frozen optimizer-step budget, then
-cosine decay to 1% at the last counter. The explicit decay field is unused in
-cosine mode. The saved base rates, budget and counter determine each rate directly
-on resume; increasing an epoch budget is a new training configuration.
+Changing a cadence leaves initial LR and decay values unchanged. The experimental
+Cosine schedules from the draft 0.6.3 beta have been removed in 0.7.0; those beta
+Cosine jobs require a new training. Ordinary cadence jobs remain resumable.
 
-The 0.6.3 beta recommends `min(max(8, 4 × knobs), 24)` held-out validation captures
-per joint switch combination. New-project default validation count is 12; saved
+The 0.7.0 preview recommends `min(max(8, 4 × dimensions), 24)` held-out validation captures
+per joint Complex Switch combination. Dimensions include neural knobs and Simple
+Switches; clean volume is measured separately. New-project default validation count is 12; saved
 plans are unchanged. ESR_worst is the maximum complete-setting validation ESR,
 reported beside the mean for Full/Lite. It does not change best-checkpoint selection.
 
