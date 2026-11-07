@@ -102,7 +102,7 @@ def test_controls_scaled_scheduler_counts_controls_and_resumes_at_boundary(
     (job / "resume-0.ckpt").touch()
     assert training.job_can_resume(workspace, job)
     workspace.preferences["advanced_parametric"]["rate_preset"] = "a2_updates"
-    assert not training.job_can_resume(workspace, job)
+    assert training.job_can_resume(workspace, job) == (count == 1)
 
 
 @pytest.mark.parametrize(
@@ -114,25 +114,18 @@ def test_scaled_preset_preview_and_selection_are_saved(
     workspace.draft_controls.append(SwitchSpec("Bright", ("Off", "On")).to_dict())
     workspace.preferences.update(n_train=4, n_validation=2)
     ready_audio(workspace)
+    workspace.preferences["advanced_parametric"] = dict(rate_preset=preset)
+    before = workspace.fingerprint()
     window._attach(workspace)
+    window.save_preferences()
+    assert workspace.fingerprint() == before
     selector = window.advanced_fields["rate_preset"]
-    selector.setCurrentIndex(selector.findData(preset))
-    selector.activated.emit(selector.currentIndex())
-    schedule = workspace_update_schedule(workspace)
-    assert schedule["cadence_multiplier"] == pytest.approx(expected)
-    if preset == "a2_slow":
-        assert selector.currentText() == "A2 Slow"
-        assert "A2 Slow:" in selector.toolTip()
-    assert (
-        f"every {schedule['decay_steps']:.8g} optimizer updates"
-        in window.rate_preview.text()
+    assert selector.currentData() == "a2_updates"
+    assert window.advanced_fields["lr_decay"].value() == pytest.approx(
+        0.994 ** (1 / expected), abs=5e-10
     )
     assert window.advanced_fields["lr_decay"].isEnabled()
     assert Workspace(workspace.directory).training_options()["rate_preset"] == preset
-    selector.setCurrentIndex(selector.findData("a2_updates"))
-    selector.activated.emit(selector.currentIndex())
-    assert workspace_update_schedule(workspace)["cadence_multiplier"] == 1
-    assert "Audio: A2 Cadence" in window.rate_preview.text()
 
 
 @pytest.mark.parametrize("factor", [0, -1, True, "1", None, float("nan"), float("inf")])

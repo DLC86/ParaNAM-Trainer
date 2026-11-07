@@ -181,6 +181,14 @@ def job_can_resume(workspace, job):
                 include_gradient_safety=False,
             )
         )
+    from .cadences import legacy_cadence_fingerprint
+
+    if spec.get("fingerprint") not in fingerprints:
+        alias = legacy_cadence_fingerprint(
+            workspace, spec, spec.get("preferences", {}).get("batch_size")
+        )
+        if alias is not None:
+            fingerprints.append(alias)
     if spec.get("fingerprint") not in fingerprints:
         # Older jobs did not fingerprint these controls. Resume only if their
         # actual recipe matches the options currently shown in the application.
@@ -1359,7 +1367,12 @@ def run_job(job):
     elapsed_base = float(shared.get("elapsed", 0))
     clock_start = time.monotonic()
     with FileLock(str(workspace.directory / "training" / "worker.lock"), timeout=0):
-        if workspace.fingerprint() != spec["fingerprint"]:
+        from .cadences import legacy_cadence_fingerprint
+
+        if (
+            workspace.fingerprint() != spec["fingerprint"]
+            and legacy_cadence_fingerprint(workspace, spec) != spec["fingerprint"]
+        ):
             raise ValueError("Project changed since this training job was prepared")
         os.chdir(workspace.directory)
         torch.set_num_threads(max(1, min(8, (os.cpu_count() or 2) - 1)))

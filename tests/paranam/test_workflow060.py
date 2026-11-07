@@ -32,11 +32,22 @@ def test_static_hides_hypernetwork_fields_and_labels(window, workspace):
         layout.labelForField(field) is None or layout.labelForField(field).isHidden()
         for field in fields
     )
-    assert layout.isRowVisible(window.advanced_fields["learning_rate"])
+    assert layout.isRowVisible(window.advanced_fields["learning_rate"].parentWidget())
     assert layout.isRowVisible(window.advanced_fields["optimizer"])
     window.load_advanced_options("parametric")
-    assert all(layout.isRowVisible(field) for field in fields)
-    assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.0004
+    assert all(
+        layout.isRowVisible(
+            field.parentWidget()
+            if field
+            in (
+                window.advanced_fields["hypernetwork_learning_rate"],
+                window.advanced_fields["hypernetwork_rate_preset"],
+            )
+            else field
+        )
+        for field in fields
+    )
+    assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.001
     assert window.advanced_fields["hypernetwork_lr_decay"].isEnabled()
 
 

@@ -17,8 +17,11 @@ def requested_settings():
     return {
         **saved,
         "hypernetwork_recipe": "HyperA2",
-        "rate_preset": "a2_dataset",
-        "hypernetwork_rate_preset": "a2_dataset",
+        "rate_preset": "a2_updates",
+        "hypernetwork_rate_preset": "a2_updates",
+        "hypernetwork_learning_rate": 0.001,
+        "hypernetwork_lr_decay": 0.998497,
+        "branch_loss_reduction": "sum",
     }
 
 
@@ -29,7 +32,7 @@ def test_hypera2_preset_matches_every_saved_0252_advanced_field():
 def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_path):
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
     assert workspace.training_options() == requested_settings()
-    assert workspace.preferences["epochs"] == 100
+    assert workspace.preferences["epochs"] == 50
     assert workspace.training_batch_size() == 16
     workspace.preferences["advanced_parametric"] = training_preset("HyperWaveNet")
     workspace.save()
@@ -66,15 +69,15 @@ def test_0252_architecture_optimizer_safety_flags_and_both_decay_clocks(workspac
         "lr": 0.004,
         "weight_decay": 3.17e-7,
     }
-    assert spec["model"]["hypernet_lr_scale"] == 0.1
-    assert spec["model"]["loss"]["training_recipe"] == "legacy"
+    assert spec["model"]["hypernet_lr_scale"] == 0.25
+    assert spec["model"]["loss"]["training_recipe"] == "a2"
     assert spec["model"]["loss"]["mrstft_weight"] == 0.0005
     steps = spec["preferences"]["rate_schedule"]["audio"]["steps_per_epoch"]
     assert spec["model"]["lr_scheduler"] == {
         "class": "IndependentGroupLR",
         "kwargs": {
-            "audio": {"interval": "step", "step_size": steps, "gamma": 0.994},
-            "hypernetwork": {"interval": "step", "step_size": steps, "gamma": 0.994},
+            "audio": {"interval": "step", "step_size": 62, "gamma": 0.994},
+            "hypernetwork": {"interval": "step", "step_size": 62, "gamma": 0.998497},
         },
     }
     assert "gradient_clip_val" not in spec["learning"]["trainer"]

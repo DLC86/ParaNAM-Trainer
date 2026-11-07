@@ -31,7 +31,7 @@ from ..models.parametric import quantize_to_capture_grid as _quantize_to_capture
 from ..models.parametric import switch_combinations as _switch_combinations
 from ..models.parametric import ParamSpec as _ParamSpec
 from .params import DEFAULT_KNOB_STEP as _DEFAULT_KNOB_STEP
-from .params import gain_knob_index as _gain_knob_index
+from .params import gain_knob_indices as _gain_knob_index
 from .params import ControlSpec as _ControlSpec
 from .params import validate_knobs as _validate_knobs
 
@@ -714,22 +714,29 @@ def _corner_vertices(n: int) -> list[tuple[bool, ...]]:
     ]
 
 
-def _corner_high_flag_sets(n: int, gain_index: _Optional[int]) -> list[list[bool]]:
+def _corner_high_flag_sets(
+    n: int, gain_index: int | _Sequence[int] | None
+) -> list[list[bool]]:
     """
     The per-corner max/min pattern (True = knob at max) before dedup: the vertex set from
     :func:`_corner_vertices`, crossed with the gain knob's min and max when one is marked
     so every tone-stack extreme is seen at both ends of the drive range. Duplicates that
     collapse for small knob counts are removed later by :func:`corner_settings`.
     """
-    if gain_index is None:
+    gains = (
+        ()
+        if gain_index is None
+        else ((gain_index,) if isinstance(gain_index, int) else tuple(gain_index))
+    )
+    if not gains:
         return [list(vertex) for vertex in _corner_vertices(n)]
-
-    others = [i for i in range(n) if i != gain_index]
-    flag_sets: list[list[bool]] = []
+    others = [i for i in range(n) if i not in gains]
+    flag_sets = []
     for vertex in _corner_vertices(len(others)):
-        for gain_high in (False, True):
+        for gain_values in _itertools.product((False, True), repeat=len(gains)):
             flags = [False] * n
-            flags[gain_index] = gain_high
+            for index, high in zip(gains, gain_values):
+                flags[index] = high
             for position, index in enumerate(others):
                 flags[index] = vertex[position]
             flag_sets.append(flags)
@@ -739,7 +746,7 @@ def _corner_high_flag_sets(n: int, gain_index: _Optional[int]) -> list[list[bool
 def corner_settings(
     specs: _Sequence[_ParamSpec],
     *,
-    gain_index: _Optional[int] = None,
+    gain_index: int | _Sequence[int] | None = None,
     default_step: float = _DEFAULT_KNOB_STEP,
 ) -> list[dict[str, _Any]]:
     """
@@ -755,10 +762,13 @@ def corner_settings(
     if any(spec.type == "switch" for spec in specs):
         continuous = tuple(spec for spec in specs if spec.type != "switch")
         switches = tuple(spec for spec in specs if spec.type == "switch")
-        continuous_gain = (
-            sum(spec.type != "switch" for spec in specs[:gain_index])
-            if gain_index is not None
-            else None
+        gains = (
+            ()
+            if gain_index is None
+            else ((gain_index,) if isinstance(gain_index, int) else tuple(gain_index))
+        )
+        continuous_gain = tuple(
+            sum(spec.type != "switch" for spec in specs[:index]) for index in gains
         )
         corners = corner_settings(
             continuous, gain_index=continuous_gain, default_step=default_step
@@ -792,10 +802,8 @@ def corner_capture_count(
     specs = tuple(knob.to_param_spec() for knob in knobs)
     continuous = tuple(spec for spec in specs if spec.type != "switch")
     gain = _gain_knob_index(knobs)
-    continuous_gain = (
-        sum(spec.type != "switch" for spec in specs[:gain])
-        if gain is not None
-        else None
+    continuous_gain = tuple(
+        sum(spec.type != "switch" for spec in specs[:index]) for index in gain
     )
     return len(
         corner_settings(

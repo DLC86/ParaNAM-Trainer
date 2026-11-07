@@ -111,36 +111,28 @@ def test_independent_dataset_clocks_restore_exactly(workspace, audio, hyper):
 
 def test_new_choices_and_restored_presets_preserve_old_project(window, workspace):
     ready_audio(workspace)
-    workspace.preferences["advanced_parametric"] = training_preset("HyperA2")
-    window._attach(workspace)
-    for key in ("rate_preset", "hypernetwork_rate_preset"):
-        selector = window.advanced_fields[key]
-        assert selector.findData("a2_dataset") >= 0
-        assert selector.findData("a2_dataset_sqrt") >= 0
-        assert selector.findData("a2_controls") >= 0
-        assert selector.currentData() == "a2_dataset"
-    assert "Independent LR schedules" in window.rate_preview.text()
-    hyper = window.advanced_fields["hypernetwork_rate_preset"]
-    hyper.setCurrentIndex(hyper.findData("a2_dataset_sqrt"))
-    hyper.activated.emit(hyper.currentIndex())
-    assert (
-        Workspace(workspace.directory).training_options()["hypernetwork_rate_preset"]
-        == "a2_dataset_sqrt"
+    workspace.preferences["advanced_parametric"] = dict(
+        rate_preset="a2_dataset", hypernetwork_rate_preset="a2_dataset_sqrt"
     )
-    workspace.preferences["advanced_parametric"].update(
-        rate_preset="a2_updates", hypernetwork_rate_preset="a2_controls"
-    )
-    workspace.save()
     before = workspace.fingerprint()
-    window.load_advanced_options()
+    window._attach(workspace)
     window.save_preferences()
     assert workspace.fingerprint() == before
     for key in ("rate_preset", "hypernetwork_rate_preset"):
         selector = window.advanced_fields[key]
-        assert selector.currentData() == (
-            "a2_updates" if key == "rate_preset" else "a2_controls"
-        )
-        assert all(
-            selector.findData(old) >= 0
-            for old in ("a2_updates", "a2_controls", "a2_slow")
-        )
+        assert [selector.itemData(i) for i in range(selector.count())] == [
+            "manual",
+            "a2_updates",
+        ]
+    assert window.advanced_fields["rate_preset"].currentData() == "manual"
+    assert (
+        window.advanced_fields["hypernetwork_rate_preset"].currentData() == "a2_updates"
+    )
+    assert "Independent LR schedules" in window.rate_preview.text()
+    hyper = window.advanced_fields["hypernetwork_rate_preset"]
+    hyper.setCurrentIndex(hyper.findData("manual"))
+    hyper.activated.emit(hyper.currentIndex())
+    assert (
+        Workspace(workspace.directory).training_options()["hypernetwork_rate_preset"]
+        == "manual"
+    )

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import sys
 import time
 from pathlib import Path
+
+from .numeric import DecimalSpinBox as QDoubleSpinBox
 
 from PySide6.QtCore import (
     Qt,
@@ -36,7 +39,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QComboBox,
     QSpinBox,
-    QDoubleSpinBox,
     QCheckBox,
     QFormLayout,
     QFileDialog,
@@ -114,7 +116,11 @@ def duration(seconds):
         return "Estimating…"
     minutes, seconds = divmod(max(0, int(seconds)), 60)
     hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes:02d}m" if hours else f"{minutes:02d}:{seconds:02d}"
+    return (
+        f"{hours}h {minutes:02d}m {seconds:02d}s"
+        if hours
+        else f"{minutes:02d}:{seconds:02d}"
+    )
 
 
 class WizardWindow(
@@ -181,6 +187,13 @@ class WizardWindow(
         self._restoring_setup = False
         self.capture_stage.connect(self.capture_status.setText)
         self.route_levels.connect(self._route_metered)
+        from .queue_clock import ElapsedClock
+
+        self._elapsed_clock = ElapsedClock()
+        self.queue_seconds_timer = QTimer(self)
+        self.queue_seconds_timer.setSingleShot(True)
+        self.queue_seconds_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.queue_seconds_timer.timeout.connect(self._tick_queue_seconds)
         self.timer = QTimer(self)
         self.timer.setInterval(600)
         self.timer.timeout.connect(self.refresh_training)
@@ -357,15 +370,34 @@ class WizardWindow(
         row.addWidget(self.new_button)
         row.addWidget(self.open_button)
         row.addStretch()
+        self.open_project_folder_button = button(
+            "Open project folder", self.open_selected_project_folder
+        )
+        self.open_project_folder_button.setEnabled(False)
+        row.addWidget(self.open_project_folder_button)
         box.addLayout(row)
         self.recent = QListWidget()
         self.recent.setItemDelegate(RecentProjectDelegate(self.recent))
         self.recent.setMinimumHeight(320)
+        self.recent.itemSelectionChanged.connect(
+            lambda: self.open_project_folder_button.setEnabled(
+                bool(self.recent.currentItem())
+            )
+        )
         self.recent.itemDoubleClicked.connect(
             lambda item: self.open_project(Path(item.data(Qt.ItemDataRole.UserRole)))
         )
         box.addWidget(self.recent)
         layout.addWidget(projects)
+
+    def open_selected_project_folder(self):
+        item = self.recent.currentItem()
+        if item:
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(
+                    str(Path(item.data(Qt.ItemDataRole.UserRole)).resolve())
+                )
+            )
 
     def _settings(self, layout):
         layout.addWidget(label("Settings", "title"))
@@ -604,7 +636,7 @@ class WizardWindow(
         self.seed = QSpinBox()
         self.seed.setRange(0, 2**31 - 1)
         self.corners = QCheckBox(
-            "Include range-extreme captures for every switch combination"
+            "Include range-extreme captures for every knob/switch combination (corners)"
         )
         self.corners.setChecked(True)
         form.addRow("Training LHS captures", self.n_train)
@@ -704,6 +736,9 @@ class WizardWindow(
         self.capture_table.itemSelectionChanged.connect(self.select_capture)
         layout.addWidget(self.capture_table, 1)
         self.rig_ready.toggled.connect(self.update_enabled)
+        self.rig_ready.toggled.connect(
+            lambda checked: self.scene.stop_blink() if checked else None
+        )
 
     def _training(self, layout):
         layout.addWidget(label("TURN CAPTURES INTO AN INSTRUMENT", "eyebrow"))
@@ -719,7 +754,7 @@ class WizardWindow(
         form = QFormLayout()
         self.epochs = QSpinBox()
         self.epochs.setRange(1, 100000)
-        self.epochs.setValue(100)
+        self.epochs.setValue(50)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 128)
         self.batch_size.setValue(16)
@@ -758,8 +793,8 @@ class WizardWindow(
                 10,
                 9,
             ),
-            ("lr_decay", "LR Decay", 0.994, 0, 1, 6),
-            ("hypernetwork_lr_decay", "Hypernetwork LR Decay", 0.994, 0, 1, 6),
+            ("lr_decay", "LR Decay", 0.994, 0, 1, 9),
+            ("hypernetwork_lr_decay", "Hypernetwork LR Decay", 0.998497, 0, 1, 9),
             ("ny", "NY (samples)", 8192, 1, 1048576, 0),
             ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
             ("weight_decay", "Weight Decay", 3.17e-7, 0, 10, 12),
@@ -798,41 +833,43 @@ class WizardWindow(
         advanced_form.insertRow(0, "Preset", preset)
         preset.activated.connect(self.apply_training_preset)
         rate_preset = QComboBox()
-        from .recipes import RATE_PRESET_LABELS
-
-        for key, title in RATE_PRESET_LABELS.items():
-            rate_preset.addItem(title, key)
-        rate_preset.addItem("Manual / per-epoch decay", "manual")
-        rate_preset.setCurrentIndex(rate_preset.findData("manual"))
-        rate_preset.setToolTip(
-            "A2 Cadence: 62 updates. A2 Slow: 62 × knobs × 2^switches / √2. A2 Slower: 62 × knobs × 2^switches. "
-            "Dataset-normalized: A2 interval × (dataset updates / reference updates), or its square root. "
-            "Uses complete training batches after validation audio is excluded; validation captures are not counted."
-        )
-        self.advanced_fields["rate_preset"] = rate_preset
-        advanced_form.insertRow(1, "Learning-rate preset", rate_preset)
-        rate_preset.activated.connect(self.apply_rate_preset)
         hyper_rate_preset = QComboBox()
-        for index in range(rate_preset.count()):
-            hyper_rate_preset.addItem(
-                rate_preset.itemText(index), rate_preset.itemData(index)
+        for field in (rate_preset, hyper_rate_preset):
+            field.addItem("per epoch", "manual")
+            field.addItem("per 62 optimizer updates (A2 cadence)", "a2_updates")
+            field.setToolTip(
+                "Cadence of this network's LR Decay. Legacy resumes retain the original checkpoint clock."
             )
-        hyper_rate_preset.setCurrentIndex(hyper_rate_preset.findData("manual"))
-        hyper_rate_preset.setToolTip(
-            "Choose the hypernetwork cadence independently. Each reduction uses the editable Hypernetwork LR Decay value."
-        )
+        self.advanced_fields["rate_preset"] = rate_preset
         self.advanced_fields["hypernetwork_rate_preset"] = hyper_rate_preset
-        advanced_form.insertRow(
-            2, "Hypernetwork learning-rate preset", hyper_rate_preset
-        )
-        hyper_rate_preset.activated.connect(self.apply_hypernetwork_rate_preset)
+        for value_key, selector in (
+            ("learning_rate", rate_preset),
+            ("hypernetwork_learning_rate", hyper_rate_preset),
+        ):
+            value = self.advanced_fields[value_key]
+            caption = advanced_form.labelForField(value).text()
+            row_index, _ = advanced_form.getWidgetPosition(value)
+            removed = advanced_form.takeRow(value)
+            if removed.labelItem:
+                removed.labelItem.widget().hide()
+                removed.labelItem.widget().deleteLater()
+            pair = QWidget()
+            pair_layout = QHBoxLayout(pair)
+            pair_layout.setContentsMargins(0, 0, 0, 0)
+            pair_layout.addWidget(value)
+            pair_layout.addWidget(selector)
+            advanced_form.insertRow(row_index, caption, pair)
+            if value_key == "hypernetwork_learning_rate":
+                self.hypernetwork_rate_row = pair
+        rate_preset.activated.connect(self.save_preferences)
+        hyper_rate_preset.activated.connect(self.save_preferences)
         self.rate_preview = label("", "muted")
         self.rate_preview.setWordWrap(True)
         advanced_form.addRow(self.rate_preview)
         self.preset_description = label("", "muted")
         advanced_form.addRow(self.preset_description)
         self.advanced_fields["hypernetwork_learning_rate"].setToolTip(
-            "Independent learning rate for the knob-to-weight network. Its cadence can follow the main preset or use a separate preset. Parametric training only."
+            "Independent learning rate for the knob-to-weight network. Choose its own decay cadence beside the learning rate. Parametric training only."
         )
         self.advanced_fields["learning_rate"].setToolTip(
             "Learning rate for the base audio-network weights."
@@ -947,7 +984,7 @@ class WizardWindow(
         layout.addWidget(label("Training queue", "title"))
         layout.addWidget(
             label(
-                "Each row is an independent training instance. Reordering affects waiting jobs; removing a row keeps its models and checkpoints on disk.",
+                "Each row is an independent training instance. All rows can be reordered; the waiting jobs follow that order; removing a row keeps its models and checkpoints on disk.",
                 "muted",
             )
         )
@@ -1012,7 +1049,7 @@ class WizardWindow(
         resume_options.addWidget(label("Device"))
         resume_options.addWidget(self.resume_device)
         resume_options.addStretch()
-        layout.addWidget(self.resume_options_widget)
+        self.resume_options_widget.hide()
         self.training_status = label("Add training from a project to begin.", "muted")
         layout.addWidget(self.training_status)
         grid = QGridLayout()
@@ -1040,17 +1077,17 @@ class WizardWindow(
         layout.addWidget(self.train_progress)
         row = self.queue_run_row
         self.queue_start_button = button("Start queue", self.run_queue, True)
-        self.pause_button = button("Pause & save", self.pause_training)
-        self.stop_button = button("Stop", self.stop_training)
+        self.pause_button = button("Pause selected training", self.pause_training)
+        self.stop_button = button("Cancel selected training", self.stop_training)
         self.models_button = button("Open model folder", self.open_models)
         row.addWidget(self.queue_start_button)
+        row.addStretch()
         row.addWidget(self.pause_button)
         row.addWidget(self.stop_button)
         row.addWidget(self.resume_button)
         row.addWidget(self.retrain_button)
         self.export_best_button = button("Export best model", self.export_best_model)
         row.addWidget(self.export_best_button)
-        row.addStretch()
         actions.addWidget(self.models_button)
         self.export_status = label("", "muted")
         layout.addWidget(self.export_status)
@@ -1078,11 +1115,11 @@ class WizardWindow(
         self.save_preferences()
 
     def load_advanced_options(self, kind=None):
-        options = dict(self.workspace.training_options(kind))
-        if options["hypernetwork_rate_preset"] == "follow":
-            # Display legacy shared schedules as their explicit effective values.
-            options["hypernetwork_rate_preset"] = options["rate_preset"]
-            options["hypernetwork_lr_decay"] = options["lr_decay"]
+        from .cadences import editable_cadences
+
+        options = editable_cadences(
+            self.workspace, self.workspace.training_options(kind)
+        )
         for key, field in self.advanced_fields.items():
             field.blockSignals(True)
             if isinstance(field, QComboBox):
@@ -1113,33 +1150,9 @@ class WizardWindow(
         self.refresh_rate_preview(kind)
 
     def apply_rate_preset(self, *_):
-        if not self.workspace or self._loading:
-            return
-        if self.advanced_fields["rate_preset"].currentData() in (
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
-            "a2_dataset",
-            "a2_dataset_sqrt",
-        ):
-            for key, value in (("learning_rate", 0.004),):
-                self.advanced_fields[key].blockSignals(True)
-                self.advanced_fields[key].setValue(value)
-                self.advanced_fields[key].blockSignals(False)
         self.save_preferences()
 
     def apply_hypernetwork_rate_preset(self, *_):
-        if not self.workspace or self._loading:
-            return
-        if self.advanced_fields["hypernetwork_rate_preset"].currentData() not in (
-            "follow",
-            "manual",
-        ):
-            for key, value in (("hypernetwork_learning_rate", 0.0004),):
-                field = self.advanced_fields[key]
-                field.blockSignals(True)
-                field.setValue(value)
-                field.blockSignals(False)
         self.save_preferences()
 
     def refresh_rate_preview(self, kind=None):
@@ -1170,7 +1183,14 @@ class WizardWindow(
             try:
                 from .recipes import workspace_group_schedules
 
-                schedules = workspace_group_schedules(self.workspace)
+                from .cadences import editable_cadences
+
+                schedules = workspace_group_schedules(
+                    self.workspace,
+                    editable_cadences(
+                        self.workspace, self.workspace.training_options()
+                    ),
+                )
                 descriptions = []
                 for name, schedule in schedules.items():
                     unit = (
@@ -1241,9 +1261,14 @@ class WizardWindow(
             "condition_dilated_convolutions",
             "branch_loss_reduction",
         ):
+            if key in ("hypernetwork_learning_rate", "hypernetwork_rate_preset"):
+                continue
             self.advanced_panel.layout().setRowVisible(
                 self.advanced_fields[key], parametric
             )
+        self.advanced_panel.layout().setRowVisible(
+            self.hypernetwork_rate_row, parametric
+        )
         for key in (
             "hypernetwork_mode",
             "condition_dilated_convolutions",
@@ -1296,7 +1321,7 @@ class WizardWindow(
         QMessageBox.warning(self, "ParaNAM Trainer", str(error))
 
     def navigate(self, index):
-        if index in (1, 2, 3, 5) and not self.workspace:
+        if index in (1, 2, 3) and not self.workspace:
             self.notify_error("Create or open a project first.")
             return
         if index in (2, 3) and not self.busy():
@@ -1402,6 +1427,7 @@ class WizardWindow(
 
     def _attach(self, workspace, use_last_setup=False):
         self.close_audio()
+        self.scene.stop_blink()
         self.initialize_global_setup(workspace)
         self.workspace = workspace
         from .recovery import RecoveryRequired
@@ -1963,6 +1989,14 @@ class WizardWindow(
             prefs[key] = field.value()
         previous_type = prefs["capture_type"]
         next_type = self.capture_kind.currentData()
+        prefs[previous_type + "_epochs"] = self.epochs.value()
+        if previous_type != next_type:
+            prefs["epochs"] = prefs.get(
+                next_type + "_epochs", 50 if next_type == "parametric" else 200
+            )
+            self.epochs.blockSignals(True)
+            self.epochs.setValue(prefs["epochs"])
+            self.epochs.blockSignals(False)
         old_options = self.workspace.training_options(previous_type)
         batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
         prefs[batch_key] = self.batch_size.value()
@@ -1976,15 +2010,11 @@ class WizardWindow(
             )
             for key, field in self.advanced_fields.items()
         }
-        advanced = prefs["advanced_" + previous_type]
-        if (
-            old_options["hypernetwork_rate_preset"] == "follow"
-            and advanced["hypernetwork_rate_preset"] == advanced["rate_preset"]
-            and advanced["hypernetwork_lr_decay"] == advanced["lr_decay"]
-        ):
-            # Keep the old fingerprint only while the visible settings are exactly
-            # equivalent. Any separate edit immediately becomes independent.
-            advanced["hypernetwork_rate_preset"] = "follow"
+        from .cadences import preserve_unchanged_cadences
+
+        prefs["advanced_" + previous_type] = preserve_unchanged_cadences(
+            self.workspace, old_options, prefs["advanced_" + previous_type]
+        )
         if previous_type != next_type:
             next_key = "static_batch_size" if next_type == "static" else "batch_size"
             self.batch_size.blockSignals(True)
@@ -2284,12 +2314,16 @@ class WizardWindow(
                 (i for i, e in enumerate(entries) if e.status != "captured"),
                 len(entries) - 1,
             )
+            self.capture_table.blockSignals(True)
             self.capture_table.selectRow(row)
-            self.select_capture()
+            self.capture_table.blockSignals(False)
+            self.select_capture(automatic=True)
         self.rig_ready.setChecked(False)
         self.update_enabled()
 
-    def select_capture(self):
+    def select_capture(self, automatic=False):
+        if not automatic:
+            self.scene.stop_blink()
         if self.workspace and 0 <= self.capture_table.currentRow() < len(
             self._capture_entries
         ):
@@ -2390,6 +2424,8 @@ class WizardWindow(
                 "Recording… Timing is checked at the beginning and end of this recording."
             )
             self.capture_progress.setValue(0)
+            self._recorded_control_values = dict(entry.params)
+            self._recorded_capture_path = entry.y_path
 
             def capture_signals(progress, cancel):
                 results = []
@@ -2419,6 +2455,19 @@ class WizardWindow(
         self.capture_progress.setValue(100)
         self.capture_status.setText(f"Saved {len(reports)} signal recording(s)")
         self.refresh_captures()
+        row = self.capture_table.currentRow()
+        if 0 <= row < len(self._capture_entries):
+            following = self._capture_entries[row]
+            if following.y_path != getattr(
+                self, "_recorded_capture_path", following.y_path
+            ):
+                self.capture_progress.setValue(0)
+                previous = getattr(self, "_recorded_control_values", {})
+                self.scene.start_blink(
+                    name
+                    for name, value in following.params.items()
+                    if previous.get(name) != value
+                )
         messages = [message for report in reports for message in report.messages]
         if messages:
             QMessageBox.warning(self, "Capture quality check", "\n".join(messages))
@@ -2497,6 +2546,23 @@ class WizardWindow(
         self.export_worker = None
         self.refresh_training()
 
+    def _tick_queue_seconds(self):
+        elapsed = self._elapsed_clock.value()
+        self.metrics["elapsed"].setText(duration(elapsed))
+        eta = getattr(self, "_queue_eta", None)
+        delta = (
+            time.monotonic() - getattr(self, "_queue_eta_started", time.monotonic())
+            if self._elapsed_clock.running
+            else 0
+        )
+        self.metrics["eta"].setText(
+            duration(max(0, eta - delta) if eta is not None else None)
+        )
+        if self._elapsed_clock.running and self.isVisible():
+            self.queue_seconds_timer.start(max(1, math.ceil((1 - elapsed % 1) * 1000)))
+        else:
+            self.queue_seconds_timer.stop()
+
     def _render_job_progress(self):
         progress = training.job_progress(self.job)
         spec = (
@@ -2506,6 +2572,8 @@ class WizardWindow(
         )
         total_epochs = spec.get("preferences", {}).get("epochs")
         if not progress:
+            self._elapsed_clock.update(None, 0, False)
+            self.queue_seconds_timer.stop()
             self.esr_chart.set_history([], total_epochs)
             entry = (
                 self.queue_controller.store.get(self.selected_job_id)
@@ -2546,7 +2614,7 @@ class WizardWindow(
         elif queue_state in ("pausing", "stopping"):
             message = f"{queue_state.title()} at the next batch boundary. The last complete epoch is kept."
         if status == "failed" and progress.get("resume_available"):
-            message += f"\nA checkpoint is available. Resume restarts epoch {progress.get('restart_epoch', 1)}. You can reduce batch size after a memory error."
+            message += f"\nA checkpoint is available. Resume restarts epoch {progress.get('restart_epoch', 1)}."
         if self.selected_job_id != self.queue_controller.active_id and status in (
             "running",
             "scoring",
@@ -2569,17 +2637,15 @@ class WizardWindow(
         self.metrics["train_esr"].setText(
             "—" if train_esr is None else f"{train_esr:.5f}"
         )
-        live = (
-            max(0, time.time() - progress.get("updated_at", time.time()))
-            if self.selected_job_id == self.queue_controller.active_id
-            and self.selected_job_id is not None
-            else 0
+        running = (
+            self.selected_job_id is not None
+            and self.selected_job_id == self.queue_controller.active_id
+            and status in ("running", "scoring", "pausing", "stopping")
         )
-        self.metrics["elapsed"].setText(duration(progress.get("elapsed", 0) + live))
-        eta = progress.get("eta")
-        self.metrics["eta"].setText(
-            duration(max(0, eta - live) if eta is not None else None)
-        )
+        self._elapsed_clock.update(str(self.job), progress.get("elapsed", 0), running)
+        self._queue_eta = progress.get("eta")
+        self._queue_eta_started = time.monotonic()
+        self._tick_queue_seconds()
         fraction = (
             progress.get("member", 0)
             + (max(0, epoch - 1) + progress.get("batch_fraction", 0)) / max(epochs, 1)

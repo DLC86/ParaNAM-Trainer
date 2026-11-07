@@ -10,9 +10,7 @@ from paranam.workspace import read_json
 from tests.paranam.test_workflow055 import ready_audio
 
 
-@pytest.mark.parametrize(
-    "preset", ["a2_updates", "a2_slow", "a2_controls", "a2_dataset_sqrt", "a2_dataset"]
-)
+@pytest.mark.parametrize("preset", ["a2_updates", "manual"])
 def test_all_presets_use_editable_independent_decay_values(window, workspace, preset):
     from nam.train.parametric import _ParametricLightningModule
 
@@ -71,14 +69,13 @@ def test_legacy_follow_is_not_visible_and_keeps_old_fingerprint_until_edited(
     window._attach(workspace)
     assert window.advanced_fields["hypernetwork_rate_preset"].findData("follow") == -1
     assert (
-        window.advanced_fields["hypernetwork_rate_preset"].currentData()
-        == "a2_controls"
+        window.advanced_fields["hypernetwork_rate_preset"].currentData() == "a2_updates"
     )
     assert window.advanced_fields["hypernetwork_lr_decay"].value() == 0.97
     window.save_preferences()
     assert workspace.fingerprint() == fingerprint
     window.advanced_fields["hypernetwork_lr_decay"].setValue(0.8)
-    assert workspace.training_options()["hypernetwork_rate_preset"] == "a2_controls"
+    assert workspace.training_options()["hypernetwork_rate_preset"] == "a2_updates"
     assert workspace.training_options()["hypernetwork_lr_decay"] == 0.8
     assert workspace.training_options()["lr_decay"] == 0.97
     spec = read_json(training.make_job(workspace) / "spec.json")
@@ -109,14 +106,7 @@ def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
         hypernetwork_learning_rate=0.001,
     )
     window._attach(workspace)
-    order = [
-        "a2_updates",
-        "a2_slow",
-        "a2_controls",
-        "a2_dataset_sqrt",
-        "a2_dataset",
-        "manual",
-    ]
+    order = ["manual", "a2_updates"]
     for batch in (4, 2):
         window.batch_size.setValue(batch)
         for key in ("rate_preset", "hypernetwork_rate_preset"):
@@ -126,7 +116,7 @@ def test_preset_order_is_fixed_and_does_not_reset_values(window, workspace):
         assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
         assert (
             window.advanced_fields["hypernetwork_rate_preset"].currentData()
-            == "a2_controls"
+            == "a2_updates"
         )
         assert window.advanced_fields["learning_rate"].value() == 0.003
         assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.001
@@ -161,7 +151,7 @@ def test_retrain_and_start_queue_restore_paused_old_recipe(
     atomic_write_json(controller.control_path, {"paused_job": paused["id"]})
     restored = controller.store.retrain(paused["id"])
     assert restored.training_options()["rate_preset"] == "a2_updates"
-    assert restored.training_options()["hypernetwork_rate_preset"] == "a2_controls"
+    assert restored.training_options()["hypernetwork_rate_preset"] == "a2_updates"
     assert restored.training_options()["hypernetwork_learning_rate"] == 0.001
     assert restored.training_ready() and not restored.plan_changed()
     replacement = controller.store.add(restored)
@@ -220,8 +210,11 @@ def test_old_ids_are_available_with_new_names_and_do_not_reset_saved_rates(
     window._attach(workspace)
     for key in ("rate_preset", "hypernetwork_rate_preset"):
         selector = window.advanced_fields[key]
-        for identifier, label in RATE_PRESET_LABELS.items():
-            assert selector.itemText(selector.findData(identifier)) == label
+        assert selector.itemText(selector.findData("manual")) == "per epoch"
+        assert (
+            selector.itemText(selector.findData("a2_updates"))
+            == "per 62 optimizer updates (A2 cadence)"
+        )
     window.save_preferences()
     assert workspace.fingerprint() == before
     assert window.advanced_fields["learning_rate"].value() == 0.003

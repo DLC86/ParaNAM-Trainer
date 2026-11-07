@@ -144,6 +144,12 @@ class TrainingQueue:
         if not workspace.training_ready():
             raise ValueError("Complete every planned capture before adding training.")
         frozen = snapshot_workspace(workspace, self.snapshot_root(workspace))
+        from .cadences import editable_cadences
+
+        frozen.preferences["advanced_" + frozen.project.capture_type] = (
+            editable_cadences(frozen, frozen.training_options())
+        )
+        frozen.save()
         job = training.make_job(frozen, job_directory=frozen.directory.parent)
         spec = read_json(job / "spec.json")
         source = frozen.preferences["_queue_source_project"]
@@ -198,6 +204,14 @@ class TrainingQueue:
         snapshot = Workspace(Path(spec["project"]))
         workspace.draft_controls = copy.deepcopy(snapshot.draft_controls)
         workspace.project.user_metadata = copy.deepcopy(snapshot.project.user_metadata)
+        if isinstance(effective, dict):
+            from .cadences import editable_cadences, stored_schedules
+
+            workspace.preferences[
+                "advanced_" + saved.get("capture_type", entry["kind"])
+            ] = editable_cadences(
+                snapshot, workspace.training_options(), stored_schedules(spec)
+            )
         workspace.save()
         return workspace
 
@@ -287,14 +301,13 @@ class TrainingQueue:
 
     def move(self, identifier, offset):
         def edit(entries):
-            pending = [i for i, e in enumerate(entries) if e["state"] == "queued"]
-            position = next(
-                (p for p, i in enumerate(pending) if entries[i]["id"] == identifier),
+            a = next(
+                (i for i, entry in enumerate(entries) if entry["id"] == identifier),
                 None,
             )
-            if position is None or not 0 <= position + offset < len(pending):
+            if a is None or not 0 <= a + offset < len(entries):
                 return
-            a, b = pending[position], pending[position + offset]
+            b = a + offset
             entries[a], entries[b] = entries[b], entries[a]
 
         self._edit(edit)

@@ -467,15 +467,17 @@ _GAIN_KNOB_ROWS = [
 ]
 
 
-def test_gain_column_is_single_select(_qapp):
+def test_gain_column_allows_two_and_rejects_a_third(_qapp):
     from PySide6.QtCore import Qt as _Qt
 
     window = _MainWindow()
     _fill_knob_rows(window, _GAIN_KNOB_ROWS)
-    # Ticking a second knob's Gain/Drive box clears the first.
+    # Two gain knobs stay selected; a third selection is rejected.
     window.knob_table.item(1, 5).setCheckState(_Qt.CheckState.Checked)
-    assert window.knob_table.item(0, 5).checkState() == _Qt.CheckState.Unchecked
+    assert window.knob_table.item(0, 5).checkState() == _Qt.CheckState.Checked
     assert window.knob_table.item(1, 5).checkState() == _Qt.CheckState.Checked
+    window.knob_table.item(2, 5).setCheckState(_Qt.CheckState.Checked)
+    assert window.knob_table.item(2, 5).checkState() == _Qt.CheckState.Unchecked
     window.close()
 
 

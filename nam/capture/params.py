@@ -42,7 +42,7 @@ class KnobSpec:
     :param avoid_zero: When true, no planned capture sets this knob to zero; a draw that
         would snap to zero uses the next reachable grid value instead. Use for gain/drive
         knobs that mute the rig at zero and can destabilize training.
-    :param is_gain: Marks this knob as the amp's gain/drive control. At most one knob may
+    :param is_gain: Marks this knob as the amp's gain/drive control. At most two knobs may
         be marked. It changes how the initial corner captures are generated (the gain knob
         gets its own min/max sweep so the EQ params' corners are learned at both gain
         extremes); it is capture-only metadata and does not affect the training-side
@@ -226,9 +226,9 @@ def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
             )
         seen[key] = knob.name
     gain_names = [knob.name for knob in knobs if knob.is_gain]
-    if len(gain_names) > 1:
+    if len(gain_names) > 2:
         raise ValueError(
-            "At most one knob may be marked Gain/Drive; "
+            "At most two knobs may be marked Gain/Drive; "
             f"got {', '.join(repr(name) for name in gain_names)}"
         )
     return knobs
@@ -237,9 +237,14 @@ def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
 def gain_knob_index(knobs: _Sequence[ControlSpec]) -> _Optional[int]:
     """
     Position of the knob marked Gain/Drive, or ``None`` if none is. Assumes the knob set
-    has passed :func:`validate_knobs` (at most one gain knob).
+    has passed :func:`validate_knobs` (at most two gain knobs; this legacy helper returns the first).
     """
     for index, knob in enumerate(knobs):
         if knob.is_gain:
             return index
     return None
+
+
+def gain_knob_indices(knobs: _Sequence[ControlSpec]) -> tuple[int, ...]:
+    """All gain/drive dimensions, in capture-control order."""
+    return tuple(i for i, knob in enumerate(knobs) if knob.is_gain)

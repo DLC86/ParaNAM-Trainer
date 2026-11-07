@@ -4,6 +4,8 @@ import math
 import time
 from pathlib import Path
 
+from .numeric import DecimalSpinBox as QDoubleSpinBox
+
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QRectF, QSize
 from PySide6.QtGui import QPainter, QPen, QColor, QFontMetrics
 from PySide6.QtWidgets import (
@@ -14,7 +16,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QGridLayout,
     QComboBox,
-    QDoubleSpinBox,
     QDial,
     QButtonGroup,
     QFileDialog,
@@ -29,6 +30,8 @@ from .workspace import read_json
 from .ir import BUNDLED, prepare_ir, IRProcessor
 from .preview import preview_files
 from .ui_widgets import navigation_icon
+from .compare_layout import ControlFlowLayout, ControlPanel, AssetList
+from .control_paint import paint_slide_switch
 
 
 class PlayDial(QDial):
@@ -148,25 +151,14 @@ class SlideSwitch(QSlider):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        middle = self.height() / 2
-        painter.setPen(QPen(QColor("#606060"), 1))
-        painter.setBrush(QColor("#202020"))
-        painter.drawRoundedRect(QRectF(6, middle - 10, self.width() - 12, 20), 5, 5)
-        for index in range(self.maximum() + 1):
-            x = self.position_x(index)
-            painter.drawLine(round(x), round(middle - 5), round(x), round(middle + 5))
-        painter.setPen(QPen(QColor("#bf0000" if self.hasFocus() else "#a0a0a0"), 2))
-        painter.setBrush(QColor("#454545"))
-        x = self.position_x(self.value())
-        painter.drawRoundedRect(QRectF(x - 11, middle - 17, 22, 34), 3, 3)
-        painter.setPen(QPen(QColor("#b8b8b8"), 1))
-        for offset in (-4, 0, 4):
-            painter.drawLine(
-                round(x + offset),
-                round(middle - 8),
-                round(x + offset),
-                round(middle + 8),
-            )
+        paint_slide_switch(
+            painter,
+            QRectF(self.rect()),
+            self.value(),
+            self.maximum() + 1,
+            self.label_padding,
+            self.hasFocus(),
+        )
 
     def choose_position(self, event):
         fraction = (event.position().x() - self.label_padding) / max(
@@ -291,7 +283,7 @@ class LevelMeter(QWidget):
         super().__init__(parent)
         self.channels = channels
         self.levels = [-60.0] * channels
-        self.setFixedSize(44, 92)
+        self.setFixedSize(25 if channels == 1 else 44, 92)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.decay)
         self.timer.start(50)
@@ -369,9 +361,9 @@ class PlayActions:
         note.setObjectName("muted")
         layout.addWidget(note)
         row = QHBoxLayout()
-        self.play_model = QComboBox()
+        self.play_model = QComboBox(self)
         self.play_model.addItem("Choose a model…", None)
-        row.addWidget(self.play_model, 1)
+        self.play_model.hide()
         self.play_open = QPushButton("Load NAM / PNAM…")
         self.play_open.clicked.connect(self.open_play_model)
         row.addWidget(self.play_open)
@@ -394,7 +386,7 @@ class PlayActions:
             "Calibrated falls back to Raw when model or interface output calibration is unavailable. Normalized uses the model loudness metadata, with Raw fallback."
         )
         self.play_output_mode.currentIndexChanged.connect(self.update_play_settings)
-        layout.addLayout(row)
+        model_buttons = row
         buffer_row = QHBoxLayout()
         buffer_row.addWidget(QLabel("Playback buffer"))
         self.play_buffer = QComboBox()
@@ -489,9 +481,9 @@ class PlayActions:
         self.play_calibration = QLabel("")
         self.play_calibration.setWordWrap(True)
         layout.addWidget(self.play_calibration)
-        self.play_controls = QFrame()
+        self.play_controls = ControlPanel()
         self.play_controls.setObjectName("ampPanel")
-        self.play_controls_layout = QGridLayout(self.play_controls)
+        self.play_controls_layout = ControlFlowLayout(self.play_controls)
         self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
         self.play_controls_layout.setHorizontalSpacing(24)
         self.play_controls.hide()
@@ -526,23 +518,39 @@ class PlayActions:
             title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             controls.addWidget(title, 0, column)
             selector.setMinimumWidth(140)
+            selector.setAttribute(Qt.WidgetAttribute.WA_LayoutUsesWidgetRect, True)
             controls.addWidget(
                 selector, 1, column, alignment=Qt.AlignmentFlag.AlignCenter
             )
         layout.addLayout(controls)
         row = QHBoxLayout()
         row.addWidget(QLabel("Monitor IR"))
-        self.play_ir = QComboBox()
+        self.play_ir = QComboBox(self)
         self.play_ir.addItem("Off", None)
         for name in ("Ampeg", "Celestion", "Eminence", "Mesa", "Plate", "Spring"):
             self.play_ir.addItem(
                 name + " · Tone3000", str(BUNDLED / (name.lower() + ".wav"))
             )
-        row.addWidget(self.play_ir, 1)
+        self.play_ir.hide()
         self.play_ir_open = QPushButton("Load IR…")
         self.play_ir_open.clicked.connect(self.open_play_ir)
         row.addWidget(self.play_ir_open)
-        layout.addLayout(row)
+        ir_buttons = row
+        self.play_model_list = AssetList(self.play_model)
+        self.play_ir_list = AssetList(self.play_ir)
+        assets = QHBoxLayout()
+        for title, view, buttons in (
+            ("Models", self.play_model_list, model_buttons),
+            ("Impulse responses", self.play_ir_list, ir_buttons),
+        ):
+            pane = QFrame()
+            pane.setObjectName("card")
+            contents = QVBoxLayout(pane)
+            contents.addWidget(QLabel(title))
+            contents.addWidget(view)
+            contents.addLayout(buttons)
+            assets.addWidget(pane, 1)
+        layout.addLayout(assets)
         self.play_ir_status = QLabel(
             "IR affects the monitor signal; reamp send is independent."
         )
@@ -750,7 +758,12 @@ class PlayActions:
             )
 
     def playback_project(self):
-        project = self.workspace.project.model_copy(deep=True)
+        if self.workspace:
+            project = self.workspace.project.model_copy(deep=True)
+        else:
+            from nam.capture.project import CaptureProject
+
+            project = CaptureProject(knobs=[], sample_rate=48000)
         project.audio = self.audio_settings()
         project.capture_level_dbfs = self.capture_level.level()
         project.input_level_dbu = (
@@ -824,6 +837,8 @@ class PlayActions:
         for index, control in enumerate(info["controls"]):
             frame = QWidget()
             column = QVBoxLayout(frame)
+            column.setContentsMargins(9, 9, 9, 9)
+            column.setSpacing(6)
             name = QLabel(control["name"])
             name.setObjectName("compareControlLabel")
             name.setTextFormat(Qt.TextFormat.PlainText)
@@ -881,7 +896,10 @@ class PlayActions:
                     )
                 )
             column.addWidget(widget, alignment=Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(frame, index // 5, index % 5)
+            frame.setFixedWidth(
+                max(132, slider.width() + 18) if control["positions"] else 132
+            )
+            grid.addWidget(frame)
         self.play_status.setText(
             "Ready. Gear and Model switch the monitored source; the real gear and model stay warm in parallel."
         )
@@ -911,12 +929,7 @@ class PlayActions:
             )
 
     def start_playback(self):
-        if (
-            not self.workspace
-            or not self._play_ready
-            or self.play_worker
-            or self.worker
-        ):
+        if not self._play_ready or self.play_worker or self.worker:
             return
         try:
             device = self.device.currentData()

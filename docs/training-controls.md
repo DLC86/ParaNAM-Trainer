@@ -48,77 +48,29 @@ capture or ensemble member has its own displayed history.
 ## Advanced training settings
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
-editable and have separate scheduler selectors. New HyperA2 projects use
-**A2 Dataset-normalized** for both, starting at 0.004 and 0.0004 with decay 0.994.
-All other HyperA2 advanced values retain the requested 06/11 02:52 recipe.
-Batch size defaults to 16 and the epoch budget to 100.
+editable. Beside each value, select **per epoch** or **per 62 optimizer updates
+(A2 cadence)** for its editable decay. These choices replace the former presets.
+Changing a cadence leaves initial LR and decay values unchanged.
 
-Let `S` be the number of complete optimizer updates in one project training
-epoch and `R` the bundled static A2 reference (62 updates: standard input,
-NY 8192, batch 16, initial 10 seconds and final 9 seconds excluded).
-The two new presets replace the control-count-based choices:
+New HyperA2 projects use LR 0.004/0.001, decay 0.994/0.998497 per 62 optimizer
+updates, batch 16 and 50 epochs. Static models default to 200 epochs and retain
+per-epoch scheduling. Switching capture type preserves separate epoch budgets.
 
-| Preset | Discrete reduction interval | Example: S = 100 × R |
-| --- | --- | --- |
-| A2 Dataset-normalized | `R × (S/R) = S` | 6,200 updates |
-| A2 Dataset-normalized √ | `R × sqrt(S/R)` | 620 updates |
+For legacy presets, the editor computes an equivalent average decay. If the old
+reduction interval was I updates and its multiplier was gamma, the displayed
+62-update multiplier is `gamma ** (62/I)`. Dataset-normalized linear decay maps
+to per epoch with the same gamma. Sqrt normalization uses the complete optimizer
+updates per training epoch after cropping and validation exclusion. Old control
+cadences use their original control factor and A2 Slow's division by sqrt(2).
+The equivalent rates match their average logarithmic slope; their discrete
+reduction instants need not coincide. No decay schedule guarantees generalization.
 
-Each reduction multiplies the selected group's LR by its editable decay value
-(default 0.994). Linear normalization
-therefore applies one reduction per complete dataset epoch. For 100 epochs,
-initial rates 0.004/0.0004 become approximately 0.002191/0.0002191 when both groups
-use linear normalization. The square-root variant decays faster than the linear
-variant for datasets larger than the reference, and slower for smaller datasets.
-The audio and hypernetwork can select different modes, or **Manual / per-epoch
-decay**, whose decay value remains editable separately for each group.
-Both decay fields remain editable for every preset, independently. Changing a
-cadence preserves those decay values; only the full HyperA2/HyperWaveNet recipe
-selector restores recipe defaults. The Follow mode is no longer selectable.
-Legacy shared configurations are displayed with their explicit effective cadence
-and decay, preserving unchanged checkpoint identities. Initial rates remain editable. Hypernetwork options apply only to parametric training.
-Static A2 scheduling is unchanged.
-
-The accounting reads WAV headers and mirrors the real training loader: cropping,
-initial/final validation exclusion, receptive-field context, delay alignment,
-NY and complete batches dropped separately for each capture. Validation captures
-do not enter S. Thus captures with different useful durations, batch sizes or NY
-are accounted for through optimizer updates, rather than raw WAV duration or the
-number of knobs/switches. The preview reports each group's interval, reference,
-complete updates per epoch, ratio and final LR. Empty/incomplete training batches
-produce a clear error rather than a guessed schedule.
-
-Fractional intervals retain their remainder: reduction k occurs at
-`ceil(k × interval)`. Both independent counters are saved in checkpoints and
-restored on resume. Generated jobs freeze the calculated interval; scheduler
-normalization is not recomputed mid-training. Changing a preset requires a new
-training instance. No schedule guarantees better validation ESR or generalization;
-normalization trades faster decay for a comparable progression per dataset epoch.
-
-The restored update/control cadences use this fixed selector order:
-
-| Name | Reduction interval |
-| --- | --- |
-| A2 Cadence | 62 updates |
-| A2 Slow | `62 × max(1, knobs) × 2^switches / sqrt(2)` |
-| A2 Slower | `62 × max(1, knobs) × 2^switches` |
-| A2 Dataset-normalized √ | `62 × sqrt(S/62)` |
-| A2 Dataset-normalized | `S` |
-| Manual / per-epoch decay | One epoch; editable gamma |
-
-Both selectors contain the same choices, without Follow. The order is fixed,
-not recalculated from dataset size. A2 Slow retains the previous division by
-sqrt(2), rather than taking the square root of the control factor.
-They are independently selectable for the audio network and hypernetwork,
-alongside both Dataset-normalized choices and Manual.
-The serialized IDs remain `a2_updates`, `a2_controls` and `a2_slow`: loading a
-saved project does not rename/migrate its effective settings or reset initial
-rates. Resume retains the job's frozen interval and both checkpoint counters,
-including jobs prepared with earlier control-count formulas. Existing capture,
-architecture and evaluation-protocol compatibility checks still apply.
-The 0.6.0 exclusion has been removed. Resuming a paused queue can therefore
-continue its earlier paused instance before newly retrained jobs. Retrain restores
-the effective frozen advanced configuration, taking precedence over stale editor
-preferences. New-project defaults remain Dataset-normalized for both groups.
+Unchanged legacy editor settings retain their stored identity. Resume uses the
+job's original frozen scheduler configuration, optimizer state and both saved
+counters, including fractional cadence intervals. Retrain and newly queued jobs
+use the two-choice representation and equivalent decay. Capture, architecture
+and evaluation-protocol compatibility checks still apply. Follow is not a
+selectable mode; editing either group's cadence/decay makes it independent.
 
 In static capture mode, hypernetwork-specific fields and their labels are hidden,
 including the parametric recipe selector, LR/preset/decay, weight mode/rank,
@@ -158,22 +110,20 @@ topologies, validation and compilation settings are common to both recipes.
 | Setting | HyperA2 | HyperWaveNet (Phillip Self) |
 | --- | --- | --- |
 | Base LR | 0.004 | 0.002 |
-| Hypernetwork LR | 0.0004 | 0.002 |
+| Hypernetwork LR | 0.001 | 0.002 |
 | Optimizer | Adam | AdamW |
 | Batch size | 16 | 32 |
 | Generated deltas | Low rank, rank 2; dilated convolution kernels excluded | Low rank, rank 2; dilated convolution kernels excluded |
 | Hypernetwork hidden layer / activation | 16 / LeakyReLU | 16 / LeakyReLU |
-| Full/Lite branch loss reduction | Mean | Mean |
+| Full/Lite branch loss reduction | Sum | Mean |
 | Clipping / NaN/Inf protection | Disabled / disabled (limit stored as 1.0) | 1.0 / enabled |
 | NY / MRSTFT weight | 8192 / 0.0005 | 8192 / 0.0005 |
 | LR decay / weight decay | 0.994 / 3.17e-7 | 0.994 / 3.17e-7 |
-| Audio LR schedule | A2 Dataset-normalized, every S updates | Manual, per epoch |
-| Hypernetwork LR schedule | A2 Dataset-normalized, every S updates | Manual, per epoch |
-| cuDNN benchmark / deterministic algorithms | Disabled / disabled | Enabled / disabled |
+| Audio LR schedule | Every 62 optimizer updates, decay 0.994 | Manual, per epoch |
+| Hypernetwork LR schedule | Every 62 optimizer updates, decay 0.998497 | Manual, per epoch |
+| cuDNN benchmark / deterministic algorithms | Disabled / disabled | Disabled / disabled |
 
-HyperA2 retains the advanced fields of the saved 06/11 02:52 training,
-with the subsequently requested dataset-normalized audio/hypernetwork schedules
-and its preset label changed to HyperA2. Old jobs retain their saved labels, files and original scheduler settings on resume.
+HyperA2 uses the explicit 0.6.2 defaults above. Old jobs retain their saved settings on resume.
 
 The HyperWaveNet settings were verified against Phillip Self's
 [capture exporter](https://github.com/phillipmself/neural-amp-modeler-parametric/blob/a3684411076be69dab53505df14922487697f2cf/nam/capture/export.py)

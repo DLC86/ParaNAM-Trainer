@@ -63,8 +63,6 @@ class QueueActions:
         try:
             self.queue_controller.store.prepare_resume(
                 self.selected_job_id,
-                self.resume_batch_size.value(),
-                self.resume_device.currentData(),
             )
             self.queue_controller.start()
             self.refresh_training()
@@ -142,7 +140,7 @@ class QueueActions:
                 else spec.get("model", {}).get("metadata", {}).get("name", "")
             )
             values = (
-                str(pending) if state == "queued" else "—",
+                str(row + 1),
                 model_name or "—",
                 entry["name"],
                 time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
@@ -197,6 +195,8 @@ class QueueActions:
         if selected:
             self._render_job_progress()
         else:
+            self._elapsed_clock.update(None, 0, False)
+            self.queue_seconds_timer.stop()
             self.training_status.setText(
                 "Add training from a project. Each instance keeps its own captures, settings and checkpoints."
             )
@@ -302,10 +302,7 @@ class QueueActions:
             self.play_stop.hide()
             self.play_quick_stop.setEnabled(listening and self.play_stop.isEnabled())
             self.play_start.setEnabled(
-                present
-                and self._play_ready
-                and self.play_loader is None
-                and self.worker is None
+                self._play_ready and self.play_loader is None and self.worker is None
             )
             self.preview_start.setEnabled(self.play_start.isEnabled())
             for mode, widget in (
@@ -391,10 +388,10 @@ class QueueActions:
         )
         self.resume_batch_size.setEnabled(resumable)
         self.resume_device.setEnabled(resumable)
-        self.resume_options_widget.setVisible(resumable)
+        self.resume_options_widget.hide()
         self.remove_job_button.setEnabled(bool(entry) and state not in ACTIVE)
-        self.job_up.setEnabled(state == "queued")
-        self.job_down.setEnabled(state == "queued")
+        self.job_up.setEnabled(bool(entry))
+        self.job_down.setEnabled(bool(entry))
         self.capture_round_button.setEnabled(state == "needs_captures" and not active)
         self.capture_round_button.setVisible(state == "needs_captures")
         self.models_button.setEnabled(bool(entry))
@@ -468,6 +465,7 @@ class QueueActions:
             self.workspace.save()
         self.close_audio()
         self.timer.stop()
+        self.queue_seconds_timer.stop()
         if getattr(self, "_update_dialog", None) is not None:
             self._update_dialog.accept()
         event.accept()

@@ -484,7 +484,7 @@ def test_existing_044_job_resumes_only_with_matching_generation(workspace, prese
     for key, value in dict(
         hypernetwork_mode="full",
         condition_dilated_convolutions=True,
-        branch_loss_reduction="sum",
+        branch_loss_reduction="mean" if preset == "HyperA2" else "sum",
     ).items():
         workspace.preferences["advanced_parametric"] = {
             **training_preset(preset),

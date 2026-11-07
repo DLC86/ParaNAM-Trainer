@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.6.1 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.1-preview)**
+**[Download ParaNAM Trainer 0.6.2 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.2-preview)**
 
 | Model type | Result |
 | --- | --- |
@@ -121,7 +121,8 @@ validation segments, as TTS v11 does. Training excludes the first 10 and final
 For parametric models, **+ Add control** lets you choose a knob or switch. Knobs
 have ranges, steps and defaults; switches have a position count, a name for each
 position and a default position. Multiple switches are supported, and the plan
-covers every combination of their positions.
+covers every combination of their positions. Up to two knobs can be marked
+**Gain/Drive**: corners cross both gain extremes with the other controls.
 
 **Capture plan & learning method** offers **Normal** and **Active learning**,
 training/validation capture counts, a reproducible seed and optional range-extreme
@@ -167,28 +168,26 @@ hidden here. Exported filenames follow the model Name, with filesystem-safe
 characters.
 
 **Advanced training settings** is collapsed by default. It contains Batch Size,
-Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, separate LR presets and
+Adam/AdamW, Learning Rate, Hypernetwork Learning Rate, separate decay cadences and
 manual decay controls for the audio network and hypernetwork, NY, Fit MRSTFT,
 MRSTFT Weight, Weight Decay and the parametric hypernetwork options. The HyperWaveNet preset uses **AdamW**. HyperA2 and static A2 use batch 16 by default; selecting the
 reference HyperWaveNet recipe initializes its batch and settings separately.
 
-**Learning-rate preset** and **Hypernetwork learning-rate preset** now offer
-**A2 Dataset-normalized** and **A2 Dataset-normalized √**, independently. They multiply
-the static A2 interval (62 optimizer updates) by `S/62` or `sqrt(S/62)`, where `S`
-is the complete updates per project training epoch after validation audio is
-excluded. Linear normalization gives one 0.994 reduction per epoch. The preview
-shows actual counts, intervals and final rates. Manual per-epoch decay remains available. Both decay values are editable for
-every preset and changing a cadence keeps the values entered in their fields. The original cadences are also available as **A2 Cadence**, **A2 Slow**,
-and **A2 Slower**. Stored preset identifiers and checkpoint clocks
-are preserved, so older jobs can resume with their original learning-rate behavior.
+Each learning rate has a cadence selector: **per epoch** or **per 62 optimizer
+updates (A2 cadence)**. Both decay values remain editable and independent.
+Legacy presets display an equivalent decay using these two choices. Resuming an
+existing job preserves its original frozen scheduler clocks and optimizer state;
+new jobs use the displayed cadence and equivalent average decay. The discrete
+reduction instants can differ between a legacy job and a newly retrained job.
 
-New projects default to **HyperA2**, **100 epochs**, and batch 16. HyperA2 retains
-the requested 06/11 02:52 advanced configuration (Adam, audio/hypernetwork LR
-0.004/0.0004, rank-2 deltas, dilated convolution kernels excluded, clipping,
-NaN/Inf scanning and cuDNN benchmark off), with the subsequently requested linear
-dataset-normalized schedule for both rates. Initial rates remain editable.
-Existing recordings and checkpoints are kept. New-scheduler jobs retain both
-counters on resume. Hypernetwork settings are hidden in static capture mode.
+New parametric projects default to **HyperA2**, **50 epochs** and batch 16.
+Static projects default to **200 epochs**. HyperA2 uses Adam, audio/hypernetwork
+LR **0.004/0.001**, decay **0.994/0.998497** per 62 updates, rank-2 deltas,
+dilated convolution kernels excluded and summed Full/Lite losses. MRSTFT is on
+(NY 8192, weight 0.0005); weight decay is 3.17e-7. Clipping, NaN/Inf gradient
+scanning, cuDNN benchmark and deterministic training are off. HyperWaveNet is
+unchanged except that cuDNN benchmark now defaults off. Existing projects keep
+their saved settings. Hypernetwork settings are hidden in static capture mode.
 The HyperA2/HyperWaveNet recipe selector changes training settings; parametric
 exports remain **HyperA2 Full + Lite** in either case.
 
@@ -205,8 +204,8 @@ Every instance keeps its own snapshot of recordings, settings and calibration.
 You can edit the open project, open another project, or make new captures while
 the training queue is processed.
 
-Use **Start queue**, **Pause & save**, **Stop** and **Resume** here. Waiting jobs
-can be reordered or removed; removing a row keeps its files on disk. **Retrain**
+Use **Start queue**, **Pause selected training**, **Cancel selected training** and
+**Resume** here. All rows can be reordered; inactive jobs can be removed; removing a row keeps its files on disk. **Retrain**
 reopens the original project on **Train** with the selected stopped, paused or
 finished instance’s configuration, allowing changes before a new instance is queued.
 Other training instances continue running independently. The **Name** column uses
@@ -293,6 +292,7 @@ not apply per-setting RMS normalization.
 
 ## More information
 
+- [0.6.2 changes](docs/release-0.6.2.md)
 - [0.6.1 changes](docs/release-0.6.1.md)
 - [0.6.0 changes](docs/release-0.6.0.md)
 - [0.5.9 changes](docs/release-0.5.9.md)

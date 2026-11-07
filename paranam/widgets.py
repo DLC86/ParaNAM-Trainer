@@ -1,9 +1,12 @@
 """Native Qt drawing and editors for the capture wizard."""
 
 import math
+import time
 from PySide6 import QtSvg  # Include SVG image support in frozen installers.
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from .numeric import DecimalSpinBox as QDoubleSpinBox
+
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QWidget,
@@ -13,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QComboBox,
-    QDoubleSpinBox,
     QSpinBox,
     QCheckBox,
     QTableWidget,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from nam.capture.params import KnobSpec, SwitchSpec
+from .control_paint import paint_slide_switch
 
 _font_loaded = False
 
@@ -75,6 +78,7 @@ QFrame#ampPanel { background: #000000; border: 2px solid #404040; border-radius:
 QFrame#ampPanel QWidget { background: transparent; }
 QLabel#compareControlLabel { font-size: 11pt; }
 QDoubleSpinBox#controlValue, QDoubleSpinBox#controlValue QLineEdit { background: transparent; border: none; border-radius: 0; padding: 2px; font-size: 16px; font-weight: 600; }
+QDoubleSpinBox#controlValue { min-height: 26px; max-height: 26px; }
 QDoubleSpinBox#controlValue:focus { color: #ffffff; }
 QPushButton:disabled { color: #676767; background: #222222; border-color: #2c2c2c; }
 QPushButton#primary { background: #bf0000; color: #ffffff; border: 1px solid #bf0000; }
@@ -189,11 +193,30 @@ class ControlScene(QWidget):
     def __init__(self):
         super().__init__()
         self.controls, self.values = [], {}
+        self.blink_names = set()
+        self.blink_started = 0.0
+        self.blink_timer = QTimer(self)
+        self.blink_timer.setInterval(40)
+        self.blink_timer.timeout.connect(self.update)
         self.setMinimumHeight(180)
 
     def set_controls(self, controls, values):
+        if dict(values) != self.values:
+            self.stop_blink()
         self.controls, self.values = list(controls), dict(values)
         self._height()
+        self.update()
+
+    def start_blink(self, names):
+        self.blink_names = set(names)
+        self.blink_started = time.monotonic()
+        if self.blink_names:
+            self.blink_timer.start()
+        self.update()
+
+    def stop_blink(self):
+        self.blink_names.clear()
+        self.blink_timer.stop()
         self.update()
 
     def _height(self):
@@ -212,7 +235,16 @@ class ControlScene(QWidget):
         for index, control in enumerate(self.controls):
             x, y = (index % columns) * width, (index // columns) * 185
             bounds = QRectF(x + 7, y + 6, width - 14, 170)
-            painter.setBrush(QColor("#232323"))
+            shade = 35
+            if control.name in self.blink_names:
+                pulse = (
+                    1
+                    - math.cos(
+                        (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
+                    )
+                ) / 2
+                shade += round(45 * pulse)
+            painter.setBrush(QColor(shade, shade, shade))
             painter.setPen(QPen(QColor("#3b3b3b"), 1))
             painter.drawRoundedRect(bounds, 12, 12)
             painter.setPen(QColor(TEXT))
@@ -231,35 +263,32 @@ class ControlScene(QWidget):
                 ),
             )
             if isinstance(control, SwitchSpec):
-                painter.setFont(QFont("Inter", 10))
-                label = str(value)
-                painter.setPen(QColor(ACCENT))
-                painter.drawText(
-                    QRectF(x + 12, y + 48, width - 24, 42),
-                    Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                    label,
-                )
                 count = len(control.enum_names)
                 selected = (
                     control.enum_names.index(value)
                     if value in control.enum_names
                     else 0
                 )
-                for i in range(count):
-                    px = x + 24 + (width - 48) * i / max(1, count - 1)
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QColor(ACCENT if i == selected else "#4e4e4e"))
-                    painter.drawEllipse(
-                        QPointF(px, y + 111),
-                        5 if i == selected else 3,
-                        5 if i == selected else 3,
-                    )
-                painter.setPen(QColor(MUTED))
-                painter.drawText(
-                    QRectF(x + 10, y + 133, width - 20, 23),
-                    Qt.AlignmentFlag.AlignCenter,
-                    f"POSITION {selected + 1} OF {count}",
+                font = QFont("Inter", 11, QFont.Weight.Bold)
+                painter.setFont(font)
+                switch_width = min(width - 30, max(84, (count - 1) * 36 + 32))
+                left = x + (width - switch_width) / 2
+                paint_slide_switch(
+                    painter,
+                    QRectF(left, y + 37, switch_width, 108),
+                    selected,
+                    count,
+                    16,
                 )
+                step = (switch_width - 32) / max(1, count - 1)
+                for position, text in enumerate(control.enum_names):
+                    center = left + 16 + position * step
+                    painter.setPen(QColor(ACCENT if position == selected else MUTED))
+                    painter.drawText(
+                        QRectF(center - step / 2, y + 136, step, 24),
+                        Qt.AlignmentFlag.AlignCenter,
+                        text,
+                    )
             else:
                 fraction = min(
                     1,

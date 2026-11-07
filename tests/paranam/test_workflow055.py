@@ -128,19 +128,18 @@ def test_a2_cadence_counts_real_batches_and_preserves_optimizer_step_decay(works
 
 def test_rate_preset_preview_persists_and_updates_with_batch(window, workspace):
     ready_audio(workspace)
-    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_dataset")
+    workspace.preferences["advanced_parametric"] = dict(rate_preset="a2_dataset_sqrt")
     window._attach(workspace)
     selector = window.advanced_fields["rate_preset"]
-    selector.setCurrentIndex(selector.findData("a2_dataset"))
-    selector.activated.emit(selector.currentIndex())
+    assert selector.currentData() == "a2_updates"
     assert window.advanced_fields["lr_decay"].isEnabled()
-    assert "reference" in window.rate_preview.text()
+    assert "62 optimizer updates" in window.rate_preview.text()
     assert "after 2 epochs" in window.rate_preview.text()
     first = window.rate_preview.text()
     window.batch_size.setValue(2)
-    assert window.rate_preview.text() != first
+    assert "62 optimizer updates" in window.rate_preview.text()
     assert (
-        Workspace(workspace.directory).training_options()["rate_preset"] == "a2_dataset"
+        Workspace(workspace.directory).training_options()["rate_preset"] == "a2_updates"
     )
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert not selector.isEnabled() and window.rate_preview.isHidden()

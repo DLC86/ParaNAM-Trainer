@@ -423,19 +423,19 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
 ):
     fresh = Workspace.create(tmp_path / "Fresh", "Fresh")
     options = fresh.training_options()
-    assert fresh.preferences["epochs"] == 100
+    assert fresh.preferences["epochs"] == 50
     assert fresh.training_batch_size() == 16
     assert options["hypernetwork_recipe"] == "HyperA2"
-    assert options["rate_preset"] == "a2_dataset"
+    assert options["rate_preset"] == "a2_updates"
     assert options["optimizer"] == "Adam"
     assert options["hypernetwork_mode"] == "low_rank"
     assert not options["condition_dilated_convolutions"]
     assert options["learning_rate"] == 0.004
-    assert options["hypernetwork_learning_rate"] == 0.0004
+    assert options["hypernetwork_learning_rate"] == 0.001
     window._attach(fresh)
-    assert window.epochs.value() == 100
+    assert window.epochs.value() == 50
     assert window.advanced_fields["hypernetwork_recipe"].currentData() == "HyperA2"
-    assert window.advanced_fields["rate_preset"].currentData() == "a2_dataset"
+    assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
     fresh.preferences.update(
         epochs=250,
         batch_size=16,

@@ -6,6 +6,8 @@ import threading
 from collections import deque
 
 import numpy as np
+from .numeric import DecimalSpinBox as QDoubleSpinBox
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
@@ -14,7 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QDoubleSpinBox,
     QPushButton,
     QCheckBox,
     QComboBox,

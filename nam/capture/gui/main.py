@@ -582,7 +582,7 @@ class MainWindow(_QMainWindow):
         self.knob_table.setToolTip(
             'Tick "Avoid zero" for gain/drive knobs so no capture sets them to zero '
             '(the nearest non-zero grid value is used instead). Tick "Gain/Drive" on '
-            "the one gain/drive knob (optional) so the initial corner captures sweep it "
+            "up to two gain/drive knobs (optional) so the initial corner captures sweep it "
             "separately from the EQ knobs."
         )
         self.knob_table.itemChanged.connect(self._on_knob_item_changed)
@@ -1438,7 +1438,7 @@ class MainWindow(_QMainWindow):
         is_gain: _Any = False,
     ) -> None:
         # Filling checkbox cells fires itemChanged; block it so building a row never trips
-        # the single-gain enforcement mid-construction.
+        # the gain-count enforcement mid-construction.
         self.knob_table.blockSignals(True)
         try:
             row = self.knob_table.rowCount()
@@ -1463,20 +1463,16 @@ class MainWindow(_QMainWindow):
         return item
 
     def _on_knob_item_changed(self, item: _QTableWidgetItem) -> None:
-        # At most one knob is Gain/Drive: ticking one clears the rest.
         if item.column() == 5 and item.checkState() == _Qt.CheckState.Checked:
-            self.knob_table.blockSignals(True)
-            try:
-                for row in range(self.knob_table.rowCount()):
-                    if row == item.row():
-                        continue
-                    other = self.knob_table.item(row, 5)
-                    if (
-                        other is not None
-                        and other.checkState() == _Qt.CheckState.Checked
-                    ):
-                        other.setCheckState(_Qt.CheckState.Unchecked)
-            finally:
+            checked = [
+                row
+                for row in range(self.knob_table.rowCount())
+                if self.knob_table.item(row, 5) is not None
+                and self.knob_table.item(row, 5).checkState() == _Qt.CheckState.Checked
+            ]
+            if len(checked) > 2:
+                self.knob_table.blockSignals(True)
+                item.setCheckState(_Qt.CheckState.Unchecked)
                 self.knob_table.blockSignals(False)
         self._refresh_corner_count()
 

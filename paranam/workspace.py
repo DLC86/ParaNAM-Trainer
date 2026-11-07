@@ -28,7 +28,7 @@ DEFAULTS = {
     "capture_level_dbfs": 0.0,
     "capture_type": "parametric",
     "mode": "normal",
-    "epochs": 200,
+    "epochs": 50,
     "batch_size": 16,
     "static_batch_size": 16,
     "device": "auto",
@@ -91,6 +91,14 @@ class Workspace:
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
+        current_kind = stored.get("capture_type", self.project.capture_type)
+        if "epochs" not in stored:
+            self.preferences["epochs"] = 200 if current_kind == "static" else 50
+        for kind, epochs in (("parametric", 50), ("static", 200)):
+            self.preferences.setdefault(
+                kind + "_epochs",
+                stored.get("epochs", epochs) if kind == current_kind else epochs,
+            )
         if self.project.capture_type == "static" and "static_batch_size" not in stored:
             self.preferences["static_batch_size"] = stored.get("batch_size", 16)
         if "capture_level_dbfs" not in stored:
@@ -154,7 +162,9 @@ class Workspace:
         from .recipes import training_preset, preset_batch_size
 
         workspace.preferences.update(
-            epochs=100,
+            epochs=50,
+            parametric_epochs=50,
+            static_epochs=200,
             batch_size=preset_batch_size("HyperA2"),
             advanced_parametric=training_preset("HyperA2"),
         )

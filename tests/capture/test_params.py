@@ -94,10 +94,12 @@ def test_gain_knob_index_finds_the_marked_knob():
     assert _gain_knob_index([_KnobSpec(name="Tone", min=0.0, max=10.0)]) is None
 
 
-def test_validate_knobs_rejects_two_gain_knobs():
+def test_validate_knobs_accepts_two_but_rejects_three_gain_knobs():
     knobs = [
         _KnobSpec(name="Gain", min=0.0, max=10.0, is_gain=True),
         _KnobSpec(name="Drive", min=0.0, max=10.0, is_gain=True),
     ]
+    assert _validate_knobs(knobs) == tuple(knobs)
+    knobs.append(_KnobSpec(name="Boost", min=0.0, max=10.0, is_gain=True))
     with _pytest.raises(ValueError):
         _validate_knobs(knobs)

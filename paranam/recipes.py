@@ -32,23 +32,22 @@ def rate_cadence_multiplier(project, preset):
 def training_preset(name):
     if name not in ("HyperA2", "HyperWaveNet"):
         raise ValueError(f"Unknown training preset: {name}")
-    # Start from the saved 2026-11-06 02:52 recipe, with the subsequently
-    # requested dataset-normalized clocks. Every effective option is stored in jobs.
+    # Each recipe is explicit; frozen jobs keep their own effective options.
     hyper_a2 = name == "HyperA2"
     return dict(
-        rate_preset="a2_dataset" if hyper_a2 else "manual",
-        cudnn_benchmark=not hyper_a2,
+        rate_preset="a2_updates" if hyper_a2 else "manual",
+        cudnn_benchmark=False,
         deterministic_training=False,
-        hypernetwork_rate_preset="a2_dataset" if hyper_a2 else "manual",
-        hypernetwork_lr_decay=0.994,
+        hypernetwork_rate_preset="a2_updates" if hyper_a2 else "manual",
+        hypernetwork_lr_decay=0.998497 if hyper_a2 else 0.994,
         hypernetwork_recipe=name,
         hypernetwork_mode="low_rank",
         hypernetwork_rank=2,
         condition_dilated_convolutions=False,
-        branch_loss_reduction="mean",
+        branch_loss_reduction="sum" if hyper_a2 else "mean",
         optimizer="Adam" if hyper_a2 else "AdamW",
         learning_rate=0.004 if hyper_a2 else 0.002,
-        hypernetwork_learning_rate=0.0004 if hyper_a2 else 0.002,
+        hypernetwork_learning_rate=0.001 if hyper_a2 else 0.002,
         lr_decay=0.994,
         ny=8192,
         fit_mrstft=True,
@@ -281,7 +280,7 @@ def rate_group_schedule(
     )
 
 
-def workspace_group_schedules(workspace):
+def workspace_group_schedules(workspace, options=None):
     from nam.capture.export import build_data_config
     from .evaluation import reserve_validation_audio
 
@@ -297,7 +296,7 @@ def workspace_group_schedules(workspace):
             workspace.directory,
             workspace.training_batch_size(),
             workspace.preferences["epochs"],
-            workspace.training_options(),
+            options if options is not None else workspace.training_options(),
             hypernetwork=hyper,
         )
         for name, hyper in (("audio", False), ("hypernetwork", True))
