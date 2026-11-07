@@ -202,7 +202,7 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
     )
     return (
         max(1, 15 * n_knobs) * combinations,
-        min(3 * n_knobs, 10) * combinations,
+        (min(max(8, 4 * n_knobs), 24) if n_knobs else 0) * combinations,
         combinations,
     )
 

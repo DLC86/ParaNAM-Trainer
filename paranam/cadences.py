@@ -40,7 +40,7 @@ def editable_cadences(workspace, options, schedules=None):
                 result["lr_decay"],
             )
             continue
-        if preset in ("manual", "a2_updates"):
+        if preset in ("manual", "a2_updates", "cosine_budget"):
             continue
         original = (schedules or {}).get(group, {})
         if preset == "a2_dataset":

@@ -7,6 +7,10 @@ on:
         type: choice
         default: all
         options: [all, windows, linux, macos-arm64, macos-intel]
+      keep_draft:
+        description: Keep uploaded release in draft after verification
+        type: boolean
+        default: false
       release_id:
         description: Optional private draft preview ID for direct upload (avoids artifact quota)
         type: string
@@ -132,5 +136,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_ID: ${{ inputs.release_id }}
+          KEEP_DRAFT: ${{ inputs.keep_draft }}
         run: python packaging/publish_native.py finalize
 

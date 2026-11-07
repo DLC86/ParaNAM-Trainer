@@ -50,7 +50,17 @@ capture or ensemble member has its own displayed history.
 The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
 editable. Beside each value, select **per epoch** or **per 62 optimizer updates
 (A2 cadence)** for its editable decay. These choices replace the former presets.
-Changing a cadence leaves initial LR and decay values unchanged.
+Changing a cadence leaves initial LR and decay values unchanged. The beta adds
+**Cosine (whole budget)** independently for both groups. It uses a linear warmup
+from zero to the configured LR over 2% of the frozen optimizer-step budget, then
+cosine decay to 1% at the last counter. The explicit decay field is unused in
+cosine mode. The saved base rates, budget and counter determine each rate directly
+on resume; increasing an epoch budget is a new training configuration.
+
+The 0.6.3 beta recommends `min(max(8, 4 × knobs), 24)` held-out validation captures
+per joint switch combination. New-project default validation count is 12; saved
+plans are unchanged. ESR_worst is the maximum complete-setting validation ESR,
+reported beside the mean for Full/Lite. It does not change best-checkpoint selection.
 
 New HyperA2 projects use LR 0.004/0.001, decay 0.994/0.998497 per 62 optimizer
 updates, batch 16 and 50 epochs. Static models default to 200 epochs and retain

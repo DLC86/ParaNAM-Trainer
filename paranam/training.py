@@ -325,6 +325,7 @@ def make_job(workspace, resume=False, job_directory=None):
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
         if options.get("rate_preset", "manual") not in (
+            "cosine_budget",
             "manual",
             "a2_updates",
             "a2_controls",
@@ -334,6 +335,7 @@ def make_job(workspace, resume=False, job_directory=None):
         ):
             raise ValueError("Choose a listed learning-rate preset")
         if options.get("hypernetwork_rate_preset", "follow") not in (
+            "cosine_budget",
             "follow",
             "manual",
             "a2_updates",
@@ -427,9 +429,9 @@ def make_job(workspace, resume=False, job_directory=None):
         from .evaluation import PROTOCOL, reserve_validation_audio
 
         reserve_validation_audio(data)
-        if (
-            not is_static
-            and options.get("hypernetwork_rate_preset", "follow") != "follow"
+        if not is_static and (
+            options.get("hypernetwork_rate_preset", "follow") != "follow"
+            or options["rate_preset"] == "cosine_budget"
         ):
             from .recipes import rate_group_schedule
 
@@ -449,7 +451,12 @@ def make_job(workspace, resume=False, job_directory=None):
                 "class": "IndependentGroupLR",
                 "kwargs": {
                     name: {
-                        key: schedule[key] for key in ("interval", "step_size", "gamma")
+                        key: schedule[key]
+                        for key in (
+                            ("kind", "interval", "total_steps")
+                            if schedule.get("kind") == "cosine_budget"
+                            else ("interval", "step_size", "gamma")
+                        )
                     }
                     for name, schedule in schedules.items()
                 },
@@ -947,6 +954,12 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             checkpoint["validation_esr"] = (self.last_metrics or {}).get("full")
             checkpoint["validation_esr_full"] = (self.last_metrics or {}).get("full")
             checkpoint["validation_esr_lite"] = (self.last_metrics or {}).get("lite")
+            checkpoint["validation_esr_worst_full"] = (self.last_metrics or {}).get(
+                "worst_full"
+            )
+            checkpoint["validation_esr_worst_lite"] = (self.last_metrics or {}).get(
+                "worst_lite"
+            )
             checkpoint["best_validation_esr_full"] = self.best
             checkpoint["best_train_esr_full"] = self.best_train
             checkpoint["train_esr_full"] = (self.last_metrics or {}).get("train_full")
@@ -1122,6 +1135,15 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 return float(value.detach().cpu()) if value is not None else None
 
             lite, full = size_esr("lite"), size_esr("full")
+
+            def metric_float(key):
+                value = trainer.callback_metrics.get(key)
+                return float(value.detach().cpu()) if value is not None else None
+
+            worst = metric_float("ESR_worst")
+            worst_full, worst_lite = metric_float("ESR_worst_full"), metric_float(
+                "ESR_worst_lite"
+            )
             train_scores = {"lite": None, "full": None}
             data = (
                 evaluation_data if evaluation_data is not None else spec.get("data", {})
@@ -1164,11 +1186,20 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 )
                 + " | "
                 f"Lite={display(lite)} | Full (checkpoint)={display(full)} | Mean={display(esr)}"
-                f" | Train ESR | Lite={display(train_lite)} | Full={display(train_full)}",
+                + (
+                    f" | ESR_worst | Lite={display(worst_lite)} | Full={display(worst_full)} | Combined={display(worst)}"
+                    if worst is not None
+                    else ""
+                )
+                + f" | Train ESR | Lite={display(train_lite)} | Full={display(train_full)}",
                 flush=True,
             )
             self.last_metrics = dict(epoch=epoch, full=full, lite=lite, mean=esr)
             self.last_metrics.update(train_full=train_full, train_lite=train_lite)
+            if worst is not None:
+                self.last_metrics.update(
+                    worst=worst, worst_full=worst_full, worst_lite=worst_lite
+                )
             self.esr_history = [
                 entry for entry in self.esr_history if entry["epoch"] < epoch
             ]
@@ -1217,6 +1248,9 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                 esr_lite=lite,
                 esr_full=full,
                 esr_mean=esr,
+                esr_worst=worst,
+                esr_worst_full=worst_full,
+                esr_worst_lite=worst_lite,
                 train_esr_full=train_full,
                 train_esr_lite=train_lite,
             )

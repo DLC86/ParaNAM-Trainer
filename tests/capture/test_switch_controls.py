@@ -48,7 +48,7 @@ def test_duplicate_control_names():
 
 def test_plan_balances_every_joint_state_and_keeps_validation_held_out():
     specs = controls()
-    assert capture_recommendations(specs) == (180, 36, 6)
+    assert capture_recommendations(specs) == (180, 48, 6)
     train, val = plan_captures(specs, n_train=181, n_validation=37, seed=8)
     assert (train, val) == plan_captures(specs, n_train=181, n_validation=37, seed=8)
     for entries, expected in ((train, [30] * 5 + [31]), (val, [6] * 5 + [7])):
@@ -129,7 +129,7 @@ def test_gui_controls_switch_roundtrip_and_recommendations(monkeypatch, tmp_path
         window._apply_n_validation_recommendation()
         window._refresh_corner_count()
         assert window.n_train_spin.value() == 45
-        assert window.n_validation_spin.value() == 9
+        assert window.n_validation_spin.value() == 24
         assert "minimum: 3" in window.n_train_recommended_label.text()
         assert main.knob_rows_to_specs(window._knob_table_rows())[1] == spec
         assert main.format_params({"Mode": "Normal"}) == "Mode=Normal"

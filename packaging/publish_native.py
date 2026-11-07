@@ -50,7 +50,10 @@ def main():
         assert all(
             a["state"] == "uploaded" and a["size"] > 0 for a in release["assets"]
         )
-        subprocess.run(["gh", "release", "edit", tag, "--draft=false"], check=True)
+        if os.environ.get("KEEP_DRAFT", "false") == "true":
+            print("All native packages verified; release remains in draft.")
+        else:
+            subprocess.run(["gh", "release", "edit", tag, "--draft=false"], check=True)
     else:
         raise ValueError("Choose upload or finalize")
 

@@ -429,7 +429,7 @@ class _EpochMetrics:
             accumulator = self._ungrouped
         accumulator.update(preds, targets, means)
 
-    def compute(self) -> dict[str, float]:
+    def compute(self, *, include_worst=False) -> dict[str, float]:
         if not self._capture_grouped:
             return self._ungrouped.compute()
         per_capture = [
@@ -446,7 +446,18 @@ class _EpochMetrics:
         for key in keys:
             values = [metrics[key] for metrics in per_capture if key in metrics]
             out[key] = sum(values) / len(values)
+        if include_worst:
+            values = [metrics["ESR"] for metrics in per_capture]
+            out["ESR_worst"] = (
+                max(values)
+                if all(_isfinite(value) for value in values)
+                else float("inf")
+            )
         return out
+
+    def worst_esr(self) -> _Optional[float]:
+        """Worst complete setting; unavailable when capture identity is missing."""
+        return self.compute(include_worst=True).get("ESR_worst")
 
 
 def _bucket_means(loss_dict: dict) -> dict[str, _torch.Tensor]:
@@ -884,13 +895,17 @@ class _ParametricLightningModule(_LightningModule):
         if self._scheduler_config is None:
             return optimizer
         if independent_rates:
-            from ._lr_scheduler import GroupUpdateCadenceLR
+            from ._lr_scheduler import GroupUpdateCadenceLR, GroupBudgetCosineLR
 
             schedulers = []
             for index, name in enumerate(("audio", "hypernetwork")):
                 schedule = self._scheduler_config["kwargs"][name]
-                scheduler = GroupUpdateCadenceLR(
-                    optimizer, index, schedule["step_size"], schedule["gamma"]
+                scheduler = (
+                    GroupBudgetCosineLR(optimizer, index, schedule["total_steps"])
+                    if schedule.get("kind") == "cosine_budget"
+                    else GroupUpdateCadenceLR(
+                        optimizer, index, schedule["step_size"], schedule["gamma"]
+                    )
                 )
                 schedulers.append(
                     dict(
@@ -991,12 +1006,16 @@ class _ParametricLightningModule(_LightningModule):
         # Reduction happens once in on_validation_epoch_end; nothing to return.
 
     def on_validation_epoch_end(self):
-        metrics = self._val_metrics.compute()
+        metrics = self._val_metrics.compute(include_worst=True)
         if not metrics:
             return
         self._log_bucket(metrics, _VALIDATION_BUCKET)
-        for size, size_metrics in self._val_size_metrics.items():
-            self._log_bucket(size_metrics.compute(), f"{_VALIDATION_BUCKET}/{size}")
+        size_results = {
+            size: accumulator.compute(include_worst=True)
+            for size, accumulator in self._val_size_metrics.items()
+        }
+        for size, scores in size_results.items():
+            self._log_bucket(scores, f"{_VALIDATION_BUCKET}/{size}")
         val_loss_key = self._val_loss_key()
         if val_loss_key not in metrics:
             raise RuntimeError(
@@ -1005,8 +1024,10 @@ class _ParametricLightningModule(_LightningModule):
         # Bare keys back the checkpoint monitor (val_loss), the checkpoint filename
         # (ESR, MSE), and any threshold-ESR early stopping.
         monitored = dict(metrics)
-        for size, size_metrics in self._val_size_metrics.items():
-            monitored[f"ESR_{size}"] = size_metrics.compute()["ESR"]
+        for size, scores in size_results.items():
+            monitored[f"ESR_{size}"] = scores["ESR"]
+            if "ESR_worst" in scores:
+                monitored[f"ESR_worst_{size}"] = scores["ESR_worst"]
         monitored["val_loss"] = metrics[val_loss_key]
         self.log_dict(monitored)
 

@@ -13,6 +13,12 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
+## 0.6.3 beta branch
+
+This branch adds independent **Cosine (whole budget)** schedules, denser held-out
+validation and **ESR_worst**. The beta release remains in draft; the public stable
+download above stays on 0.6.2. See [beta changes](docs/release-0.6.3-beta.md).
+
 ## Credits
 
 ParaNAM Trainer builds on **[Phillip Self](https://github.com/phillipmself)**'s

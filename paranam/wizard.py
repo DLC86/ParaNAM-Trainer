@@ -837,6 +837,7 @@ class WizardWindow(
         for field in (rate_preset, hyper_rate_preset):
             field.addItem("per epoch", "manual")
             field.addItem("per 62 optimizer updates (A2 cadence)", "a2_updates")
+            field.addItem("Cosine (whole budget)", "cosine_budget")
             field.setToolTip(
                 "Cadence of this network's LR Decay. Legacy resumes retain the original checkpoint clock."
             )
@@ -1164,7 +1165,9 @@ class WizardWindow(
         self.advanced_fields["rate_preset"].setEnabled(parametric)
         hyper_preset = self.advanced_fields["hypernetwork_rate_preset"].currentData()
         self.advanced_fields["hypernetwork_rate_preset"].setEnabled(parametric)
-        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(parametric)
+        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(
+            parametric and hyper_preset != "cosine_budget"
+        )
         matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
             "a2_updates",
             "a2_controls",
@@ -1172,7 +1175,9 @@ class WizardWindow(
             "a2_dataset",
             "a2_dataset_sqrt",
         )
-        self.advanced_fields["lr_decay"].setEnabled(True)
+        self.advanced_fields["lr_decay"].setEnabled(
+            self.advanced_fields["rate_preset"].currentData() != "cosine_budget"
+        )
         self.advanced_fields["lr_decay"].setToolTip(
             "Editable learning-rate multiplier applied at each reduction of the selected cadence."
             if matched
@@ -1202,6 +1207,13 @@ class WizardWindow(
                         "rate_preset" if name == "audio" else "hypernetwork_rate_preset"
                     )
                     preset_name = self.advanced_fields[field_name].currentText()
+                    if schedule.get("kind") == "cosine_budget":
+                        descriptions.append(
+                            f"{name.title()}: Cosine (whole budget); linear warmup for the first 2% ({schedule['warmup_steps']:.8g} updates), then cosine to 1% LR. "
+                            f"Frozen budget: {schedule['total_steps']} optimizer updates ({schedule['steps_per_epoch']} per epoch). "
+                            f"Peak LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e}. LR Decay is not used."
+                        )
+                        continue
                     accounting = (
                         f" Dataset: {schedule['steps_per_epoch']} complete updates/epoch; "
                         f"A2 reference: {schedule['reference_steps']}; ratio {schedule['dataset_reference_ratio']:.8g}."
