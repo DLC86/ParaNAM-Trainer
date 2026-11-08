@@ -150,7 +150,7 @@ def navigation_icon(kind):
                 for b in (4, 12, 20):
                     p.drawLine(3, a, 12, b)
                     p.drawLine(12, b, 21, a)
-            p.setBrush(QColor("#1b1b1b"))
+            p.setBrush(QColor("#f0f0f0"))
             for x, ys in ((3, (6, 18)), (12, (4, 12, 20)), (21, (6, 18))):
                 for y in ys:
                     p.drawEllipse(QPointF(x, y), 2, 2)

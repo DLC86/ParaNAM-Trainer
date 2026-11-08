@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from html import escape
 import math
 import re
 import shutil
@@ -49,6 +50,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
     QAbstractItemView,
+    QAbstractButton,
     QProgressBar,
     QPlainTextEdit,
     QToolButton,
@@ -301,6 +303,7 @@ class WizardWindow(
         content.setContentsMargins(30, 24, 30, 22)
         content.setSpacing(18)
         self.project_label = label("No project open", "muted")
+        self.project_label.setTextFormat(Qt.TextFormat.RichText)
         content.addWidget(self.project_label)
         self.build_recovery_notice(content)
         self.pages = QStackedWidget()
@@ -555,6 +558,9 @@ class WizardWindow(
         self.capture_kind.currentIndexChanged.connect(self.save_preferences)
         self.control_card, box = card("Rig controls")
         self.control_table = QTableWidget(0, 4)
+        corner = self.control_table.findChild(QAbstractButton)
+        if corner:
+            corner.setText("#")
         self.control_table.setHorizontalHeaderLabels(
             ["Name", "Type", "Range / positions", "Default"]
         )
@@ -679,6 +685,18 @@ class WizardWindow(
         self.mode.currentIndexChanged.connect(self.save_preferences)
 
     def _capture(self, layout):
+        options = QHBoxLayout()
+        options.addStretch(1)
+        self.monitor_return = QCheckBox("Monitor Return")
+        self.monitor_return.setToolTip("Send the live Return input to the selected Monitor outputs during capture.")
+        self.prewarm_audio = QCheckBox("Pre-warm audio interface")
+        self.prewarm_audio.setChecked(True)
+        self.prewarm_audio.setToolTip("Play a short white-noise signal before each capture to stabilize the audio interface.")
+        self.monitor_return.toggled.connect(lambda *_: self.save_audio())
+        self.prewarm_audio.toggled.connect(lambda *_: self.save_audio())
+        options.addWidget(self.monitor_return)
+        options.addWidget(self.prewarm_audio)
+        layout.addLayout(options)
         layout.addWidget(label("BRING YOUR RIG INTO THE MODEL", "eyebrow"))
         layout.addWidget(label("Set. Record. Repeat.", "title"))
         self.capture_summary = label("Generate a capture plan to begin.", "muted")
@@ -714,9 +732,12 @@ class WizardWindow(
         )
         layout.addWidget(self.capture_status)
         self.capture_table = CaptureTable(0, 6)
+        corner = self.capture_table.findChild(QAbstractButton)
+        if corner:
+            corner.setText("#")
         self.capture_table.setHorizontalHeaderLabels(
             [
-                "Split",
+                "Type",
                 "Control settings",
                 "Status",
                 "Latency",
@@ -980,12 +1001,12 @@ class WizardWindow(
                 "muted",
             )
         )
+        layout.addWidget(self.metadata_card)
         layout.addWidget(self.training_settings)
         if sys.platform != "darwin":
             self.gpu_setup_button = button("Add NVIDIA GPU support", self.configure_gpu)
             box.addWidget(self.gpu_setup_button)
             self.refresh_gpu_button()
-        layout.addWidget(self.metadata_card)
         self.train_button = button("Train · add to queue", self.start_training, True)
         layout.addWidget(self.train_button)
         self.epochs.valueChanged.connect(self.save_preferences)
@@ -1003,10 +1024,12 @@ class WizardWindow(
         )
         self.queue_run_row = QHBoxLayout()
         layout.addLayout(self.queue_run_row)
-        self.queue_table = QTableWidget(0, 8)
+        self.queue_table = QTableWidget(0, 7)
+        corner = self.queue_table.findChild(QAbstractButton)
+        if corner:
+            corner.setText("#")
         self.queue_table.setHorizontalHeaderLabels(
             [
-                "Order",
                 "Name",
                 "Project",
                 "Created",
@@ -1029,7 +1052,7 @@ class WizardWindow(
         self.queue_table.horizontalHeader().setStretchLastSection(False)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
-        for column, width in enumerate((56, 140, 120, 110, 90, 100, 65, 85)):
+        for column, width in enumerate((140, 120, 110, 90, 100, 65, 85)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         layout.addWidget(self.queue_table, 1)
@@ -1450,8 +1473,11 @@ class WizardWindow(
         except RecoveryRequired:
             pass  # Opening a project must remain available for queue rebuilding.
         self.project_label.setText(
-            f"{workspace.project.name or workspace.directory.name}  ·  Saved locally"
+            f"<b>{escape(workspace.project.name or workspace.directory.name)}</b>  ·  Saved locally"
         )
+        audio = workspace.project.audio
+        self.monitor_return.setChecked(audio.monitor_return_enabled)
+        self.prewarm_audio.setChecked(audio.prewarm_enabled)
         paths = self.settings.value("recent", [])
         if isinstance(paths, str):
             paths = [paths]
@@ -1641,6 +1667,8 @@ class WizardWindow(
             instrument_input_channel=self.instrument_input.currentData(),
             monitor_output_left=self.monitor_left.currentData(),
             monitor_output_right=self.monitor_right.currentData(),
+            monitor_return_enabled=self.monitor_return.isChecked(),
+            prewarm_enabled=self.prewarm_audio.isChecked(),
             output_channel=self.output_channel.currentData(),
             loopback_input_channel=(
                 self.loop_input.currentData() if self.loop_enabled.isChecked() else None
@@ -2286,7 +2314,7 @@ class WizardWindow(
         else:
             entries = order_captures(project.entries, project.control_specs())
             headers = [
-                "Split",
+                "Type",
                 "Control settings",
                 "Status",
                 "Latency",
@@ -2354,6 +2382,27 @@ class WizardWindow(
             for col, text in enumerate(columns):
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
+                running = (
+                    self.worker is not None
+                    and entry.y_path == getattr(self, "_recorded_capture_path", None)
+                    and entry.status != "captured"
+                )
+                has_warning = bool(
+                    self._capture_metrics(entry)[2] not in ("—", "")
+                )
+                color = (
+                    "#e8c75a"
+                    if has_warning
+                    else "#55d69e"
+                    if running
+                    else "#54c9c0"
+                    if entry.status == "captured"
+                    else "#f0f0f0"
+                )
+                item.setForeground(QColor(color))
+                status_col = 1 if static else 2
+                if col == status_col and running:
+                    item.setText("Running")
                 self.capture_table.setItem(row, col, item)
         self.capture_table.blockSignals(False)
         completed = sum(e.status == "captured" for e in project.entries)
@@ -2432,6 +2481,10 @@ class WizardWindow(
                 )
             self.save_audio()
             audio = self.audio_settings()
+            if audio.monitor_return_enabled and audio.host_api != "ASIO":
+                raise ValueError(
+                    "Return monitoring during capture currently requires an ASIO interface."
+                )
             if audio.input_channel is None or audio.output_channel is None:
                 raise ValueError(
                     "Select a Send output and Return input in Settings before capturing."
@@ -2500,6 +2553,11 @@ class WizardWindow(
                 return results if static else results[0]
 
             self.run_audio(capture_signals, self._capture_done)
+            status_col = 1 if static else 2
+            status_item = self.capture_table.item(index, status_col)
+            if status_item:
+                status_item.setText("Running")
+                status_item.setForeground(QColor("#55d69e"))
         except Exception as error:
             self.notify_error(error)
 
@@ -2559,26 +2617,19 @@ class WizardWindow(
         box = QMessageBox(self)
         box.setWindowTitle("Clean volume verification")
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
-            "The first volume captures do not perfectly match a clean attenuator."
-        )
+        box.setText("Peak and RMS levels show a possible non-linear volume response.")
         box.setInformativeText(
             message
-            + "\n\nThe interface or capture noise can also contribute. You can continue with a fitted clean-volume curve without regenerating the plan."
+            + "\n\nCheck the audio interface or reamp box for distortion, or go back to Plan and remove Clean volume."
         )
-        proceed = box.addButton(
-            "Continue as clean volume", QMessageBox.ButtonRole.AcceptRole
-        )
-        retry = box.addButton(
-            "Recapture the first four", QMessageBox.ButtonRole.ActionRole
-        )
-        pause = box.addButton("Keep paused", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(pause)
+        proceed = box.addButton("Dismiss", QMessageBox.ButtonRole.AcceptRole)
+        back = box.addButton("Go back to Plan", QMessageBox.ButtonRole.ActionRole)
+        box.setDefaultButton(proceed)
         box.exec()
         return (
-            "continue"
+            "dismiss"
             if box.clickedButton() is proceed
-            else "retry" if box.clickedButton() is retry else "pause"
+            else "plan" if box.clickedButton() is back else "dismiss"
         )
 
     def review_volume_check(self):
@@ -2589,22 +2640,21 @@ class WizardWindow(
         if state.get("screen_decision") != "warning":
             return
         choice = self._ask_volume_warning(state.get("warning_message", ""))
-        if choice == "continue":
+        if choice == "dismiss":
             state["screen_decision"] = "accepted"
             from nam.capture.output_gain import advance_calibration
 
             advance_calibration(project, self.workspace.directory)
-        elif choice == "retry":
-            state["screen_decision"] = None
-            state["status"] = "measuring"
-            project.output_gain = None
-            for entry in project.entries:
-                if entry.y_path in state.get("screen_paths", []):
-                    entry.status = "pending"
+        elif choice == "plan":
+            self.workspace.save()
+            self.navigate(1)
+            return
         self.workspace.save()
         self.refresh_captures()
 
     def cancel_capture(self):
+        if hasattr(self, "capture_progress"):
+            self.capture_progress.setValue(0)
         if self.cancel_token:
             self.cancel_token.cancel()
 
@@ -2801,11 +2851,13 @@ class WizardWindow(
                 scrollbar = self.details.verticalScrollBar()
                 position = scrollbar.value()
                 follow = position >= scrollbar.maximum() - 2
+                horizontal = self.details.horizontalScrollBar().value()
                 self.details.setPlainText(content)
                 if follow:
                     self.details.moveCursor(QTextCursor.MoveOperation.End)
                 else:
                     scrollbar.setValue(position)
+                self.details.horizontalScrollBar().setValue(horizontal)
                 self._log_content = content
         result = read_json(self.job / "export-result.json", {})
         request = read_json(self.job / "export-request.json", {})

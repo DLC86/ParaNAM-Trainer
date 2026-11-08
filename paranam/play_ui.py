@@ -570,7 +570,6 @@ class PlayActions:
         )
         self.play_ir_status.setWordWrap(True)
         self.play_ir_status.setObjectName("muted")
-        layout.addWidget(self.play_ir_status)
         self.ir_loader = None
         self._ir_kernel = self._ir_processor = None
         self._ir_path = None
@@ -596,7 +595,6 @@ class PlayActions:
             "Select a model. Audio starts only when Play is pressed."
         )
         self.play_status.setWordWrap(True)
-        layout.addWidget(self.play_status)
         layout.addLayout(assets, 1)
         self.play_worker = self.play_loader = None
         self._play_restart = self._pending_play_load = False

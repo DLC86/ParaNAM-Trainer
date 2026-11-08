@@ -404,6 +404,10 @@ class PlaybackRecorder(_Protocol):
         loopback_output_channel: _Optional[int] = None,
         loopback_input_channel: _Optional[int] = None,
         loopback_playback: _Optional[_np.ndarray] = None,
+        prewarm_enabled: bool = False,
+        monitor_return_enabled: bool = False,
+        monitor_output_left: _Optional[int] = None,
+        monitor_output_right: _Optional[int] = None,
         blocksize: int = 0,
         latency: _Latency = "low",
         host_api: _Optional[str] = None,
@@ -505,6 +509,10 @@ class SounddeviceRecorder:
         loopback_output_channel: _Optional[int] = None,
         loopback_input_channel: _Optional[int] = None,
         loopback_playback: _Optional[_np.ndarray] = None,
+        prewarm_enabled: bool = False,
+        monitor_return_enabled: bool = False,
+        monitor_output_left: _Optional[int] = None,
+        monitor_output_right: _Optional[int] = None,
         blocksize: int = 0,
         latency: _Latency = "low",
         host_api: _Optional[str] = None,
@@ -518,13 +526,24 @@ class SounddeviceRecorder:
             raise AudioDeviceError(
                 "Select a Send output and Return input before capturing audio."
             )
+        playback = _np.asarray(playback, dtype=_np.float32)
+        warm_frames = int(sample_rate * 0.25) if prewarm_enabled else 0
+        if warm_frames:
+            noise = _np.random.default_rng().uniform(
+                -0.1259, 0.1259, warm_frames
+            ).astype(_np.float32)
+            playback = _np.concatenate((noise, playback))
+            if loopback_playback is not None:
+                loopback_playback = _np.concatenate(
+                    (noise, _np.asarray(loopback_playback, dtype=_np.float32))
+                )
         if host_api == "ASIO":
             from ._asio_stream import AsioRecorder
 
             if self._asio is None:
                 self._asio = AsioRecorder()
-            return self._asio.playrec(
-                playback=_np.asarray(playback, dtype=_np.float32),
+            main, loopback = self._asio.playrec(
+                playback=playback,
                 sample_rate=sample_rate,
                 input_device=input_device,
                 output_device=output_device,
@@ -533,14 +552,19 @@ class SounddeviceRecorder:
                 loopback_input_channel=loopback_input_channel,
                 loopback_output_channel=loopback_output_channel,
                 loopback_playback=loopback_playback,
+                monitor_return_enabled=monitor_return_enabled,
+                monitor_output_left=monitor_output_left,
+                monitor_output_right=monitor_output_right,
                 blocksize=blocksize,
                 progress=progress,
                 cancel=cancel,
                 **({"meter": meter} if meter is not None else {}),
             )
+            return main[warm_frames:], (
+                loopback[warm_frames:] if loopback is not None else None
+            )
 
         self.close()
-        playback = _np.asarray(playback, dtype=_np.float32)
         if playback.ndim != 1:
             raise ValueError(f"Expected mono playback; got shape {playback.shape}")
 
@@ -679,9 +703,11 @@ class SounddeviceRecorder:
         _raise_on_dropout(sd.get_status(), latency=latency, blocksize=blocksize)
         if progress is not None:
             progress(1.0)
-        main = recording[:, input_channel - 1].copy()
+        main = recording[warm_frames:, input_channel - 1].copy()
         loopback = (
-            recording[:, loopback_input_channel - 1].copy() if use_loopback else None
+            recording[warm_frames:, loopback_input_channel - 1].copy()
+            if use_loopback
+            else None
         )
         if meter is not None:
             meter(

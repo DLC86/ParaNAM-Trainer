@@ -13,11 +13,11 @@
   therefore cannot use Avoid max or Gain/Drive.
 - Clean output volume trains the neural effect at maximum volume and measures
   a separate attenuation curve with short validation-signal recordings at the
-  selected knob step (default 1.000 when Clean volume is enabled). Four initial
-  clips screen two volume positions in two control contexts. A tolerant warning
-  can be accepted to fit a monotone curve, or only those four clips can be
-  recaptured; recordings are preserved. Remaining points use the same step grid,
-  with a monotone least-squares fit. The user can change the default step.
+  selected knob step (default 1.000 when Clean volume is enabled). All other
+  controls stay at maximum. Peak and RMS attenuation are compared against the
+  volume-10 reference; a difference greater than 0.2 dB shows an advisory warning
+  with **Dismiss** and **Go back to Plan** actions. The output curve is fitted
+  from the measured RMS levels.
   Maximum-volume references are recorded first. A silent minimum is measured as
   a noise-floor clip, without requiring timing alignment or a loopback. Audible
   captures retain timing checks; an explicitly configured loopback must work.
@@ -40,6 +40,20 @@
   https://github.com/phillipmself/neural-amp-modeler-parametric/releases/tag/training-inputs-v1
 - LR cadence selectors now sit beside their respective decay fields, with
   aligned numeric fields and transparent row containers.
+- Capture progress resets when cancelled. Capture and Queue rows use state
+  colors, their lists have a shaded “#” corner header, and Capture labels its
+  first column **Type**. Queue no longer shows a redundant order column.
+- Capture can pre-warm the interface with 250 ms of low-level white noise and
+  monitor the Return signal through ASIO Monitor outputs when enabled.
+- Scrollbar tracks are hidden. Training log horizontal position is preserved
+  while new text arrives, and remaining-time estimates use every observed batch
+  and stay visible while paused.
+- The project name is bold in the header, Train shows metadata before settings,
+  its neural-network icon uses filled nodes, and Compare removes the two status
+  lines shown beneath the player.
+- Parametric exports include Train ESR Full/Lite and the saved advanced settings
+  in training metadata. Legacy `validation_esr`, `validation_reference`, and
+  `validation_esr_mean` fields are removed.
 - Held-out validation recommendation is min(max(8, 4 × dimensions), 24) per
   Complex Switch state; Simple Switch dimensions count alongside knobs. The
   initial validation count is 12. ESR_worst reports the worst complete held-out

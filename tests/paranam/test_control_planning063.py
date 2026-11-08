@@ -152,7 +152,7 @@ def record_pending(
             gain = value
         audio = signal * gain * (1 if entry.params["Tone"] == 10 else 0.7)
         if colored and 0 < value < 1:
-            audio = audio + 0.15 * gain * np.roll(signal, 1)
+            audio = np.clip(signal, -0.025, 0.025) * gain
         target = root / entry.y_path
         target.parent.mkdir(parents=True, exist_ok=True)
         sf.write(target, audio, 48000, subtype="FLOAT")
@@ -163,13 +163,8 @@ def record_pending(
 def test_volume_calibration_uses_knob_grid_and_survives_reload(tmp_path):
     project = volume_project()
     initialize_calibration(project)
-    assert len(project.entries) == 103  # 101 knob steps + two alternate-context checks
-    assert (
-        sum(
-            e.user_metadata["output_gain"]["phase"] == "screen" for e in project.entries
-        )
-        == 4
-    )
+    assert len(project.entries) == 101
+    assert all(e.params["Tone"] == 10 for e in project.entries)
     record_pending(project, tmp_path)
     assert advance_calibration(project, tmp_path) == 0
     project = CaptureProject.model_validate_json(project.model_dump_json())
@@ -190,16 +185,14 @@ def test_volume_calibration_uses_knob_grid_and_survives_reload(tmp_path):
     assert wrapped["config"]["base_config"] == original["config"]
 
 
-@pytest.mark.parametrize("failure", ["colored", "context_dependent"])
-def test_volume_screen_warning_is_advisory_and_preserves_captures(tmp_path, failure):
+def test_volume_peak_rms_warning_is_advisory_and_preserves_captures(tmp_path):
     project = volume_project()
     initialize_calibration(project)
-    screen_paths = set(project.output_gain_state["screen_paths"])
-    record_pending(project, tmp_path, paths=screen_paths, **{failure: True})
+    record_pending(project, tmp_path, colored=True)
     advance_calibration(project, tmp_path)
     assert project.output_gain_state["screen_decision"] == "warning"
-    assert any(e.status == "pending" for e in project.entries)
-    record_pending(project, tmp_path, **{failure: True})
+    assert "0.20 dB" in project.output_gain_state["warning_message"]
+    assert all(e.status == "captured" for e in project.entries)
     project.output_gain_state["screen_decision"] = "accepted"
     advance_calibration(project, tmp_path)
     assert project.output_gain_state["status"] == "ready"

@@ -178,9 +178,15 @@ class AsioRecorder:
             "output_channel",
             "loopback_input_channel",
             "loopback_output_channel",
+            "monitor_return_enabled",
+            "monitor_output_left",
+            "monitor_output_right",
             "blocksize",
         )
-        config = tuple(settings[k] for k in keys)
+        config = tuple(
+            settings.get(k, False if k == "monitor_return_enabled" else None)
+            for k in keys
+        )
         if self.stream is not None and self.config == config and self.stream.active:
             return
         self._close_stream()
@@ -193,11 +199,36 @@ class AsioRecorder:
             ("loopback_input_channel", ins),
             ("output_channel", outs),
             ("loopback_output_channel", outs),
+            ("monitor_output_left", outs),
+            ("monitor_output_right", outs),
         ):
             value = settings[name]
             if value is not None and not 1 <= value <= maximum:
                 raise AudioDeviceError(f"{name} is outside the device's channel range.")
-        self.settings = {key: settings[key] for key in keys}
+        self.settings = {
+            key: settings.get(key, False if key == "monitor_return_enabled" else None)
+            for key in keys
+        }
+        if settings["monitor_return_enabled"]:
+            monitors = [
+                channel
+                for channel in (
+                    settings["monitor_output_left"],
+                    settings["monitor_output_right"],
+                )
+                if channel is not None
+            ]
+            if not monitors:
+                raise AudioDeviceError(
+                    "Select at least one Monitor output in Audio settings to monitor Return."
+                )
+            if len(set(monitors)) != len(monitors) or any(
+                channel in (settings["output_channel"], settings["loopback_output_channel"])
+                for channel in monitors
+            ):
+                raise AudioDeviceError(
+                    "Monitor outputs must be distinct from Send and loopback outputs."
+                )
         self.actual_blocksize = None
         self.last_status = None
         # With ASIO and no software block adapter, callback frames expose the native
@@ -242,6 +273,14 @@ class AsioRecorder:
             n = min(frames, len(job.main) - start)
             stop = start + n
             outgoing[:n, self.settings["output_channel"] - 1] = job.main[start:stop]
+            if self.settings["monitor_return_enabled"]:
+                returned = incoming[:n, self.settings["input_channel"] - 1]
+                for channel in (
+                    self.settings["monitor_output_left"],
+                    self.settings["monitor_output_right"],
+                ):
+                    if channel is not None:
+                        outgoing[:n, channel - 1] = returned
             job.recorded[start:stop] = incoming[:n, self.settings["input_channel"] - 1]
             if job.loop is not None:
                 outgoing[:n, self.settings["loopback_output_channel"] - 1] = job.loop[

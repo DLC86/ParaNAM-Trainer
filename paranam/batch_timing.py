@@ -6,8 +6,8 @@ import math
 
 class BatchTiming:
     def __init__(self):
-        self.durations = deque(maxlen=100)
-        self.validation_times = deque(maxlen=10)
+        self.durations = deque()
+        self.validation_times = deque()
 
     def record(self, seconds):
         if math.isfinite(seconds) and seconds > 0:

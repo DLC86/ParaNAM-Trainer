@@ -259,6 +259,8 @@ class AudioSettingsModel(_BaseModel):
     instrument_input_channel: _Optional[int] = None
     monitor_output_left: _Optional[int] = None
     monitor_output_right: _Optional[int] = None
+    monitor_return_enabled: bool = False
+    prewarm_enabled: bool = True
     # Optional second I/O pair (on the same devices) wired as a direct loopback: a copy
     # of the capture playback (timing blips and input audio alike) goes out
     # ``loopback_output_channel`` and is patched straight back into

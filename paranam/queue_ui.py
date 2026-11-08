@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QColor
 from PySide6.QtWidgets import QTableWidgetItem
 
 from . import training
@@ -140,7 +140,6 @@ class QueueActions:
                 else spec.get("model", {}).get("metadata", {}).get("name", "")
             )
             values = (
-                str(row + 1),
                 model_name or "—",
                 entry["name"],
                 time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
@@ -153,6 +152,15 @@ class QueueActions:
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, entry["id"])
                 item.setToolTip(f"{entry['project']}\n{entry['job']}")
+                colors = {
+                    "running": "#55d69e",
+                    "completed": "#54c9c0",
+                    "paused": "#92979d",
+                    "stopped": "#ff7777",
+                    "queued": "#f0f0f0",
+                    "pending": "#f0f0f0",
+                }
+                item.setForeground(QColor(colors.get(state, "#f0f0f0")))
                 table.setItem(row, column, item)
             if entry["id"] == self.selected_job_id:
                 selected = entry

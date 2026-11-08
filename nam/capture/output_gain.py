@@ -1,9 +1,4 @@
-"""Measure an output attenuator separately from the neural effect.
-
-All neural captures use the maximum physical volume. Short calibration captures
-fit y(v)=gain(v)*y(max), check waveform residuals and a second knob context, then
-fit a monotone curve to the fixed knob-step grid. Classification is advisory.
-"""
+"""Measure a clean output attenuator from peak and RMS levels."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -83,7 +78,7 @@ def _append(project, positions, context, phase):
                 user_metadata={
                     "output_gain": {
                         "phase": phase,
-                        "context": "max" if context == _context(project) else "check",
+                        "context": "max",
                     }
                 },
             ),
@@ -92,62 +87,29 @@ def _append(project, positions, context, phase):
 
 
 def initialize_calibration(project):
-    """A fixed knob-step grid; four screening captures precede the remaining points."""
+    """Capture only the fixed volume grid with every other control at maximum."""
     from .planner import _capture_grid_values
 
     control = volume_control(project)
     if control is None:
         return
+    # Older plans included redundant calibration captures with other controls at
+    # defaults. Keep their WAVs on disk, but remove them from the active plan.
+    project.entries = [
+        entry
+        for entry in project.entries
+        if entry.split != "gain"
+        or entry.user_metadata.get("output_gain", {}).get("context") != "check"
+    ]
     grid = _capture_grid_values(
         replace(control.to_param_spec(), avoid_zero=False, avoid_max=False),
         control.step,
     )
-    midpoint = _snap(control, (control.min + control.max) / 2)
     high = _context(project)
-    alternate = _context(project, defaults=True)
-    if all(
-        alternate[c.name] == high[c.name]
-        for c in project.control_specs()
-        if c.name != control.name
-    ):
-        for c in project.control_specs():
-            if c.name != control.name:
-                alternate[c.name] = (
-                    c.enum_names[0]
-                    if isinstance(c, SwitchSpec)
-                    else float(
-                        _quantize_to_capture_grid(
-                            np.array([c.min]), (c.to_param_spec(),), default_step=c.step
-                        )[0]
-                    )
-                )
-    contexts = [high]
-    if any(
-        alternate[c.name] != high[c.name]
-        for c in project.control_specs()
-        if c.name != control.name
-    ):
-        contexts.append(alternate)
-    screening = []
-    for position in (control.max, midpoint):
-        for context in contexts:
-            _append(project, [position], context, "screen")
-            params = {**context, control.name: position}
-            entry = next(
-                e for e in project.entries if e.split == "gain" and e.params == params
-            )
-            entry.user_metadata.setdefault("output_gain", {})["phase"] = "screen"
-            if entry.y_path not in screening:
-                screening.append(entry.y_path)
     _append(project, grid, high, "grid")
-    by_path = {e.y_path: e for e in project.entries}
-    project.entries = [by_path[path] for path in screening] + [
-        e for e in project.entries if e.y_path not in screening
-    ]
     project.output_gain_state = {
         "method": "grid",
         "status": "measuring",
-        "screen_paths": screening,
         "screen_decision": None,
     }
     project.output_gain = None
@@ -166,26 +128,11 @@ def _signal(project, root, entry):
     return signal[:, 0]
 
 
-def _measure(reference, target, shift, noise):
-    if shift >= 0:
-        target, reference = target[shift:], reference[: len(target) - shift]
-    else:
-        reference, target = reference[-shift:], target[: len(reference) + shift]
-    count = min(len(reference), len(target))
-    if count < 256:
-        raise ValueError("Volume calibration clips are too short after alignment")
-    reference, target = reference[:count], target[:count]
-    energy = float(np.mean(reference * reference))
-    if energy < 1e-12:
-        raise ValueError(
-            "Maximum-volume reference is silent; check the rig and recapture that reference"
-        )
-    gain = float(np.mean(reference * target) / energy)
-    residual = float(np.mean((target - gain * reference) ** 2))
-    residual = max(0.0, residual - 4 * noise) / max(
-        float(np.mean(target * target)), 1e-30
-    )
-    return gain, residual
+def _dbfs(signal):
+    peak = float(np.max(np.abs(signal))) if len(signal) else 0.0
+    rms = float(np.sqrt(np.mean(signal * signal))) if len(signal) else 0.0
+    floor = 1e-12
+    return 20 * math.log10(max(peak, floor)), 20 * math.log10(max(rms, floor))
 
 
 def _curve(points):
@@ -224,11 +171,7 @@ def _curve(points):
 
 
 def advance_calibration(project, root):
-    """Check the initial four clips early, then fit only the requested grid points.
-
-    Classification warnings are advisory and can be accepted without replanning.
-    Unreadable/silent reference recordings still need a usable recapture.
-    """
+    """Compare peak and RMS attenuation; warn only when they differ by >0.2 dB."""
     control = volume_control(project)
     if control is None:
         return 0
@@ -237,90 +180,50 @@ def advance_calibration(project, root):
         initialize_calibration(project)
         state = project.output_gain_state
     entries = [e for e in project.entries if e.split == "gain"]
-    screening = [e for e in entries if e.y_path in state.get("screen_paths", [])]
-    if not screening or any(e.status != "captured" for e in screening):
-        return 0
     main = [
         e
         for e in entries
         if e.user_metadata.get("output_gain", {}).get("context") == "max"
     ]
     reference_entry = next(e for e in main if e.params[control.name] == control.max)
+    if reference_entry.status != "captured":
+        return 0
     reference = _signal(project, root, reference_entry)
-    ref_power = float(np.mean(reference**2))
-    if ref_power < 1e-12:
+    ref_peak, ref_rms = _dbfs(reference)
+    if ref_peak <= -220 or ref_rms <= -220:
         raise ValueError(
             "Maximum-volume reference is silent; check the rig and recapture it"
         )
-    floor = next(
-        (
-            e
-            for e in main
-            if e.params[control.name] == control.min and e.status == "captured"
-        ),
-        None,
-    )
-    noise = (
-        float(np.mean(_signal(project, root, floor) ** 2)) if floor is not None else 0.0
-    )
-    if noise > ref_power * 1e-6:
-        noise = 0.0
-    if state.get("screen_decision") not in ("accepted", "passed"):
-        reasons = []
-        ratios = []
-        for context in ("max", "check"):
-            clips = [
-                e
-                for e in screening
-                if e.user_metadata.get("output_gain", {}).get("context") == context
-            ]
-            if not clips:
+    if state.get("screen_decision") != "accepted":
+        discrepancies = []
+        for entry in main:
+            if entry is reference_entry or entry.status != "captured":
                 continue
-            ref = next(e for e in clips if e.params[control.name] == control.max)
-            ref_signal = _signal(project, root, ref)
-            for clip in clips:
-                if clip is ref:
-                    continue
-                target = _signal(project, root, clip)
-                gain, residual = _measure(
-                    ref_signal, target, int((clip.delay or 0) - (ref.delay or 0)), noise
-                )
-                ratios.append(
-                    float(
-                        np.sqrt(
-                            max(float(np.mean(target**2)) - noise, 0.0)
-                            / max(float(np.mean(ref_signal**2)) - noise, 1e-30)
-                        )
-                    )
-                )
-                # These first four clips are a quick screen, not a pass/fail
-                # measurement. Leave headroom for interface noise and mild
-                # distortion before asking the user to review the curve.
-                if gain < -0.01 or gain > 1.15 or residual > 0.03:
-                    reasons.append(
-                        f"Waveform differs from simple attenuation ({100*residual:.1f}% residual power, {context} context)."
-                    )
-        if len(ratios) > 1 and _db_error(ratios[0], ratios[1]) > 2.0:
-            reasons.append(
-                f"Volume response differs between the two control configurations ({_db_error(ratios[0],ratios[1]):.2f} dB)."
-            )
-        if reasons:
+            peak, rms = _dbfs(_signal(project, root, entry))
+            # A hard mute carries only interface noise (or digital zero), so its
+            # measured crest factor cannot describe the pedal's attenuation curve.
+            if peak < -100 or rms < -100:
+                continue
+            discrepancy = abs((ref_peak - peak) - (ref_rms - rms))
+            if discrepancy > 0.2:
+                discrepancies.append((entry.params[control.name], discrepancy))
+        if discrepancies:
+            position, discrepancy = max(discrepancies, key=lambda pair: pair[1])
             state.update(
                 screen_decision="warning",
-                warning_message="\n".join(reasons),
+                warning_message=(
+                    f"At volume {position:g}, peak and RMS attenuation differ by "
+                    f"{discrepancy:.2f} dB (limit: 0.20 dB). Check for distortion in "
+                    "the audio interface or reamp box, or go back to Plan and remove "
+                    "Clean volume. You can still dismiss this warning and continue."
+                ),
                 status="measuring",
             )
             return 0
-        state["screen_decision"] = "passed"
     if any(e.status != "captured" for e in entries):
         return 0
     values = {
-        float(e.params[control.name]): float(
-            np.sqrt(
-                max(float(np.mean(_signal(project, root, e) ** 2)) - noise, 0.0)
-                / max(ref_power - noise, 1e-30)
-            )
-        )
+        float(e.params[control.name]): 10 ** ((_dbfs(_signal(project, root, e))[1] - ref_rms) / 20)
         for e in main
     }
     values[control.max] = 1.0
@@ -352,7 +255,7 @@ def advance_calibration(project, root):
         status="ready",
         measurements=len(values),
         curve_points=len(points),
-        fit_method="monotone least squares + PCHIP",
+        fit_method="peak/RMS attenuation + monotone PCHIP",
     )
     return 0
 
