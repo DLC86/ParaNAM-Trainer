@@ -232,8 +232,11 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     assert model["metadata"]["input_level_dbu"] == 18.0
     assert model["metadata"]["output_level_dbu"] == 12.0
     validation = model["metadata"]["training"]
-    assert validation["validation_reference"] == "full"
-    assert validation["validation_esr"] == validation["validation_esr_full"]
+    assert "validation_reference" not in validation
+    assert "validation_esr" not in validation
+    assert "validation_esr_mean" not in validation
+    assert validation["train_esr_full"] is not None
+    assert validation["train_esr_lite"] is not None
     assert validation["validation_esr_lite"] is not None
     assert validation["optimizer"] == "Adam"
     assert validation["validation_esr"] == progress["best_esr"]

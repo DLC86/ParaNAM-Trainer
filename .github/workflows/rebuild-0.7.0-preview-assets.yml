@@ -1,5 +1,5 @@
 name: Temporary 0.7.0 preview asset refresh
-# Rebuild from clean source files
+# Rebuild from clean source files and aligned installer validation
 # Rebuild after capture notification and CI fixes
 on:
   push:
