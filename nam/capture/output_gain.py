@@ -107,6 +107,14 @@ def initialize_calibration(project):
     )
     high = _context(project)
     _append(project, grid, high, "grid")
+    gain_entries = sorted(
+        (entry for entry in project.entries if entry.split == "gain"),
+        key=lambda entry: float(entry.params[control.name]),
+        reverse=True,
+    )
+    project.entries = gain_entries + [
+        entry for entry in project.entries if entry.split != "gain"
+    ]
     project.output_gain_state = {
         "method": "grid",
         "status": "measuring",

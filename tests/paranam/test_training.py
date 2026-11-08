@@ -151,10 +151,13 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     assert final["metadata"]["input_level_dbu"] == 18
     assert final["metadata"]["output_level_dbu"] == 12
     summary = final["metadata"]["training"]
-    assert summary["validation_reference"] == "full"
-    assert summary["validation_esr"] == summary["validation_esr_full"]
+    assert "validation_reference" not in summary
+    assert "validation_esr" not in summary
+    assert "validation_esr_mean" not in summary
     assert summary["validation_esr_lite"] is not None
-    assert summary["validation_esr"] == pytest.approx(progress["best_esr"])
+    assert summary["train_esr_full"] is not None
+    assert summary["train_esr_lite"] is not None
+    assert summary["advanced_training"]
     captured = capsys.readouterr()
     assert "Validation ESR | Lite=" in captured.out
     assert "Full (checkpoint)=" in captured.out and "Mean=" in captured.out

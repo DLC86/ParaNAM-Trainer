@@ -573,12 +573,19 @@ def make_job(workspace, resume=False, job_directory=None):
 def annotate_validation_metadata(model, metrics, optimizer, advanced_settings=None):
     if not metrics or metrics.get("full") is None:
         return
+    parametric_export = advanced_settings is not None
     summary = dict(
         validation_esr_full=metrics["full"],
         validation_esr_lite=metrics["lite"],
         epoch=metrics["epoch"],
         optimizer=optimizer,
     )
+    if not parametric_export:
+        summary.update(
+            validation_esr=metrics["full"],
+            validation_reference="full",
+            validation_esr_mean=metrics["mean"],
+        )
     summary["train_esr_full"] = metrics.get("train_full")
     summary["train_esr_lite"] = metrics.get("train_lite")
     if advanced_settings is not None:
@@ -592,8 +599,13 @@ def annotate_validation_metadata(model, metrics, optimizer, advanced_settings=No
         else "paranam_training"
     )
     training_metadata = metadata.setdefault(key, {})
-    for field in ("validation_esr", "validation_reference", "validation_esr_mean"):
-        training_metadata.pop(field, None)
+    if parametric_export:
+        for field in (
+            "validation_esr",
+            "validation_reference",
+            "validation_esr_mean",
+        ):
+            training_metadata.pop(field, None)
     training_metadata.update(summary)
     if model.get("architecture") == "SlimmableContainer":
         for index, child in enumerate(model["config"]["submodels"]):
@@ -604,14 +616,22 @@ def annotate_validation_metadata(model, metrics, optimizer, advanced_settings=No
                 if isinstance(child_metadata.get("training", {}), dict)
                 else "paranam_training"
             )
-            child_metadata.setdefault(child_key, {}).update(
-                **{
-                    **summary,
-                    "epoch": summary["epoch_" + size],
-                }
-            )
-            for key in ("validation_esr", "validation_reference", "validation_esr_mean"):
-                child_metadata[child_key].pop(key, None)
+            child_summary = {
+                **summary,
+                "epoch": summary["epoch_" + size],
+            }
+            if not parametric_export:
+                child_summary.update(
+                    validation_esr=metrics[size], validation_reference=size
+                )
+            child_metadata.setdefault(child_key, {}).update(child_summary)
+            if parametric_export:
+                for key in (
+                    "validation_esr",
+                    "validation_reference",
+                    "validation_esr_mean",
+                ):
+                    child_metadata[child_key].pop(key, None)
 
 
 def intermediate_export_extension(spec):
@@ -1481,7 +1501,13 @@ def run_job(job):
                             model_dict,
                             progress.best_metrics,
                             spec["model"]["optimizer"].get("class", "AdamW"),
-                            spec.get("preferences", {}).get("advanced_training", {}),
+                            (
+                                None
+                                if spec.get("static_captures")
+                                else spec.get("preferences", {}).get(
+                                    "advanced_training", {}
+                                )
+                            ),
                         )
                         atomic_write_json(exported, model_dict)
                 completed.append(member)
