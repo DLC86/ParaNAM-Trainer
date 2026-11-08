@@ -26,6 +26,7 @@ from typing import Union as _Union
 
 import numpy as _np
 from pydantic import BaseModel as _BaseModel
+from pydantic import AliasChoices as _AliasChoices
 from pydantic import Field as _Field
 
 from . import CAPTURE_APP_VERSION as _CAPTURE_APP_VERSION
@@ -260,7 +261,10 @@ class AudioSettingsModel(_BaseModel):
     monitor_output_left: _Optional[int] = None
     monitor_output_right: _Optional[int] = None
     monitor_return_enabled: bool = False
-    prewarm_enabled: bool = True
+    verify_asio_timing: bool = _Field(
+        default=True,
+        validation_alias=_AliasChoices("verify_asio_timing", "prewarm_enabled"),
+    )
     # Optional second I/O pair (on the same devices) wired as a direct loopback: a copy
     # of the capture playback (timing blips and input audio alike) goes out
     # ``loopback_output_channel`` and is patched straight back into

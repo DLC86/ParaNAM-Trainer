@@ -418,6 +418,7 @@ class AsioRecorder:
         loop = settings["loopback_playback"]
         if main.ndim != 1 or not len(main):
             raise AudioDeviceError("ASIO playback must be non-empty mono audio.")
+        verify_timing = settings.get("verify_asio_timing", True)
         if loop is not None:
             if np.shape(loop) != np.shape(main):
                 raise AudioDeviceError(
@@ -437,7 +438,7 @@ class AsioRecorder:
                 )
         self._open(settings)
         cancel = settings["cancel"]
-        if loop is not None:
+        if loop is not None and verify_timing:
             if self.reference is None or self.last_status:
                 self.last_status = None
                 self._stabilize(cancel)
@@ -458,7 +459,7 @@ class AsioRecorder:
             settings["progress"],
             settings.get("meter"),
         )
-        if loop is not None:
+        if loop is not None and verify_timing:
             lag, reference = self.reference
             check_timing(
                 loop, recorded, settings["sample_rate"], lag, reference, cancel=cancel

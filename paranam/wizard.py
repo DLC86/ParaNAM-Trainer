@@ -690,13 +690,16 @@ class WizardWindow(
         options.addStretch(1)
         self.monitor_return = QCheckBox("Monitor Return")
         self.monitor_return.setToolTip("Send the live Return input to the selected Monitor outputs during capture.")
-        self.prewarm_audio = QCheckBox("Pre-warm audio interface")
-        self.prewarm_audio.setChecked(True)
-        self.prewarm_audio.setToolTip("Play a short white-noise signal before each capture to stabilize the audio interface.")
+        self.verify_asio_timing = QCheckBox("Verify ASIO timing")
+        self.verify_asio_timing.setChecked(True)
+        self.verify_asio_timing.setToolTip(
+            "Check loopback timing stability before and after each ASIO capture. "
+            "Turn off to skip these additional probes; capture timing markers are still recorded."
+        )
         self.monitor_return.toggled.connect(lambda *_: self.save_audio())
-        self.prewarm_audio.toggled.connect(lambda *_: self.save_audio())
+        self.verify_asio_timing.toggled.connect(lambda *_: self.save_audio())
         options.addWidget(self.monitor_return)
-        options.addWidget(self.prewarm_audio)
+        options.addWidget(self.verify_asio_timing)
         layout.addLayout(options)
         layout.addWidget(label("BRING YOUR RIG INTO THE MODEL", "eyebrow"))
         layout.addWidget(label("Set. Record. Repeat.", "title"))
@@ -1478,7 +1481,7 @@ class WizardWindow(
         )
         audio = workspace.project.audio
         self.monitor_return.setChecked(audio.monitor_return_enabled)
-        self.prewarm_audio.setChecked(audio.prewarm_enabled)
+        self.verify_asio_timing.setChecked(audio.verify_asio_timing)
         paths = self.settings.value("recent", [])
         if isinstance(paths, str):
             paths = [paths]
@@ -1669,7 +1672,7 @@ class WizardWindow(
             monitor_output_left=self.monitor_left.currentData(),
             monitor_output_right=self.monitor_right.currentData(),
             monitor_return_enabled=self.monitor_return.isChecked(),
-            prewarm_enabled=self.prewarm_audio.isChecked(),
+            verify_asio_timing=self.verify_asio_timing.isChecked(),
             output_channel=self.output_channel.currentData(),
             loopback_input_channel=(
                 self.loop_input.currentData() if self.loop_enabled.isChecked() else None

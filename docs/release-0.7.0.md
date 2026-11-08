@@ -44,8 +44,9 @@
   colors, their lists have a shaded “#” corner header, and Capture labels its
   first column **Type**. A system notification sound plays when a capture is
   saved successfully. Queue no longer shows a redundant order column.
-- Capture can pre-warm the interface with 250 ms of low-level white noise and
-  monitor the Return signal through ASIO Monitor outputs when enabled.
+- Capture can verify ASIO loopback timing stability before and after each
+  recording. Disabling this option skips those extra probes while retaining the
+  timing markers recorded with each capture. Monitor Return is also available.
 - Scrollbar tracks are hidden. Training log horizontal position is preserved
   while new text arrives, and remaining-time estimates use every observed batch
   and stay visible while paused.

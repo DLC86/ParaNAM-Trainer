@@ -811,7 +811,7 @@ class CaptureSession:
                 audio.loopback_input_channel if use_loopback else None
             ),
             loopback_playback=loopback_playback if use_loopback else None,
-            prewarm_enabled=audio.prewarm_enabled,
+            verify_asio_timing=audio.verify_asio_timing,
             monitor_return_enabled=audio.monitor_return_enabled,
             monitor_output_left=audio.monitor_output_left,
             monitor_output_right=audio.monitor_output_right,
