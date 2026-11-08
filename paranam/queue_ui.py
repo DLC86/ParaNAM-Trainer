@@ -153,10 +153,10 @@ class QueueActions:
                 item.setData(Qt.ItemDataRole.UserRole, entry["id"])
                 item.setToolTip(f"{entry['project']}\n{entry['job']}")
                 colors = {
-                    "running": "#55d69e",
-                    "completed": "#54c9c0",
+                    "running": "#00ff00",
+                    "completed": "#00ffff",
                     "paused": "#92979d",
-                    "stopped": "#ff7777",
+                    "stopped": "#ff0000",
                     "queued": "#f0f0f0",
                     "pending": "#f0f0f0",
                 }

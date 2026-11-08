@@ -2392,11 +2392,11 @@ class WizardWindow(
                     self._capture_metrics(entry)[2] not in ("—", "")
                 )
                 color = (
-                    "#e8c75a"
+                    "#ffff00"
                     if has_warning
-                    else "#55d69e"
+                    else "#00ff00"
                     if running
-                    else "#54c9c0"
+                    else "#00ffff"
                     if entry.status == "captured"
                     else "#f0f0f0"
                 )

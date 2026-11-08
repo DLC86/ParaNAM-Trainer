@@ -110,7 +110,8 @@ QLineEdit:focus, QComboBox:focus { border: 1px solid #bf0000; }
 QComboBox QAbstractItemView { background: #000000; selection-background-color: #4d4d4d; }
 QTableWidget, QListWidget, QPlainTextEdit { background: #171717; border: 1px solid #343434; border-radius: 8px; alternate-background-color: #1f1f1f; }
 QListWidget::item { padding: 14px; border-bottom: 1px solid #2d2d2d; }
-QListWidget::item:selected, QTableWidget::item:selected { background: #3f3f3f; color: #ffffff; }
+QListWidget::item:selected { background: #3f3f3f; color: #ffffff; }
+QTableWidget::item:selected { background: #3f3f3f; }
 QHeaderView::section { background: #252525; color: #b8b8b8; border: 0; border-right: 1px solid #4c4c4c; border-bottom: 1px solid #414141; padding: 9px; }
 QTableCornerButton::section { background: #252525; border: 0; border-right: 1px solid #4c4c4c; border-bottom: 1px solid #414141; color: #b8b8b8; }
 QProgressBar { background: #292929; border: 0; border-radius: 5px; min-height: 10px; text-align: center; }
