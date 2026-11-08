@@ -1,0 +1,122 @@
+name: One-time rebuild of ParaNAM 0.7.0 preview installers
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/rebuild-0.7.0-preview-assets.yml
+permissions:
+  contents: write
+jobs:
+  targets:
+    if: github.event.head_commit.message == 'Rebuild 0.7.0 preview installers'
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        run: |
+          python3 - <<'PY'
+          import json, os
+          targets = json.load(open('packaging/targets.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(targets) + '\n')
+          PY
+  build:
+    needs: targets
+    if: github.event.head_commit.message == 'Rebuild 0.7.0 preview installers'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Free space for GPU component verification
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Linux native audio and Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libportaudio2 libasound2 libpulse0 libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libfontconfig1 libdbus-1-3
+      - name: Install Windows installer compiler
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+      - name: Install bundled training engine
+        run: python -m pip install --no-cache-dir "torch==${{ matrix.torch }}" --index-url "${{ matrix.index }}"
+      - name: Install application and build dependencies
+        run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
+      - name: Build native playback engine
+        run: python packaging/native_engine.py
+      - name: Test wizard, queue, native playback and real pause/resume training
+        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Freeze application and package installer
+        run: python packaging/build.py --flavor ${{ matrix.flavor }}
+      - name: Verify optional NVIDIA engine inside the frozen CPU app
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          PARANAM_RUNTIME_ROOT: ${{ github.workspace }}/build/optional-gpu
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer.exe" build
+          else
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
+          fi
+      - name: Replace this platform's installer on the existing preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.7.0-preview installers/* --clobber
+  publish:
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update tag, release notes, and preserve preview status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          git push --force origin "$GH_SHA:refs/tags/v0.7.0-preview"
+          gh release edit v0.7.0-preview --notes-file docs/release-0.7.0.md --prerelease --draft=false --latest=false
+      - name: Verify all five uploaded installers and preview status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/v0.7.0-preview" > release.json
+          python3 - <<'PY'
+          import json
+          release = json.load(open('release.json'))
+          expected = {
+              'ParaNAM-Trainer-0.7.0-Windows-x64-Setup.exe',
+              'ParaNAM-Trainer-0.7.0-Linux-amd64.deb',
+              'ParaNAM-Trainer-0.7.0-Linux-x86_64.tar.gz',
+              'ParaNAM-Trainer-0.7.0-macOS-arm64.dmg',
+              'ParaNAM-Trainer-0.7.0-macOS-x86_64.dmg',
+          }
+          assert release['prerelease'] and not release['draft']
+          assert {asset['name'] for asset in release['assets']} == expected
+          assert all(asset['state'] == 'uploaded' and asset['size'] > 0 and asset.get('digest', '').startswith('sha256:') for asset in release['assets'])
+          print('All 0.7.0 preview installers are uploaded; release remains a prerelease.')
+          PY
