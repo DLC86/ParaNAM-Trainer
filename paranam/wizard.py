@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 """Seven-screen desktop workflow; audio and training never block the UI thread."""
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QDesktopServices, QColor, QTextCursor, QIcon
 from PySide6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QWidget,
     QFrame,
@@ -2562,6 +2564,7 @@ class WizardWindow(
             self.notify_error(error)
 
     def _capture_done(self, qa):
+        QApplication.beep()
         if self.workspace and self.session:
             self.workspace.project = self.session.project
             last = next(
@@ -2868,3 +2871,4 @@ class WizardWindow(
                 else f"Export failed: {result.get('error', 'Unknown error')}"
             )
         self.update_enabled()
+
