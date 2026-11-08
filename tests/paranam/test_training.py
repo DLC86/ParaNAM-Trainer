@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 import json
 from pathlib import Path
 
@@ -237,7 +238,9 @@ def test_resume_legacy_adamw_checkpoint_starts_full_ranking(workspace, monkeypat
     metadata = read_json(Path(progress["export"]))["metadata"]["training"]
     assert metadata["optimizer"] == "AdamW"
     assert metadata["epoch"] == 2
-    assert metadata["validation_reference"] == "full"
+    assert "validation_reference" not in metadata
+    assert "train_esr_full" in metadata
+    assert "train_esr_lite" in metadata
 
 
 @pytest.mark.parametrize("extension", [".nam", ".pnam"])
@@ -466,3 +469,4 @@ def test_active_learning_excludes_validation_and_all_existing_settings(
     ] == validation
     assert all(p[1] in (0, 1, 2) and p[2] in (0, 1) for p in vectors)
     assert workspace.validation_matches()
+
