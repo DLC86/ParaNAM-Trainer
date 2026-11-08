@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 import json
 from pathlib import Path
 
@@ -469,4 +468,3 @@ def test_active_learning_excludes_validation_and_all_existing_settings(
     ] == validation
     assert all(p[1] in (0, 1, 2) and p[2] in (0, 1) for p in vectors)
     assert workspace.validation_matches()
-

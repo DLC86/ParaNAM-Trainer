@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 """A single COM-owning audio thread and a verified timebase for ASIO captures."""
 
 import queue
@@ -467,4 +466,3 @@ class AsioRecorder:
         if settings["progress"] is not None:
             settings["progress"](1.0)
         return main, recorded
-

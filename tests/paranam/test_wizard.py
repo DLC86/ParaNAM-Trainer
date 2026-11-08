@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 from nam.capture.params import KnobSpec, SwitchSpec
 from paranam.widgets import ControlDialog
 
@@ -235,4 +234,3 @@ def test_capture_rows_record_the_displayed_setting_after_route_reordering(
     window.record()
     assert recorded == [original[1]]
     assert workspace.project.entries == original
-

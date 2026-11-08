@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # ParaNAM Trainer 0.7.0 preview
 
 - Complex Switch keeps the existing plan for each joint switch state. Simple
@@ -65,5 +64,4 @@ Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' 
 
 Released as a preview on main; Latest remains unchanged. Existing projects and
 recordings are not silently regenerated when new planning features are selected.
-
 

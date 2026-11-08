@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 import hashlib
 import json
 from types import SimpleNamespace
@@ -449,4 +448,3 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert restored.training_options()["hypernetwork_recipe"] == "HyperA2"
     assert restored.training_options()["rate_preset"] == "manual"
     assert restored.training_options("static")["optimizer"] == "Adam"
-

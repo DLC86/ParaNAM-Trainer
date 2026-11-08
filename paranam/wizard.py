@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 """Seven-screen desktop workflow; audio and training never block the UI thread."""
 
 from __future__ import annotations
@@ -2871,4 +2870,3 @@ class WizardWindow(
                 else f"Export failed: {result.get('error', 'Unknown error')}"
             )
         self.update_enabled()
-
