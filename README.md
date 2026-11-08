@@ -13,15 +13,15 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
-## 0.7.0 preview
+## 0.7.1 preview
 
-[Download the 0.7.0 preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.7.0-preview).
+[Find the 0.7.1 preview](https://github.com/DLC86/ParaNAM-Trainer/releases).
 
 This preview adds Simple/Complex Switch capture planning, biased knob
 sampling, Avoid max, measured clean output volume and **Truncated (Phillip Self)**
 input. It retains denser held-out validation and **ESR_worst** from the draft beta;
 the experimental Cosine schedules have been removed. The preview does not replace
-Latest. See [0.7.0 changes](docs/release-0.7.0.md).
+Latest. See [0.7.0 changes](docs/release-0.7.0.md) for the previous release notes.
 
 ## Credits
 
