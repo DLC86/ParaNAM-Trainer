@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 """A single COM-owning audio thread and a verified timebase for ASIO captures."""
 
 import queue
@@ -202,19 +203,19 @@ class AsioRecorder:
             ("monitor_output_left", outs),
             ("monitor_output_right", outs),
         ):
-            value = settings[name]
+            value = settings.get(name)
             if value is not None and not 1 <= value <= maximum:
                 raise AudioDeviceError(f"{name} is outside the device's channel range.")
         self.settings = {
             key: settings.get(key, False if key == "monitor_return_enabled" else None)
             for key in keys
         }
-        if settings["monitor_return_enabled"]:
+        if settings.get("monitor_return_enabled", False):
             monitors = [
                 channel
                 for channel in (
-                    settings["monitor_output_left"],
-                    settings["monitor_output_right"],
+                    settings.get("monitor_output_left"),
+                    settings.get("monitor_output_right"),
                 )
                 if channel is not None
             ]
@@ -223,7 +224,7 @@ class AsioRecorder:
                     "Select at least one Monitor output in Audio settings to monitor Return."
                 )
             if len(set(monitors)) != len(monitors) or any(
-                channel in (settings["output_channel"], settings["loopback_output_channel"])
+                channel in (settings.get("output_channel"), settings.get("loopback_output_channel"))
                 for channel in monitors
             ):
                 raise AudioDeviceError(
@@ -466,3 +467,4 @@ class AsioRecorder:
         if settings["progress"] is not None:
             settings["progress"](1.0)
         return main, recorded
+
