@@ -690,11 +690,13 @@ class WizardWindow(
         options.addStretch(1)
         self.monitor_return = QCheckBox("Monitor Return")
         self.monitor_return.setToolTip("Send the live Return input to the selected Monitor outputs during capture.")
-        self.verify_asio_timing = QCheckBox("Verify ASIO timing")
+        self.verify_asio_timing = QCheckBox(
+            "Check timing stability before each capture"
+        )
         self.verify_asio_timing.setChecked(True)
         self.verify_asio_timing.setToolTip(
-            "Check loopback timing stability before and after each ASIO capture. "
-            "Turn off to skip these additional probes; capture timing markers are still recorded."
+            "Check ASIO loopback timing stability before each capture. Turn off to "
+            "skip the additional probes; captured timing markers are still used for alignment."
         )
         self.monitor_return.toggled.connect(lambda *_: self.save_audio())
         self.verify_asio_timing.toggled.connect(lambda *_: self.save_audio())
