@@ -81,6 +81,7 @@ jobs:
             python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
           fi
       - name: Upload tested installer to the preview release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
