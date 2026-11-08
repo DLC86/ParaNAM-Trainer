@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 import hashlib
 import json
 from types import SimpleNamespace
@@ -303,8 +304,8 @@ def test_open_other_project_and_retrain_while_another_job_runs(
         assert window.workspace.directory == other.directory
         window.selected_job_id = completed["id"]
         window.refresh_training()
-        assert window.queue_table.horizontalHeaderItem(1).text() == "Name"
-        assert window.queue_table.item(0, 1).text() == "My NAM"
+        assert window.queue_table.horizontalHeaderItem(0).text() == "Name"
+        assert window.queue_table.item(0, 0).text() == "My NAM"
         assert window.retrain_button.isEnabled()
         window.retrain_button.click()
         assert window.workspace.directory == workspace.directory
@@ -448,3 +449,4 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert restored.training_options()["hypernetwork_recipe"] == "HyperA2"
     assert restored.training_options()["rate_preset"] == "manual"
     assert restored.training_options("static")["optimizer"] == "Adam"
+
