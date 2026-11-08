@@ -438,6 +438,8 @@ class ControlDialog(QDialog):
             self.switch_mode.setCurrentIndex(
                 self.switch_mode.findData(control.planning_mode)
             )
+        self.clean_volume.toggled.connect(self._clean_volume_changed)
+        self._clean_volume_changed(self.clean_volume.isChecked(), reset_step=False)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -445,6 +447,15 @@ class ControlDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.resize(600, 610)
+
+    def _clean_volume_changed(self, checked, reset_step=True):
+        if checked and reset_step:
+            self.step.setValue(1.0)
+        for field in (self.avoid_zero, self.avoid_max, self.gain):
+            if checked:
+                field.setChecked(False)
+            field.setEnabled(not checked)
+        self.sampling_bias.setEnabled(not checked)
 
     def resize_positions(self, n):
         old = self.positions.rowCount()
@@ -575,3 +586,4 @@ class MetadataEditor(QWidget):
                 data[key] = value
         self._metadata = data
         self.changed.emit(data)
+

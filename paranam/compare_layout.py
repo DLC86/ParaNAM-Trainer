@@ -1,7 +1,7 @@
 """Compact controls and visible asset lists for Compare."""
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QLayout, QListWidget
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, QItemSelectionModel
+from PySide6.QtWidgets import QFrame, QLayout, QListWidget, QAbstractItemView
 
 
 class ControlPanel(QFrame):
@@ -112,6 +112,7 @@ class AssetList(QListWidget):
         self.selector = selector
         self.pending = False
         self.setMinimumHeight(180)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         selector.installEventFilter(self)
         selector.currentIndexChanged.connect(self.sync)
         for signal in (
@@ -131,6 +132,18 @@ class AssetList(QListWidget):
 
     def sync(self, *_):
         self.pending = False
+        if self.count() == self.selector.count() and all(
+            self.item(i).text() == self.selector.itemText(i)
+            and self.item(i).data(Qt.ItemDataRole.UserRole) == self.selector.itemData(i)
+            for i in range(self.count())
+        ):
+            self.blockSignals(True)
+            self.setCurrentRow(
+                self.selector.currentIndex(), QItemSelectionModel.SelectionFlag.NoUpdate
+            )
+            self.blockSignals(False)
+            self.setEnabled(self.selector.isEnabled())
+            return
         self.blockSignals(True)
         self.clear()
         for index in range(self.selector.count()):
@@ -150,3 +163,4 @@ class AssetList(QListWidget):
         if event.type() == QEvent.Type.EnabledChange:
             self.setEnabled(self.selector.isEnabled())
         return False
+

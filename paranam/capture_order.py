@@ -127,6 +127,16 @@ def order_captures(entries, controls):
         return completed + pending
     gain = [e for e in pending if e.split == "gain"]
     normal = [e for e in pending if e.split != "gain"]
+    screening = [
+        e
+        for e in gain
+        if e.user_metadata.get("output_gain", {}).get("phase") == "screen"
+    ]
+    if screening and len(screening) < len(pending):
+        paths = {e.y_path for e in screening}
+        return order_captures(completed + screening, controls) + order_captures(
+            [e for e in pending if e.y_path not in paths], controls
+        )
     volume = next((c for c in controls if getattr(c, "clean_volume", False)), None)
     if volume is not None:
         references = [e for e in gain if e.params.get(volume.name) == volume.max]
@@ -154,3 +164,4 @@ def order_captures(entries, controls):
     )
     route = _refine(route, points, anchor, knob_mask)
     return completed + [entry for index in route for entry in groups[points[index]]]
+

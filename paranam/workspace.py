@@ -138,6 +138,24 @@ class Workspace:
             c.to_dict() for c in self.project.control_specs()
         ]
         reconcile_with_disk(self.project, self.directory)
+        from nam.capture.output_gain import (
+            volume_control,
+            initialize_calibration,
+            advance_calibration,
+        )
+
+        if (
+            volume_control(self.project)
+            and self.project.entries
+            and self.project.output_gain_state.get("method") != "grid"
+            and self.project.output_gain_state.get("status") != "ready"
+        ):
+            initialize_calibration(self.project)
+            try:
+                advance_calibration(self.project, self.directory)
+            except ValueError as error:
+                self.project.output_gain_state["message"] = str(error)
+            save_project(self.project, self.directory)
 
     @classmethod
     def create(cls, directory, name, audio=None):
@@ -207,6 +225,82 @@ class Workspace:
             if entry.capture_id:
                 groups.setdefault(entry.capture_id, []).append(entry)
         return list(groups.values())
+
+    def rename_control(self, old_name, new_name):
+        """Change parameter keys without moving audio or modifying frozen jobs."""
+        new_name = new_name.strip()
+        draft = [
+            {**c, "name": new_name} if c["name"] == old_name else dict(c)
+            for c in self.draft_controls
+        ]
+        validate_knobs([control_from_dict(c) for c in draft])
+        project = self.project.model_copy(deep=True)
+        changed = False
+        for control in project.knobs:
+            if control.name == old_name:
+                control.name = new_name
+                changed = True
+        if changed:
+            validate_knobs(project.control_specs())
+            for entry in project.entries:
+                entry.params = {
+                    new_name if k == old_name else k: v for k, v in entry.params.items()
+                }
+            if project.output_gain and project.output_gain["name"] == old_name:
+                project.output_gain["name"] = new_name
+            project.control_name_history.append({"from": old_name, "to": new_name})
+        self.project, self.draft_controls = project, draft
+        self._sync_control_configs({old_name: new_name})
+        self.save()
+
+    def move_control(self, index, destination):
+        if not (
+            0 <= index < len(self.draft_controls)
+            and 0 <= destination < len(self.draft_controls)
+        ):
+            return
+        control = self.draft_controls.pop(index)
+        self.draft_controls.insert(destination, control)
+        order = {c["name"]: i for i, c in enumerate(self.draft_controls)}
+        self.project.knobs.sort(key=lambda c: order.get(c.name, len(order)))
+        names = [c.name for c in self.project.control_specs()]
+        for entry in self.project.entries:
+            entry.params = {name: entry.params[name] for name in names}
+        if self.project.output_gain:
+            self.project.output_gain["index"] = names.index(
+                self.project.output_gain["name"]
+            )
+        self._sync_control_configs()
+        self.save()
+
+    def _sync_control_configs(self, renamed=None):
+        from nam.capture.export import build_data_config, _training_param_specs
+
+        renamed = renamed or {}
+        if (self.directory / "data.json").exists():
+            atomic_write_json(
+                self.directory / "data.json", build_data_config(self.project)
+            )
+        names = [p["name"] for p in _training_param_specs(self.project)]
+        for filename in (
+            "model_concat.json",
+            "model_hyper.json",
+            "model_hyper_a2.json",
+        ):
+            path = self.directory / filename
+            if not path.is_file():
+                continue
+            config = read_json(path)
+            params = config.get("net", {}).get("config", {}).get("params")
+            if isinstance(params, list):
+                for param in params:
+                    param["name"] = renamed.get(param["name"], param["name"])
+                params.sort(
+                    key=lambda p: (
+                        names.index(p["name"]) if p["name"] in names else len(names)
+                    )
+                )
+                atomic_write_json(path, config)
 
     def add_static_capture(self, name):
         name = str(name).strip()
@@ -653,3 +747,4 @@ class Workspace:
         if batch_size is not None:
             data["settings"]["batch_size"] = batch_size
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+

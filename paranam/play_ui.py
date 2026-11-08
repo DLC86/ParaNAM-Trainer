@@ -387,6 +387,9 @@ class PlayActions:
         )
         self.play_output_mode.currentIndexChanged.connect(self.update_play_settings)
         model_buttons = row
+        self.play_model_remove = QPushButton("Remove")
+        self.play_model_remove.clicked.connect(self.remove_play_models)
+        model_buttons.addWidget(self.play_model_remove)
         buffer_row = QHBoxLayout()
         buffer_row.addWidget(QLabel("Playback buffer"))
         self.play_buffer = QComboBox()
@@ -536,8 +539,17 @@ class PlayActions:
         self.play_ir_open.clicked.connect(self.open_play_ir)
         row.addWidget(self.play_ir_open)
         ir_buttons = row
+        self.play_ir_remove = QPushButton("Remove")
+        self.play_ir_remove.clicked.connect(self.remove_play_irs)
+        ir_buttons.addWidget(self.play_ir_remove)
         self.play_model_list = AssetList(self.play_model)
         self.play_ir_list = AssetList(self.play_ir)
+        self.play_model_list.itemSelectionChanged.connect(
+            self.update_asset_remove_buttons
+        )
+        self.play_ir_list.itemSelectionChanged.connect(self.update_asset_remove_buttons)
+        self.play_model.currentIndexChanged.connect(self.update_asset_remove_buttons)
+        self.play_ir.currentIndexChanged.connect(self.update_asset_remove_buttons)
         assets = QHBoxLayout()
         for title, view, buttons in (
             ("Models", self.play_model_list, model_buttons),
@@ -547,10 +559,12 @@ class PlayActions:
             pane.setObjectName("card")
             contents = QVBoxLayout(pane)
             contents.addWidget(QLabel(title))
-            contents.addWidget(view)
+            contents.addWidget(view, 1)
+            view.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
             contents.addLayout(buttons)
             assets.addWidget(pane, 1)
-        layout.addLayout(assets)
         self.play_ir_status = QLabel(
             "IR affects the monitor signal; reamp send is independent."
         )
@@ -561,6 +575,12 @@ class PlayActions:
         self._ir_kernel = self._ir_processor = None
         self._ir_path = None
         self.play_ir.currentIndexChanged.connect(self.load_play_ir)
+        imported = self.settings.value("play_irs", []) or []
+        if isinstance(imported, str):
+            imported = [imported]
+        for path in imported:
+            if Path(path).is_file() and self.play_ir.findData(path) < 0:
+                self.play_ir.addItem(Path(path).name, path)
         saved_ir = self.settings.value("play_ir", "")
         if saved_ir and Path(saved_ir).is_file():
             index = self.play_ir.findData(saved_ir)
@@ -577,10 +597,12 @@ class PlayActions:
         )
         self.play_status.setWordWrap(True)
         layout.addWidget(self.play_status)
+        layout.addLayout(assets, 1)
         self.play_worker = self.play_loader = None
         self._play_restart = self._pending_play_load = False
         self.play_buffer.currentIndexChanged.connect(self._play_buffer_changed)
         self._play_ready = False
+        self.update_asset_remove_buttons()
 
     def _play_gain(self, name, minimum, maximum, default, layout, column=None):
         if column is None:
@@ -607,9 +629,94 @@ class PlayActions:
         field.valueChanged.connect(self.update_play_settings)
         return field
 
+    def _selected_asset_paths(self, view):
+        return {
+            str(item.data(Qt.ItemDataRole.UserRole))
+            for item in view.selectedItems()
+            if item.data(Qt.ItemDataRole.UserRole)
+        }
+
+    def update_asset_remove_buttons(self, *_):
+        if not hasattr(self, "play_ir_list"):
+            return
+        models = self._selected_asset_paths(self.play_model_list)
+        irs = self._selected_asset_paths(self.play_ir_list)
+        custom = bool(irs) and all(
+            not Path(path).resolve().is_relative_to(BUNDLED.resolve()) for path in irs
+        )
+        self.play_model_remove.setEnabled(bool(models) and self.play_model.isEnabled())
+        self.play_ir_remove.setEnabled(custom and self.play_ir.isEnabled())
+        self.play_model_remove.setToolTip(
+            "Remove selected entries from this list; keep files on disk"
+        )
+        self.play_ir_remove.setToolTip(
+            "Remove selected custom IRs from this list; bundled IRs are protected"
+        )
+
+    def remove_play_models(self):
+        if getattr(self, "play_loader", None):
+            return
+        removed = self._selected_asset_paths(self.play_model_list)
+        if not removed:
+            return
+        hidden = self.settings.value("play_hidden_models", []) or []
+        recent = self.settings.value("play_models", []) or []
+        if isinstance(hidden, str):
+            hidden = [hidden]
+        if isinstance(recent, str):
+            recent = [recent]
+        self.settings.setValue("play_hidden_models", sorted(set(hidden) | removed))
+        self.settings.setValue(
+            "play_models", [p for p in recent if str(Path(p).resolve()) not in removed]
+        )
+        if self.play_model.currentData() in removed and getattr(
+            self, "play_worker", None
+        ):
+            self.stop_playback()
+        self.refresh_play_models()
+        self.play_model_list.sync()
+        self.update_asset_remove_buttons()
+
+    def remove_play_irs(self):
+        if getattr(self, "ir_loader", None):
+            return
+        removed = self._selected_asset_paths(self.play_ir_list)
+        if not removed or any(
+            Path(path).resolve().is_relative_to(BUNDLED.resolve()) for path in removed
+        ):
+            return
+        current = self.play_ir.currentData()
+        self.play_ir.blockSignals(True)
+        for index in range(self.play_ir.count() - 1, -1, -1):
+            if self.play_ir.itemData(index) in removed:
+                self.play_ir.removeItem(index)
+        self.play_ir.setCurrentIndex(
+            0 if current in removed else max(0, self.play_ir.findData(current))
+        )
+        self.play_ir.blockSignals(False)
+        self.settings.setValue(
+            "play_irs",
+            [
+                self.play_ir.itemData(i)
+                for i in range(self.play_ir.count())
+                if self.play_ir.itemData(i)
+                and not Path(self.play_ir.itemData(i))
+                .resolve()
+                .is_relative_to(BUNDLED.resolve())
+            ],
+        )
+        if current in removed:
+            self.load_play_ir()
+        self.play_ir_list.sync()
+        self.update_asset_remove_buttons()
+
     def open_play_ir(self):
         path, _ = self.choose_open_file("Load impulse response", "IR WAV (*.wav)")
         if path:
+            imported = self.settings.value("play_irs", []) or []
+            if isinstance(imported, str):
+                imported = [imported]
+            self.settings.setValue("play_irs", list(dict.fromkeys([*imported, path])))
             index = self.play_ir.findData(path)
             if index < 0:
                 self.play_ir.addItem(Path(path).name, path)
@@ -664,6 +771,13 @@ class PlayActions:
             "Load model", "NAM / PNAM models (*.nam *.pnam)"
         )
         if path:
+            hidden = self.settings.value("play_hidden_models", []) or []
+            if isinstance(hidden, str):
+                hidden = [hidden]
+            self.settings.setValue(
+                "play_hidden_models",
+                [p for p in hidden if Path(p).resolve() != Path(path).resolve()],
+            )
             recent = self.settings.value("play_models", []) or []
             if isinstance(recent, str):
                 recent = [recent]
@@ -698,7 +812,13 @@ class PlayActions:
                     names[str(Path(exported).resolve())] = (
                         f"{entry['name']} · {time.strftime('%d/%m %H:%M', time.localtime(entry['created_at']))} · {Path(exported).stem}"
                     )
-        paths = sorted({str(Path(p).resolve()) for p in paths if Path(p).is_file()})
+        hidden = self.settings.value("play_hidden_models", []) or []
+        if isinstance(hidden, str):
+            hidden = [hidden]
+        hidden = {str(Path(p).resolve()) for p in hidden}
+        paths = sorted(
+            {str(Path(p).resolve()) for p in paths if Path(p).is_file()} - hidden
+        )
         self.play_model.blockSignals(True)
         self.play_model.clear()
         self.play_model.addItem("Choose a model…", None)
@@ -722,6 +842,7 @@ class PlayActions:
         ):
             self.load_play_model()
         self._refresh_play_calibration()
+        self.update_asset_remove_buttons()
         if not self.play_worker:
             self.play_buffer.blockSignals(True)
             previous_buffer = getattr(self, "_playback_blocksize", 128)
@@ -1058,3 +1179,4 @@ class PlayActions:
         if self.play_worker:
             self._play_restart = True
             self.stop_playback(reconfigure=True)
+

@@ -443,6 +443,7 @@ class CaptureProject(_BaseModel):
     created_with_version: _Optional[str] = None
     output_gain: _Optional[dict[str, _Any]] = None
     output_gain_state: dict[str, _Any] = _Field(default_factory=dict)
+    control_name_history: list[dict[str, str]] = _Field(default_factory=list)
 
     def knob_specs(self) -> tuple[ControlSpec, ...]:
         return tuple(knob.to_knob_spec() for knob in self.knobs)
@@ -784,3 +785,4 @@ def mark_captured(
     entry.qa = qa
     entry.stream_config = stream_config
     entry.captured_at = _datetime.now(_timezone.utc).isoformat(timespec="seconds")
+

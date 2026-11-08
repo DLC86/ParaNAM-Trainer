@@ -59,6 +59,71 @@ def test_legacy_control_dicts_unchanged():
     assert "planning_mode" not in SwitchSpec("Mode", ("Off", "On")).to_dict()
 
 
+def test_clean_volume_defaults_step_to_one_but_keeps_it_editable(qapp):
+    from paranam.widgets import ControlDialog
+
+    dialog = ControlDialog(control=KnobSpec("Volume", 0, 10, step=0.5))
+    dialog.clean_volume.setChecked(True)
+    assert dialog.step.value() == 1.0
+    assert dialog.step.isEnabled()
+    dialog.step.setValue(0.25)
+    assert dialog.step.value() == 0.25
+
+    existing = ControlDialog(
+        control=KnobSpec("Volume", 0, 10, step=0.25, clean_volume=True)
+    )
+    assert existing.step.value() == 0.25
+    assert not existing.avoid_zero.isEnabled()
+    assert not existing.avoid_max.isEnabled()
+
+
+def test_renaming_and_reordering_controls_preserves_plan(workspace):
+    from paranam.workspace import read_json
+    from nam.capture.export import (
+        build_concat_model_config,
+        build_hyper_model_config,
+        build_hyper_a2_model_config,
+    )
+    from nam.capture.project import atomic_write_json
+
+    workspace.draft_controls = [
+        KnobSpec("Gain", 0, 10).to_dict(),
+        KnobSpec("Tone", 0, 10).to_dict(),
+    ]
+    workspace.generate_plan()
+
+    for filename, builder in (
+        ("model_concat.json", build_concat_model_config),
+        ("model_hyper.json", build_hyper_model_config),
+        ("model_hyper_a2.json", build_hyper_a2_model_config),
+    ):
+        atomic_write_json(workspace.directory / filename, builder(workspace.project))
+
+    paths = [entry.y_path for entry in workspace.project.entries]
+    workspace.rename_control("Gain", "Drive")
+    assert not workspace.plan_changed()
+    assert [entry.y_path for entry in workspace.project.entries] == paths
+    assert all("Drive" in entry.params for entry in workspace.project.entries)
+    assert workspace.project.control_name_history[-1] == {
+        "from": "Gain",
+        "to": "Drive",
+    }
+    for filename in (
+        "model_concat.json",
+        "model_hyper.json",
+        "model_hyper_a2.json",
+    ):
+        config = read_json(workspace.directory / filename)
+        assert "Drive" in [p["name"] for p in config["net"]["config"]["params"]]
+
+    workspace.move_control(0, 1)
+    assert not workspace.plan_changed()
+    assert [c.name for c in workspace.project.control_specs()] == ["Tone", "Drive"]
+    assert all(
+        list(entry.params) == ["Tone", "Drive"] for entry in workspace.project.entries
+    )
+
+
 def volume_project():
     return CaptureProject(
         name="Test",
@@ -72,10 +137,14 @@ def volume_project():
     )
 
 
-def record_pending(project, root, *, colored=False, context_dependent=False):
+def record_pending(
+    project, root, *, colored=False, context_dependent=False, paths=None
+):
     signal = np.random.default_rng(5).normal(0, 0.05, 4096)
     for entry in project.entries:
-        if entry.status == "captured":
+        if entry.status == "captured" or (
+            paths is not None and entry.y_path not in paths
+        ):
             continue
         value = entry.params["Volume"] / 10
         gain = value**2
@@ -91,24 +160,30 @@ def record_pending(project, root, *, colored=False, context_dependent=False):
         entry.delay = 0
 
 
-def test_volume_calibration_adapts_and_survives_reload(tmp_path):
+def test_volume_calibration_uses_knob_grid_and_survives_reload(tmp_path):
     project = volume_project()
     initialize_calibration(project)
-    assert len(project.entries) == 11
-    for _ in range(8):
-        record_pending(project, tmp_path)
-        project = CaptureProject.model_validate_json(project.model_dump_json())
-        if not advance_calibration(project, tmp_path):
-            break
+    assert len(project.entries) == 103  # 101 knob steps + two alternate-context checks
+    assert (
+        sum(
+            e.user_metadata["output_gain"]["phase"] == "screen" for e in project.entries
+        )
+        == 4
+    )
+    record_pending(project, tmp_path)
+    assert advance_calibration(project, tmp_path) == 0
+    project = CaptureProject.model_validate_json(project.model_dump_json())
+    advance_calibration(project, tmp_path)
     assert project.output_gain_state["status"] == "ready"
-    assert 9 < project.output_gain_state["measurements"] <= 65
+    assert project.output_gain_state["measurements"] == 101
+    assert project.output_gain_state["curve_points"] <= 65
     assert all(e.split == "gain" for e in project.entries)
     from scipy.interpolate import PchipInterpolator
 
     points = np.array(project.output_gain["points"])
     interpolation = PchipInterpolator(points[:, 0], points[:, 1])
     x = np.arange(0.1, 10.01, 0.1)
-    assert np.max(np.abs(20 * np.log10(interpolation(x) / (x / 10) ** 2))) < 0.25
+    assert np.max(np.abs(20 * np.log10(interpolation(x) / (x / 10) ** 2))) < 1.0
     original = dict(architecture="HyperA2", config={"test": 1}, weights=[1, 2])
     wrapped = OutputGainExportHook(project.output_gain).apply(original)
     assert wrapped["weights"] is original["weights"]
@@ -116,13 +191,19 @@ def test_volume_calibration_adapts_and_survives_reload(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["colored", "context_dependent"])
-def test_non_clean_volume_is_rejected_without_deleting_captures(tmp_path, failure):
+def test_volume_screen_warning_is_advisory_and_preserves_captures(tmp_path, failure):
     project = volume_project()
     initialize_calibration(project)
+    screen_paths = set(project.output_gain_state["screen_paths"])
+    record_pending(project, tmp_path, paths=screen_paths, **{failure: True})
+    advance_calibration(project, tmp_path)
+    assert project.output_gain_state["screen_decision"] == "warning"
+    assert any(e.status == "pending" for e in project.entries)
     record_pending(project, tmp_path, **{failure: True})
-    with pytest.raises(ValueError):
-        advance_calibration(project, tmp_path)
-    assert project.output_gain is None
+    project.output_gain_state["screen_decision"] = "accepted"
+    advance_calibration(project, tmp_path)
+    assert project.output_gain_state["status"] == "ready"
+    assert project.output_gain is not None
     assert all((tmp_path / e.y_path).is_file() for e in project.entries)
 
 
@@ -267,3 +348,4 @@ def test_parametric_export_preserves_output_curve_after_output_scaling(tmp_path)
     assert saved["config"]["base_architecture"] == "HyperA2"
     assert saved["config"]["output_gain"] == curve
     assert model.export_model_dict_post_hooks[-1] is hook
+

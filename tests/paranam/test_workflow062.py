@@ -1,5 +1,6 @@
 import math
 from itertools import product
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QLocale, QRect, Qt
@@ -87,6 +88,44 @@ def test_asset_list_keeps_selection_and_loads_once(qapp):
     assert visible.currentRow() == 1
     selector.setEnabled(False)
     assert not visible.isEnabled()
+
+
+def test_compare_asset_remove_protects_bundled_irs_and_keeps_files(
+    window, qapp, tmp_path
+):
+    model = tmp_path / "custom.nam"
+    model.write_text("model", encoding="utf-8")
+    window.settings.setValue("play_models", [str(model)])
+    window.refresh_play_models()
+    qapp.processEvents()
+    model_row = next(
+        i
+        for i in range(window.play_model_list.count())
+        if window.play_model_list.item(i).data(Qt.ItemDataRole.UserRole)
+        == str(model.resolve())
+    )
+    window.play_model_list.item(model_row).setSelected(True)
+    window.update_asset_remove_buttons()
+    assert window.play_model_remove.isEnabled()
+    window.remove_play_models()
+    qapp.processEvents()
+    assert model.is_file()
+    assert str(model.resolve()) not in window.settings.value("play_models", [])
+    assert str(model.resolve()) in window.settings.value("play_hidden_models", [])
+
+    from paranam.ir import BUNDLED
+
+    bundled_row = next(
+        i
+        for i in range(window.play_ir_list.count())
+        if window.play_ir_list.item(i).data(Qt.ItemDataRole.UserRole)
+        and Path(window.play_ir_list.item(i).data(Qt.ItemDataRole.UserRole))
+        .resolve()
+        .is_relative_to(BUNDLED.resolve())
+    )
+    window.play_ir_list.item(bundled_row).setSelected(True)
+    window.update_asset_remove_buttons()
+    assert not window.play_ir_remove.isEnabled()
 
 
 def test_compare_flow_packs_with_constant_gap(qapp):
@@ -323,3 +362,4 @@ def test_new_queued_instances_use_simplified_equivalent_clocks(workspace, tmp_pa
         interval="step", step_size=62, gamma=0.97**0.5
     )
     assert workspace.training_options()["rate_preset"] == "a2_slow"
+

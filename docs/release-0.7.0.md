@@ -12,18 +12,21 @@
   Avoid zero. Clean output volume requires its maximum as the reference and
   therefore cannot use Avoid max or Gain/Drive.
 - Clean output volume trains the neural effect at maximum volume and measures
-  a separate attenuation curve with short validation-signal recordings. Nine
-  initial positions are checked at intermediate points; additional measurements
-  are requested where needed, up to 65 curve positions. A second control context
-  checks that attenuation is independent of the other controls. Waveform/taper
-  failures preserve recordings and block training until corrected or replanned.
-  Calibration is the first phase of the saved plan, including any adaptive extra
-  points. Neural captures are blocked until it passes, including manual selection.
+  a separate attenuation curve with short validation-signal recordings at the
+  selected knob step (default 1.000 when Clean volume is enabled). Four initial
+  clips screen two volume positions in two control contexts. A tolerant warning
+  can be accepted to fit a monotone curve, or only those four clips can be
+  recaptured; recordings are preserved. Remaining points use the same step grid,
+  with a monotone least-squares fit. The user can change the default step.
   Maximum-volume references are recorded first. A silent minimum is measured as
   a noise-floor clip, without requiring timing alignment or a loopback. Audible
   captures retain timing checks; an explicitly configured loopback must work.
-  The 0.25 dB target is checked at measured positions, not a guarantee between
-  arbitrary physical pot positions. At least one other neural control is required.
+  At least one other neural control is required.
+- Renaming a control updates project parameter references while retaining its
+  audio files and plan. Controls can be reordered in the Plan page. Capture
+  displays the Clean volume split as “Volume”.
+- Compare model and impulse response lists extend to the bottom of the page and
+  allow selected entries to be removed. Bundled impulse responses are protected.
 - Clean volume is stored in a ParametricOutputGain wrapper and applied after
   the neural model using a monotone PCHIP curve and 5 ms smoothing. Compare,
   NAM Parametric Plugin 0.4.5 preview and NeuralAudio 0.1.4 preview support this
@@ -46,3 +49,4 @@
 
 Released as a preview on main; Latest remains unchanged. Existing projects and
 recordings are not silently regenerated when new planning features are selected.
+

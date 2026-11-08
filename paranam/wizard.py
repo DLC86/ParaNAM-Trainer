@@ -1,3 +1,7 @@
+Warning: truncated output (original token count: 30604)
+Total output lines: 2820
+
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 """Seven-screen desktop workflow; audio and training never block the UI thread."""
 
 from __future__ import annotations
@@ -330,7 +334,7 @@ class WizardWindow(
                             560 if field_type in (QComboBox, QLineEdit) else 260,
                         )
                     )
-            if index not in (0, 2, 4):
+            if index not in (0, 2, 4, 5):
                 layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -577,6 +581,10 @@ class WizardWindow(
         row.addWidget(button("+ Add control", self.add_control, True))
         row.addWidget(button("Edit selected", self.edit_control))
         row.addWidget(button("Remove", self.remove_control))
+        self.control_up_button = button("Move up", lambda: self.move_control(-1))
+        self.control_down_button = button("Move down", lambda: self.move_control(1))
+        row.addWidget(self.control_up_button)
+        row.addWidget(self.control_down_button)
         row.addStretch()
         box.addLayout(row)
         layout.addWidget(self.control_card)
@@ -695,6 +703,11 @@ class WizardWindow(
         row.addWidget(self.rig_ready, 1)
         row.addWidget(self.record_button)
         row.addWidget(self.cancel_button)
+        self.volume_check_button = button(
+            "Review volume check", self.review_volume_check
+        )
+        self.volume_check_button.hide()
+        row.addWidget(self.volume_check_button)
         layout.addLayout(row)
         self.capture_progress = QProgressBar()
         self.capture_progress.setRange(0, 100)
@@ -908,976 +921,7 @@ class WizardWindow(
         benchmark.toggled.connect(self.save_preferences)
         deterministic = QCheckBox("Deterministic training")
         deterministic.setToolTip(
-            "Use deterministic PyTorch algorithms and a fixed per-epoch batch order. Forces benchmark off. Unsupported operations raise an error. Results are reproducible within the same supported software/hardware environment; training can be slower."
-        )
-        self.advanced_fields["deterministic_training"] = deterministic
-        advanced_form.addRow(deterministic)
-        deterministic.toggled.connect(self._deterministic_changed)
-        weight_mode = QComboBox()
-        weight_mode.addItem("Full", "full")
-        weight_mode.addItem("Low rank", "low_rank")
-        weight_mode.setToolTip(
-            "How knob-dependent weight deltas are generated. Independent of Full/Lite audio size."
-        )
-        self.advanced_fields["hypernetwork_mode"] = weight_mode
-        advanced_form.addRow("Hypernetwork weight mode", weight_mode)
-        rank = QSpinBox()
-        rank.setRange(1, 8)
-        rank.setValue(2)
-        rank.setToolTip(
-            "Rank of generated matrix deltas, from 1 to 8. Effective rank is also limited by each matrix's dimensions."
-        )
-        self.advanced_fields["hypernetwork_rank"] = rank
-        advanced_form.addRow("Rank (low-rank mode)", rank)
-        dilated = QCheckBox("Condition dilated convolution kernels on knobs")
-        dilated.setToolTip(
-            "When disabled, dilated convolution kernel weights remain trainable and shared across settings. Their biases may still be conditioned."
-        )
-        self.advanced_fields["condition_dilated_convolutions"] = dilated
-        advanced_form.addRow(dilated)
-        reduction = QComboBox()
-        reduction.addItem("Sum", "sum")
-        reduction.addItem("Mean", "mean")
-        reduction.setToolTip(
-            "Changes how Full/Lite training losses are combined before backpropagation, not the definition of validation ESR."
-        )
-        self.advanced_fields["branch_loss_reduction"] = reduction
-        advanced_form.addRow("Full/Lite loss reduction", reduction)
-        for field, signal in (
-            (weight_mode, weight_mode.currentIndexChanged),
-            (rank, rank.valueChanged),
-            (dilated, dilated.toggled),
-            (reduction, reduction.currentIndexChanged),
-        ):
-            signal.connect(self.save_preferences)
-            signal.connect(lambda *_: self.refresh_hypernetwork_controls())
-        self.advanced_fields["lr_decay"].setToolTip(
-            "Exponential learning-rate multiplier after each epoch."
-        )
-        self.advanced_fields["ny"].setToolTip(
-            "Number of training output samples per window. Validation keeps its independent window."
-        )
-        box.addWidget(self.advanced_panel)
-        self.advanced_panel.hide()
-        self.advanced_toggle.toggled.connect(self.advanced_panel.setVisible)
-        self.advanced_toggle.toggled.connect(
-            lambda expanded: self.advanced_toggle.setArrowType(
-                Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
-            )
-        )
-        box.addWidget(
-            label(
-                "Full and Lite are trained together. Pause stops at the next batch boundary; resume restarts the interrupted epoch from its last complete checkpoint.",
-                "muted",
-            )
-        )
-        layout.addWidget(self.training_settings)
-        if sys.platform != "darwin":
-            self.gpu_setup_button = button("Add NVIDIA GPU support", self.configure_gpu)
-            box.addWidget(self.gpu_setup_button)
-            self.refresh_gpu_button()
-        layout.addWidget(self.metadata_card)
-        self.train_button = button("Train · add to queue", self.start_training, True)
-        layout.addWidget(self.train_button)
-        self.epochs.valueChanged.connect(self.save_preferences)
-        self.batch_size.valueChanged.connect(self.save_preferences)
-        self.accelerator.currentIndexChanged.connect(self.save_preferences)
-
-    def _queue(self, layout):
-        layout.setSpacing(8)
-        layout.addWidget(label("Training queue", "title"))
-        layout.addWidget(
-            label(
-                "Each row is an independent training instance. All rows can be reordered; the waiting jobs follow that order; removing a row keeps its models and checkpoints on disk.",
-                "muted",
-            )
-        )
-        self.queue_run_row = QHBoxLayout()
-        layout.addLayout(self.queue_run_row)
-        self.queue_table = QTableWidget(0, 8)
-        self.queue_table.setHorizontalHeaderLabels(
-            [
-                "Order",
-                "Name",
-                "Project",
-                "Created",
-                "Model",
-                "Status",
-                "Epoch",
-                "Validation Full ESR",
-            ]
-        )
-        self.queue_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.queue_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
-        )
-        self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.queue_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
-        )
-        self.queue_table.horizontalHeader().setStretchLastSection(False)
-        self.queue_table.setMinimumHeight(100)
-        self.queue_table.setMaximumHeight(16777215)
-        for column, width in enumerate((56, 140, 120, 110, 90, 100, 65, 85)):
-            self.queue_table.setColumnWidth(column, width)
-        self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
-        layout.addWidget(self.queue_table, 1)
-        actions = QHBoxLayout()
-        self.resume_button = button("Resume", self.resume_training)
-        self.retrain_button = button("Retrain", self.retrain_training)
-        self.job_up = button("Move up", lambda: self.move_job(-1))
-        self.job_down = button("Move down", lambda: self.move_job(1))
-        self.remove_job_button = button("Remove from queue", self.remove_job)
-        self.capture_round_button = button(
-            "Capture next active-learning round", self.open_capture_round
-        )
-        for widget in (self.job_up, self.job_down, self.remove_job_button):
-            actions.addWidget(widget)
-        layout.addLayout(actions)
-        secondary_actions = QHBoxLayout()
-
-        secondary_actions.addWidget(self.capture_round_button)
-        layout.addLayout(secondary_actions)
-        self.resume_options_widget = QWidget()
-        resume_options = QHBoxLayout(self.resume_options_widget)
-        resume_options.setContentsMargins(0, 0, 0, 0)
-        self.resume_batch_size = QSpinBox()
-        self.resume_batch_size.setRange(1, 128)
-        self.resume_device = QComboBox()
-        self.resume_device.addItem("Automatic", "auto")
-        self.resume_device.addItem("CPU", "cpu")
-        resume_options.addWidget(label("Resume batch size"))
-        resume_options.addWidget(self.resume_batch_size)
-        resume_options.addWidget(label("Device"))
-        resume_options.addWidget(self.resume_device)
-        resume_options.addStretch()
-        self.resume_options_widget.hide()
-        self.training_status = label("Add training from a project to begin.", "muted")
-        layout.addWidget(self.training_status)
-        grid = QGridLayout()
-        self.metrics = {}
-        for index, (name, text) in enumerate(
-            (
-                ("epoch", "EPOCH"),
-                ("esr", "BEST VALIDATION ESR"),
-                ("train_esr", "BEST TRAIN ESR"),
-                ("elapsed", "ELAPSED"),
-                ("eta", "REMAINING"),
-            )
-        ):
-            frame, metric_layout = card(text)
-            metric_layout.setContentsMargins(12, 6, 12, 6)
-            metric_layout.setSpacing(4)
-            metric = label("—", "metric")
-            metric.setStyleSheet("font-size: 22px;")
-            metric_layout.addWidget(metric)
-            self.metrics[name] = metric
-            grid.addWidget(frame, 0, index)
-        layout.addLayout(grid)
-        self.train_progress = QProgressBar()
-        self.train_progress.setRange(0, 1000)
-        layout.addWidget(self.train_progress)
-        row = self.queue_run_row
-        self.queue_start_button = button("Start queue", self.run_queue, True)
-        self.pause_button = button("Pause selected training", self.pause_training)
-        self.stop_button = button("Cancel selected training", self.stop_training)
-        self.models_button = button("Open model folder", self.open_models)
-        row.addWidget(self.queue_start_button)
-        row.addStretch()
-        row.addWidget(self.pause_button)
-        row.addWidget(self.stop_button)
-        row.addWidget(self.resume_button)
-        row.addWidget(self.retrain_button)
-        self.export_best_button = button("Export best model", self.export_best_model)
-        row.addWidget(self.export_best_button)
-        actions.addWidget(self.models_button)
-        self.export_status = label("", "muted")
-        layout.addWidget(self.export_status)
-        self.details = QPlainTextEdit()
-        self.details.setReadOnly(True)
-        self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.details.setMinimumHeight(180)
-        from .esr_chart import ESRCharts
-
-        self.esr_chart = ESRCharts()
-        for chart in self.esr_chart.charts.values():
-            chart.setMinimumHeight(160)
-            chart.setMaximumHeight(16777215)
-        self.training_tabs = self.esr_chart
-        self.training_tabs.addTab(self.details, "Training log")
-        layout.addWidget(self.training_tabs, 1)
-
-    def _deterministic_changed(self, enabled):
-        benchmark = self.advanced_fields["cudnn_benchmark"]
-        if enabled:
-            benchmark.blockSignals(True)
-            benchmark.setChecked(False)
-            benchmark.blockSignals(False)
-        benchmark.setEnabled(not enabled)
-        self.save_preferences()
-
-    def load_advanced_options(self, kind=None):
-        from .cadences import editable_cadences
-
-        options = editable_cadences(
-            self.workspace, self.workspace.training_options(kind)
-        )
-        for key, field in self.advanced_fields.items():
-            field.blockSignals(True)
-            if isinstance(field, QComboBox):
-                field.setCurrentIndex(max(0, field.findData(options[key])))
-            elif isinstance(field, QCheckBox):
-                field.setChecked(options[key])
-            else:
-                field.setValue(options[key])
-            field.blockSignals(False)
-        self.advanced_fields["mrstft_weight"].setEnabled(options["fit_mrstft"])
-        self.advanced_fields["gradient_clip_val"].setEnabled(
-            options["gradient_clipping"]
-        )
-        parametric = (
-            kind or self.workspace.preferences["capture_type"]
-        ) == "parametric"
-        self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
-        self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
-        self.advanced_fields["cudnn_benchmark"].setEnabled(
-            not options["deterministic_training"]
-        )
-        if options["deterministic_training"]:
-            field = self.advanced_fields["cudnn_benchmark"]
-            field.blockSignals(True)
-            field.setChecked(False)
-            field.blockSignals(False)
-        self.refresh_hypernetwork_controls(kind)
-        self.refresh_rate_preview(kind)
-
-    def apply_rate_preset(self, *_):
-        self.save_preferences()
-
-    def apply_hypernetwork_rate_preset(self, *_):
-        self.save_preferences()
-
-    def refresh_rate_preview(self, kind=None):
-        if not self.workspace:
-            return
-        parametric = (
-            kind or self.workspace.preferences["capture_type"]
-        ) == "parametric"
-        self.advanced_fields["rate_preset"].setEnabled(parametric)
-        hyper_preset = self.advanced_fields["hypernetwork_rate_preset"].currentData()
-        self.advanced_fields["hypernetwork_rate_preset"].setEnabled(parametric)
-        self.advanced_fields["hypernetwork_lr_decay"].setEnabled(parametric)
-        matched = parametric and self.advanced_fields["rate_preset"].currentData() in (
-            "a2_updates",
-            "a2_controls",
-            "a2_slow",
-            "a2_dataset",
-            "a2_dataset_sqrt",
-        )
-        self.advanced_fields["lr_decay"].setEnabled(True)
-        self.advanced_fields["lr_decay"].setToolTip(
-            "Editable learning-rate multiplier applied at each reduction of the selected cadence."
-            if matched
-            else "Exponential learning-rate multiplier after each epoch."
-        )
-        if parametric and hyper_preset != "follow":
-            self.rate_preview.setVisible(True)
-            try:
-                from .recipes import workspace_group_schedules
-
-                from .cadences import editable_cadences
-
-                schedules = workspace_group_schedules(
-                    self.workspace,
-                    editable_cadences(
-                        self.workspace, self.workspace.training_options()
-                    ),
-                )
-                descriptions = []
-                for name, schedule in schedules.items():
-                    unit = (
-                        "epochs"
-                        if schedule["interval"] == "epoch"
-                        else "optimizer updates on average"
-                    )
-                    field_name = (
-                        "rate_preset" if name == "audio" else "hypernetwork_rate_preset"
-                    )
-                    preset_name = self.advanced_fields[field_name].currentText()
-                    accounting = (
-                        f" Dataset: {schedule['steps_per_epoch']} complete updates/epoch; "
-                        f"A2 reference: {schedule['reference_steps']}; ratio {schedule['dataset_reference_ratio']:.8g}."
-                        if "dataset_reference_ratio" in schedule
-                        else ""
-                    )
-                    descriptions.append(
-                        f"{name.title()}: {preset_name}; multiply LR by {schedule['gamma']:g} every {schedule['step_size']:.8g} {unit}. Initial LR {schedule['initial_learning_rate']:.3e}; final LR {schedule['final_learning_rate']:.3e} after {self.workspace.preferences['epochs']} epochs.{accounting}"
-                    )
-                self.rate_preview.setText(
-                    "Independent LR schedules.\n" + "\n".join(descriptions)
-                )
-            except (ValueError, OSError, RuntimeError) as error:
-                self.rate_preview.setText(f"LR cadence preview unavailable: {error}")
-            return
-        self.rate_preview.setVisible(matched)
-        if not matched:
-            return
-        try:
-            from .recipes import workspace_update_schedule
-
-            schedule = workspace_update_schedule(self.workspace)
-            formula = {
-                "a2_updates": "original A2 update cadence",
-                "a2_controls": "knobs × 2^switches",
-                "a2_slow": "(knobs × 2^switches) / √2",
-                "a2_dataset": "dataset updates / reference updates",
-                "a2_dataset_sqrt": "√(dataset updates / reference updates)",
-            }[self.advanced_fields["rate_preset"].currentData()]
-            self.rate_preview.setText(
-                f"A2 reference: {schedule['reference_steps']} updates/epoch (standard input, batch 16, NY 8192). "
-                f"This plan: {schedule['steps_per_epoch']} updates/epoch, {schedule['training_seconds']:.1f} s of training audio.\n"
-                f"Cadence multiplier: {schedule['cadence_multiplier']:g}× "
-                f"({formula}). "
-                f"Multiply LR by {schedule['reference_gamma']:g} every {schedule['decay_steps']:.8g} optimizer updates on average; average equivalent per epoch: {schedule['gamma_epoch']:.6g}. "
-                f"After {self.workspace.preferences['epochs']} epochs: LR {schedule['final_learning_rate']:.3e}, "
-                f"hypernetwork LR {schedule['final_hypernetwork_learning_rate']:.3e} "
-                f"({schedule['reductions']} LR reductions; {schedule['equivalent_a2_epochs']:.1f} reference A2 epochs of updates). "
-                "Initial rates remain editable. Matching cadence does not select the training duration or guarantee convergence."
-            )
-        except (ValueError, OSError, RuntimeError) as error:
-            self.rate_preview.setText(f"A2 cadence preview unavailable: {error}")
-
-    def refresh_hypernetwork_controls(self, kind=None):
-        if not self.workspace:
-            return
-        parametric = (
-            kind or self.workspace.preferences["capture_type"]
-        ) == "parametric"
-        for key in (
-            "hypernetwork_recipe",
-            "hypernetwork_learning_rate",
-            "hypernetwork_rate_preset",
-            "hypernetwork_lr_decay",
-            "hypernetwork_mode",
-            "hypernetwork_rank",
-            "condition_dilated_convolutions",
-            "branch_loss_reduction",
-        ):
-            if key in ("hypernetwork_lr_decay", "hypernetwork_rate_preset"):
-                continue
-            self.advanced_panel.layout().setRowVisible(
-                self.advanced_fields[key], parametric
-            )
-        self.advanced_panel.layout().setRowVisible(
-            self.hypernetwork_rate_row, parametric
-        )
-        for key in (
-            "hypernetwork_mode",
-            "condition_dilated_convolutions",
-            "branch_loss_reduction",
-        ):
-            self.advanced_fields[key].setEnabled(parametric)
-        self.preset_description.setVisible(parametric)
-        low_rank = self.advanced_fields["hypernetwork_mode"].currentData() == "low_rank"
-        self.advanced_fields["hypernetwork_rank"].setEnabled(parametric and low_rank)
-        mode = (
-            f"low rank (rank {self.advanced_fields['hypernetwork_rank'].value()})"
-            if low_rank
-            else "full"
-        )
-        kernels = (
-            "conditioned"
-            if self.advanced_fields["condition_dilated_convolutions"].isChecked()
-            else "shared"
-        )
-        reduction = self.advanced_fields["branch_loss_reduction"].currentData()
-        self.preset_description.setText(
-            f"Weight deltas: {mode}; dilated kernels: {kernels}; Full/Lite loss: {reduction}."
-            if parametric
-            else "Static A2 training; hypernetwork settings are not used."
-        )
-
-    def apply_training_preset(self, *_):
-        if (
-            not self.workspace
-            or self.workspace.preferences["capture_type"] != "parametric"
-        ):
-            return
-        from .recipes import training_preset, preset_batch_size
-
-        name = self.advanced_fields["hypernetwork_recipe"].currentData()
-        self.workspace.preferences["advanced_parametric"] = training_preset(name)
-        self.workspace.preferences["batch_size"] = preset_batch_size(name)
-        self.batch_size.blockSignals(True)
-        self.batch_size.setValue(preset_batch_size(name))
-        self.batch_size.blockSignals(False)
-        self.load_advanced_options("parametric")
-        self.save_preferences()
-
-    def busy(self):
-        return (self.worker is not None and self.worker.isRunning()) or getattr(
-            self, "play_worker", None
-        ) is not None
-
-    def notify_error(self, error):
-        QMessageBox.warning(self, "ParaNAM Trainer", str(error))
-
-    def navigate(self, index):
-        if index in (1, 2, 3) and not self.workspace:
-            self.notify_error("Create or open a project first.")
-            return
-        if index in (2, 3) and not self.busy():
-            try:
-                if self.workspace.plan_changed() and not self.apply_plan():
-                    return
-            except ValueError as error:
-                self.notify_error(error)
-                return
-        if index == 6 and self.pages.currentIndex() != 6:
-            self._settings_return_page = self.pages.currentIndex()
-        if index != 6:
-            self._stop_settings_audio()
-        self.pages.setCurrentIndex(index)
-        if index == 6:
-            self._sync_settings_audio(retry=True)
-        self.project_label.setVisible(index != 6)
-        listening = getattr(self, "play_worker", None) is not None
-        self.play_transport_bar.setVisible(index != 5 and listening)
-        self.footer_note.setVisible(index != 5 and not listening)
-        if index == 3:
-            self.refresh_gpu_button()
-            self.refresh_rate_preview()
-        if index == 5:
-            self.refresh_play_models()
-        for i, step in enumerate(self.steps):
-            step.setChecked(i == index)
-        self.back_button.setEnabled(index > 0)
-        self.next_button.setVisible(index < 3)
-        self.next_button.setText("Train →" if index == 2 else "Next →")
-        self.update_enabled()
-
-    def back(self):
-        if self.pages.currentIndex() == 6:
-            self.navigate(getattr(self, "_settings_return_page", 0))
-            return
-        self.navigate(max(0, self.pages.currentIndex() - 1) if self.workspace else 0)
-
-    def next(self):
-        index = self.pages.currentIndex()
-        if index == 1 and not self.apply_plan():
-            return
-        if index == 2 and not self.workspace.training_ready():
-            self.notify_error("Complete every capture in the plan first.")
-            return
-        self.navigate(min(3, index + 1))
-
-    def _refresh_recent(self):
-        self.recent.clear()
-        paths = self.settings.value("recent", [])
-        if isinstance(paths, str):
-            paths = [paths]
-        for value in paths:
-            path = Path(value)
-            metadata = (
-                read_json(path / "capture_project.json", {}, tolerate_corrupt=True)
-                if path.exists()
-                else {}
-            )
-            if metadata:
-                try:
-                    self.queue_controller.store.register_legacy(Workspace(path))
-                except (OSError, ValueError):
-                    pass  # A missing/older project remains visible in Recent projects.
-            item = QListWidgetItem(f"{metadata.get('name') or path.name}\n{path}")
-            item.setData(Qt.ItemDataRole.UserRole, str(path))
-            self.recent.addItem(item)
-
-    def new_project(self):
-        if self.busy():
-            return
-        name, accepted = QInputDialog.getText(self, "New project", "Project name:")
-        if not accepted or not name.strip():
-            return
-        documents = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DocumentsLocation
-        )
-        parent = self.choose_directory("Choose where to save the project", documents)
-        if not parent:
-            return
-        safe_name = re.sub(r"[^\w .-]", "_", name).strip(" .") or "ParaNAM Project"
-        try:
-            directory = Path(parent) / safe_name
-            workspace = Workspace.create(directory, name.strip(), self.audio_settings())
-            self._attach(workspace, use_last_setup=True)
-            self.navigate(1)
-        except Exception as error:
-            self.notify_error(error)
-
-    def open_project_dialog(self):
-        path = self.choose_directory("Open ParaNAM or NAM capture project")
-        if path:
-            self.open_project(Path(path))
-
-    def open_project(self, directory):
-        if self.busy():
-            return
-        try:
-            self._attach(Workspace(directory), use_last_setup=True)
-            self.navigate(1)
-        except Exception as error:
-            self.notify_error(error)
-
-    def _attach(self, workspace, use_last_setup=False):
-        self.close_audio()
-        self.scene.stop_blink()
-        self.initialize_global_setup(workspace)
-        self.workspace = workspace
-        from .recovery import RecoveryRequired
-
-        try:
-            self.queue_controller.store.register_legacy(workspace)
-        except RecoveryRequired:
-            pass  # Opening a project must remain available for queue rebuilding.
-        self.project_label.setText(
-            f"{workspace.project.name or workspace.directory.name}  ·  Saved locally"
-        )
-        paths = self.settings.value("recent", [])
-        if isinstance(paths, str):
-            paths = [paths]
-        self.settings.setValue(
-            "recent",
-            [str(workspace.directory)]
-            + [p for p in paths if p != str(workspace.directory)][:11],
-        )
-        self._refresh_recent()
-        self._loading = True
-        try:
-            prefs = workspace.preferences
-            self.capture_kind.setCurrentIndex(
-                max(0, self.capture_kind.findData(prefs["capture_type"]))
-            )
-            self.metadata_editor.set_metadata(workspace.project.user_metadata)
-            for field, key in (
-                (self.n_train, "n_train"),
-                (self.n_validation, "n_validation"),
-                (self.seed, "seed"),
-                (self.rounds, "rounds"),
-                (self.additions, "additions"),
-                (self.epochs, "epochs"),
-            ):
-                field.setValue(prefs[key])
-            self.batch_size.setValue(workspace.training_batch_size())
-            self.load_advanced_options()
-            self.corners.setChecked(prefs["corners"])
-            self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
-            self.signal_mode.setCurrentIndex(
-                max(0, self.signal_mode.findData(prefs["input_mode"]))
-            )
-            self.custom_label.setText(
-                prefs.get("custom_input") or "No custom file selected"
-            )
-            self.accelerator.setCurrentIndex(
-                max(0, self.accelerator.findData(prefs["device"]))
-            )
-        finally:
-            self._loading = False
-        self.save_preferences()
-        self.remember_setup()
-        self.refresh_controls()
-        self.refresh_captures()
-        self._diagram()
-        self.refresh_training()
-        self.update_enabled()
-
-    def refresh_devices(self):
-        if self.busy():
-            return
-        self._audio_devices_dirty = False
-        self._settings_audio_error_key = None
-        self.remember_setup()
-        self.close_audio()
-        selected = self.device.currentData()
-        wanted = (self.last_setup() or {}).get("audio", {})
-        identity = (
-            (selected.host_api, selected.name)
-            if selected
-            else (wanted.get("host_api"), wanted.get("input_device"))
-        )
-        self._loading = True
-        try:
-            self.device.clear()
-            self._devices = [
-                d
-                for d in list_devices(refresh=True)
-                if d.max_input_channels > 0 and d.max_output_channels > 0
-            ]
-            for info in self._devices:
-                self.device.addItem(f"{info.name}  ·  {info.host_api}", info)
-            if identity[1]:
-                index = next(
-                    (
-                        i
-                        for i, info in enumerate(self._devices)
-                        if (info.host_api, info.name) == identity
-                    ),
-                    None,
-                )
-                if index is None:
-                    self.device.addItem(f"Unavailable: {identity[1]}", None)
-                    index = self.device.count() - 1
-                self.device.setCurrentIndex(index)
-        except Exception as error:
-            self.route_status.setText(str(error))
-        finally:
-            self._loading = False
-        self._device_changed()
-
-    def _reconnect_device(self):
-        from PySide6.QtWidgets import QApplication
-
-        if self.busy() or self.session or QApplication.activeModalWidget():
-            return
-        # Refresh only after a hardware notification or an explicit click.
-        # Reinitializing PortAudio on a timer repeatedly unloads ASIO drivers.
-        if not self._audio_devices_dirty:
-            if sys.platform == "win32" or self.device.currentData() is not None:
-                return
-        try:
-            self.refresh_devices()
-        except Exception:
-            pass  # A temporary driver error must not replace the saved interface.
-
-    def _device_changed(self, *_):
-        if self._loading:
-            return
-        self.close_audio()
-        info = self.device.currentData()
-        self._populate_audio_controls(info)
-        self.save_audio()
-
-    def _populate_audio_controls(self, info):
-        if info:
-            result = capabilities(info)
-            same_device = getattr(self, "_audio_device_key", None) == (
-                info.host_api,
-                info.name,
-            )
-            self._audio_device_key = (info.host_api, info.name)
-            remembered = self.remembered_audio_route(info)
-            previous_buffer = remembered.get(
-                "blocksize", self.buffer.currentData() if same_device else None
-            )
-            for key, combo, names, default in (
-                ("input_channel", self.input_channel, result.inputs, 1),
-                ("loopback_input_channel", self.loop_input, result.inputs, 2),
-                ("output_channel", self.output_channel, result.outputs, 1),
-                ("loopback_output_channel", self.loop_output, result.outputs, 2),
-                (
-                    "instrument_input_channel",
-                    self.instrument_input,
-                    result.inputs,
-                    None,
-                ),
-                ("monitor_output_left", self.monitor_left, result.outputs, None),
-                ("monitor_output_right", self.monitor_right, result.outputs, None),
-            ):
-                previous = remembered.get(
-                    key, combo.currentData() if same_device else default
-                )
-                combo.blockSignals(True)
-                combo.clear()
-                combo.addItem("None", None)
-                for number, name in enumerate(names, 1):
-                    combo.addItem(name, number)
-                combo.setCurrentIndex(max(0, combo.findData(previous)))
-                combo.blockSignals(False)
-            self.buffer.blockSignals(True)
-            self.buffer.clear()
-            for size in result.buffers:
-                self.buffer.addItem(f"{size} samples", size)
-            if not result.buffers:
-                self.buffer.addItem("Driver managed (size not exposed)", 0)
-            wanted = (
-                previous_buffer
-                if previous_buffer in result.buffers
-                else result.default_buffer
-            )
-            self.buffer.setCurrentIndex(max(0, self.buffer.findData(wanted)))
-            self.buffer.setToolTip(result.note)
-            self.buffer.blockSignals(False)
-            if "loopback_enabled" in remembered:
-                self.loop_enabled.blockSignals(True)
-                self.loop_enabled.setChecked(remembered["loopback_enabled"])
-                self.loop_enabled.blockSignals(False)
-            if "playback_blocksize" in remembered:
-                self._playback_blocksize = remembered["playback_blocksize"]
-            if min(info.max_input_channels, info.max_output_channels) < 2:
-                self.loop_enabled.setToolTip(
-                    "Clean loopback needs a second input and output. Choose a driver with both channels or disable loopback."
-                )
-            else:
-                self.loop_enabled.setToolTip(
-                    "Use a separate clean timing reference on the selected channels."
-                )
-
-    def audio_settings(self):
-        info = self.device.currentData()
-        return AudioSettingsModel(
-            host_api=info.host_api if info else None,
-            input_device=info.name if info else None,
-            output_device=info.name if info else None,
-            input_channel=self.input_channel.currentData(),
-            instrument_input_channel=self.instrument_input.currentData(),
-            monitor_output_left=self.monitor_left.currentData(),
-            monitor_output_right=self.monitor_right.currentData(),
-            output_channel=self.output_channel.currentData(),
-            loopback_input_channel=(
-                self.loop_input.currentData() if self.loop_enabled.isChecked() else None
-            ),
-            loopback_output_channel=(
-                self.loop_output.currentData()
-                if self.loop_enabled.isChecked()
-                else None
-            ),
-            blocksize=self.buffer.currentData() or 0,
-        )
-
-    def _diagram(self):
-        required = bool(
-            self.workspace and self.capture_kind.currentData() == "parametric"
-        )
-        if required:
-            self.loop_enabled.blockSignals(True)
-            self.loop_enabled.setChecked(True)
-            self.loop_enabled.blockSignals(False)
-        self.loop_enabled.setEnabled(not required)
-        self.loop_enabled.setToolTip(
-            "A separate clean loopback is required for parametric captures."
-            if required
-            else "Use a separate clean timing reference."
-        )
-        self.loop_input.setEnabled(self.loop_enabled.isChecked())
-        self.loop_output.setEnabled(self.loop_enabled.isChecked())
-
-    def save_audio(self, *_):
-        if self._loading or self.busy():
-            return
-        self.close_audio()
-        self._diagram()
-        audio = self.audio_settings()
-        key = (audio.host_api, audio.input_device, audio.instrument_input_channel)
-        if getattr(self, "_instrument_route_key", key) != key:
-            self.instrument_calibration.blockSignals(True)
-            self.instrument_calibration.setChecked(False)
-            self.instrument_calibration.blockSignals(False)
-        self._instrument_route_key = key
-        self.remember_setup()
-        self._refresh_play_calibration()
-
-    def save_calibration(self, *_):
-        if self._loading or self.busy():
-            return
-        self.remember_setup()
-        self._refresh_play_calibration()
-
-    def save_instrument_calibration(self, *_):
-        self.save_calibration()
-
-    def apply_instrument_calibration(self, value):
-        self._apply_level_calibration(
-            self.instrument_calibration, self.instrument_dbu, value
-        )
-
-    def save_capture_level(self, *_):
-        if self._loading or self.busy():
-            return
-        try:
-            level = self.capture_level.level()
-            previous = (self.last_setup() or {}).get("capture_level_dbfs", level)
-            if level != previous:
-                self.input_calibration.blockSignals(True)
-                self.input_calibration.setChecked(False)
-                self.input_calibration.blockSignals(False)
-            self.remember_setup()
-            worker = getattr(self, "settings_audio_worker", None)
-            if worker is not None:
-                worker.set_noise(worker.noise[0], level)
-            if self.session:
-                self.session.close_audio()
-                self.session = None
-        except ValueError as error:
-            self.notify_error(error)
-
-    def _set_capture_level(self, level):
-        self.capture_level.set_level(level)
-        self.save_capture_level()
-
-    def _apply_level_calibration(self, check, field, value):
-        self._loading = True
-        try:
-            field.setValue(value)
-            check.setChecked(True)
-        finally:
-            self._loading = False
-        self.save_calibration()
-
-    def calibrate_levels(self):
-        if not self.device.currentData():
-            self.notify_error("Select your audio interface before calibrating.")
-            return
-        try:
-            if (
-                self.input_channel.currentData() is None
-                or self.output_channel.currentData() is None
-            ):
-                raise ValueError(
-                    "Select a Send output and Return input before calibrating."
-                )
-            self.close_audio()
-            dialog = LevelCalibrationDialog(
-                self.device.currentData(),
-                self.input_channel.currentData(),
-                self.output_channel.currentData(),
-                self.buffer.currentData() or 0,
-                self.capture_level.level(),
-                getattr(self, "_calibration_frequency", 1000.0),
-                self,
-                channel_names=(
-                    self.input_channel.currentText(),
-                    self.output_channel.currentText(),
-                ),
-                instrument_channel=self.instrument_input.currentData(),
-                instrument_name=self.instrument_input.currentText(),
-            )
-            dialog.level_changed.connect(self._set_capture_level)
-            dialog.send_calibrated.connect(
-                lambda value: self._apply_level_calibration(
-                    self.input_calibration, self.input_dbu, value
-                )
-            )
-            dialog.return_calibrated.connect(
-                lambda value: self._apply_level_calibration(
-                    self.output_calibration, self.output_dbu, value
-                )
-            )
-            dialog.instrument_calibrated.connect(self.apply_instrument_calibration)
-            dialog.exec()
-            self._calibration_frequency = dialog.frequency.value()
-            self.remember_setup()
-        except ValueError as error:
-            self.notify_error(error)
-
-    def import_inputs(self):
-        if not self.workspace or self.busy():
-            return
-        path, _ = self.choose_open_file(
-            "Choose custom training WAV (mono, 48 kHz)", "WAV audio (*.wav)"
-        )
-        if not path:
-            return
-        try:
-            import uuid
-            import wavio
-
-            wav = wavio.read(path)
-            if wav.data.shape[1] != 1 or wav.rate != 48000:
-                raise ValueError(
-                    "Custom training input must be mono at 48 kHz, matching the fixed validation file."
-                )
-            if len(wav.data) < 48000:
-                raise ValueError(
-                    "The custom training signal must be at least one second long."
-                )
-            folder = self.workspace.directory / "signals"
-            folder.mkdir(exist_ok=True)
-            relative = "signals/custom-" + uuid.uuid4().hex[:8] + ".wav"
-            shutil.copy2(path, self.workspace.directory / relative)
-            self.workspace.preferences["custom_input"] = relative
-            self.custom_label.setText(Path(path).name)
-            self.workspace.save()
-        except Exception as error:
-            self.notify_error(error)
-
-    def close_audio(self):
-        self._stop_settings_audio()
-        if self.session:
-            self.session.close_audio()
-            self.session = None
-
-    def _get_session(self):
-        if self.session is None:
-            if self.workspace:
-                self.session = CaptureSession(
-                    self.workspace.project.model_copy(
-                        update={"audio": self.audio_settings()}
-                    ),
-                    self.workspace.directory,
-                )
-            else:
-                project = CaptureProject(
-                    knobs=[], audio=self.audio_settings(), sample_rate=48000
-                )
-                cache = Path(
-                    QStandardPaths.writableLocation(
-                        QStandardPaths.StandardLocation.CacheLocation
-                    )
-                )
-                cache.mkdir(parents=True, exist_ok=True)
-                self.session = CaptureSession(project, cache)
-        return self.session
-
-    def run_audio(self, operation, success):
-        if self.busy():
-            return
-        self.cancel_token = CancelToken()
-        self.worker = SessionWorker(operation, self.cancel_token, self)
-        self.worker.progress.connect(
-            lambda value: self.capture_progress.setValue(int(value * 100))
-        )
-        self.worker.succeeded.connect(success)
-        self.worker.failed.connect(self.notify_error)
-        self.worker.cancelled.connect(
-            lambda: self.capture_status.setText(
-                "Capture cancelled; saved captures are unchanged."
-            )
-        )
-        self.worker.finished.connect(self._audio_finished)
-        self.worker.start()
-        self.update_enabled()
-
-    def _audio_finished(self):
-        if self.workspace and self.session:
-            self.workspace.project = self.session.project
-        self.worker.deleteLater()
-        self.worker = None
-        self.cancel_token = None
-        self.refresh_captures()
-        self.update_enabled()
-        if self._close_after_pause:
-            self.close()
-
-    def _route_metered(self, send, returned, loopback_send=0.0, loopback_return=0.0):
-        import math
-
-        for name, value in (
-            ("send", send),
-            ("return", returned),
-            ("loopback_send", loopback_send),
-            ("loopback_return", loopback_return),
-        ):
-            getattr(self, f"route_{name}_meter").set_levels([value])
-            text = f"{20 * math.log10(value):.1f} dBFS" if value > 1e-6 else "−∞ dBFS"
-            getattr(self, f"route_{name}_peak").setText(text)
-
-    def refresh_controls(self):
-        if not self.workspace:
-            return
-        self.control_table.setRowCount(len(self.workspace.draft_controls))
-        for row, data in enumerate(self.workspace.draft_controls):
-            c = control_from_dict(data)
-            if isinstance(c, SwitchSpec):
+            "Use deterministic PyTorch algorithms and a fixed per-epoch batch order. Forces benchmark off. Unsupported operations raise an error. Results are reprodu…10604 tokens truncated…pec):
                 cells = (
                     c.name,
                     (
@@ -1939,7 +983,16 @@ class WizardWindow(
         if index is None:
             self.workspace.draft_controls.append(dialog.result_control.to_dict())
         else:
-            self.workspace.draft_controls[index] = dialog.result_control.to_dict()
+            before = previous[index]
+            after = dialog.result_control.to_dict()
+            if before["name"] != after["name"]:
+                try:
+                    self.workspace.rename_control(before["name"], after["name"])
+                except ValueError as error:
+                    self.notify_error(error)
+                    return
+                self.close_audio()
+            self.workspace.draft_controls[index] = after
         try:
             self.workspace.controls()
         except ValueError as error:
@@ -1947,8 +1000,23 @@ class WizardWindow(
             self.notify_error(error)
             return
         self.refresh_controls()
-        self.refresh_recommendation(True)
+        if index is None or {
+            k: v for k, v in previous[index].items() if k != "name"
+        } != {k: v for k, v in dialog.result_control.to_dict().items() if k != "name"}:
+            self.refresh_recommendation(True)
         self.workspace.save()
+
+    def move_control(self, direction):
+        if not self.workspace or self.busy():
+            return
+        index = self.control_table.currentRow()
+        target = index + direction
+        if index < 0 or not 0 <= target < len(self.workspace.draft_controls):
+            return
+        self.workspace.move_control(index, target)
+        self.close_audio()
+        self.refresh_controls()
+        self.control_table.selectRow(target)
 
     def add_control(self):
         self._control_dialog()
@@ -2226,6 +1294,9 @@ class WizardWindow(
         from .capture_order import order_captures
 
         project = self.workspace.project
+        self.volume_check_button.setVisible(
+            project.output_gain_state.get("screen_decision") == "warning"
+        )
         static = project.capture_type == "static"
         self.scene.setVisible(not static)
         self.static_card.setVisible(static)
@@ -2310,7 +1381,7 @@ class WizardWindow(
                     for name, value in entry.params.items()
                 )
                 columns = [
-                    entry.split.title(),
+                    "Volume" if entry.split == "gain" else entry.split.title(),
                     params,
                     entry.status.title(),
                     *self._capture_metrics(entry),
@@ -2483,13 +1554,14 @@ class WizardWindow(
                 from nam.capture.project import save_project
 
                 try:
-                    added = advance_calibration(
+                    advance_calibration(
                         self.workspace.project, self.workspace.directory
                     )
-                    if added:
-                        self.capture_status.setText(
-                            f"Volume calibration: {added} additional short measurements planned"
-                        )
+                    if (
+                        self.workspace.project.output_gain_state.get("screen_decision")
+                        == "warning"
+                    ):
+                        self.review_volume_check()
                 except ValueError as error:
                     self.workspace.project.output_gain = None
                     self.workspace.project.output_gain_state.update(
@@ -2517,6 +1589,55 @@ class WizardWindow(
         messages = [message for report in reports for message in report.messages]
         if messages:
             QMessageBox.warning(self, "Capture quality check", "\n".join(messages))
+
+    def _ask_volume_warning(self, message):
+        box = QMessageBox(self)
+        box.setWindowTitle("Clean volume verification")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            "The first volume captures do not perfectly match a clean attenuator."
+        )
+        box.setInformativeText(
+            message
+            + "\n\nThe interface or capture noise can also contribute. You can continue with a fitted clean-volume curve without regenerating the plan."
+        )
+        proceed = box.addButton(
+            "Continue as clean volume", QMessageBox.ButtonRole.AcceptRole
+        )
+        retry = box.addButton(
+            "Recapture the first four", QMessageBox.ButtonRole.ActionRole
+        )
+        pause = box.addButton("Keep paused", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(pause)
+        box.exec()
+        return (
+            "continue"
+            if box.clickedButton() is proceed
+            else "retry" if box.clickedButton() is retry else "pause"
+        )
+
+    def review_volume_check(self):
+        if not self.workspace:
+            return
+        project = self.workspace.project
+        state = project.output_gain_state
+        if state.get("screen_decision") != "warning":
+            return
+        choice = self._ask_volume_warning(state.get("warning_message", ""))
+        if choice == "continue":
+            state["screen_decision"] = "accepted"
+            from nam.capture.output_gain import advance_calibration
+
+            advance_calibration(project, self.workspace.directory)
+        elif choice == "retry":
+            state["screen_decision"] = None
+            state["status"] = "measuring"
+            project.output_gain = None
+            for entry in project.entries:
+                if entry.y_path in state.get("screen_paths", []):
+                    entry.status = "pending"
+        self.workspace.save()
+        self.refresh_captures()
 
     def cancel_capture(self):
         if self.cancel_token:
@@ -2730,3 +1851,4 @@ class WizardWindow(
                 else f"Export failed: {result.get('error', 'Unknown error')}"
             )
         self.update_enabled()
+
