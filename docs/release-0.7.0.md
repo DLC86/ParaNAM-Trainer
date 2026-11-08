@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # ParaNAM Trainer 0.7.0 preview
 
 - Complex Switch keeps the existing plan for each joint switch state. Simple
@@ -42,7 +43,8 @@
   aligned numeric fields and transparent row containers.
 - Capture progress resets when cancelled. Capture and Queue rows use state
   colors, their lists have a shaded “#” corner header, and Capture labels its
-  first column **Type**. Queue no longer shows a redundant order column.
+  first column **Type**. A system notification sound plays when a capture is
+  saved successfully. Queue no longer shows a redundant order column.
 - Capture can pre-warm the interface with 250 ms of low-level white noise and
   monitor the Return signal through ASIO Monitor outputs when enabled.
 - Scrollbar tracks are hidden. Training log horizontal position is preserved
@@ -63,4 +65,5 @@
 
 Released as a preview on main; Latest remains unchanged. Existing projects and
 recordings are not silently regenerated when new planning features are selected.
+
 
