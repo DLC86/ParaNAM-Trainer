@@ -239,7 +239,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     assert validation["train_esr_lite"] is not None
     assert validation["validation_esr_lite"] is not None
     assert validation["optimizer"] == "Adam"
-    assert validation["validation_esr"] == progress["best_esr"]
+    assert validation["validation_esr_full"] == progress["best_esr"]
     assert progress["train_esr_full"] is not None
     assert progress["train_esr_lite"] is not None
     assert progress["best_train_esr"] <= progress["train_esr_full"]
