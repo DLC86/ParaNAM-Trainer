@@ -19,7 +19,10 @@ def main():
     release = json.loads(gh("api", f"repos/{repository}/releases/{release_id}"))
     assert repo["full_name"].casefold() == repository.casefold(), "Repository mismatch"
     assert release["draft"] and release["prerelease"], "Expected a draft preview"
-    assert release["target_commitish"] == os.environ["GITHUB_SHA"], "Source mismatch"
+    target = release["target_commitish"]
+    if target != os.environ["GITHUB_SHA"]:
+        resolved = json.loads(gh("api", f"repos/{repository}/commits/{target}"))["sha"]
+        assert resolved == os.environ["GITHUB_SHA"], "Source mismatch"
     tag = release["tag_name"]
     if sys.argv[1] == "upload":
         packages = sorted(Path("installers").glob("*"))
