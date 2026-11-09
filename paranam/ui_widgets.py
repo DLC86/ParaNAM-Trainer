@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QPalette,
 )
 from PySide6.QtWidgets import (
     QTableWidget,
@@ -19,6 +20,21 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyleOptionViewItem,
 )
+
+
+class PreserveSelectionTextDelegate(QStyledItemDelegate):
+    """Keep each table cell's original foreground color when its row is selected."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        brush = index.data(Qt.ItemDataRole.ForegroundRole)
+        if brush is not None:
+            for group in (
+                QPalette.ColorGroup.Active,
+                QPalette.ColorGroup.Inactive,
+                QPalette.ColorGroup.Disabled,
+            ):
+                option.palette.setBrush(group, QPalette.ColorRole.HighlightedText, brush)
 
 
 class CaptureTable(QTableWidget):
