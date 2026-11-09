@@ -28,7 +28,7 @@ DEFAULTS = {
     "capture_level_dbfs": 0.0,
     "capture_type": "parametric",
     "mode": "normal",
-    "epochs": 50,
+    "epochs": 200,
     "batch_size": 16,
     "static_batch_size": 16,
     "device": "auto",
@@ -41,9 +41,14 @@ DEFAULTS = {
     "seed": 0,
     "lhs_method": "standard",
     "validation_method": "independent",
-    "input_mode": "standard",
+    "input_mode": "trunc",
     "custom_input": "",
 }
+
+
+def recommended_epochs(kind: str, input_mode: str) -> int:
+    """Suggested budget for a fresh run, not a mandatory training limit."""
+    return 200 if kind == "static" or input_mode == "trunc" else 50
 
 
 def read_json(path: Path, default=None, *, tolerate_corrupt=False):
@@ -102,8 +107,14 @@ class Workspace:
             self.preferences["validation_method"] = self.project.validation_method
         current_kind = stored.get("capture_type", self.project.capture_type)
         if "epochs" not in stored:
-            self.preferences["epochs"] = 200 if current_kind == "static" else 50
-        for kind, epochs in (("parametric", 50), ("static", 200)):
+            self.preferences["epochs"] = (
+                200 if current_kind == "static"
+                else recommended_epochs("parametric", self.preferences["input_mode"])
+            )
+        for kind, epochs in (
+            ("parametric", recommended_epochs("parametric", self.preferences["input_mode"])),
+            ("static", 200),
+        ):
             self.preferences.setdefault(
                 kind + "_epochs",
                 stored.get("epochs", epochs) if kind == current_kind else epochs,
@@ -182,15 +193,15 @@ class Workspace:
         project.train_window.ny = project.validation_window.ny = 8192
         from .signals import install_signals
 
-        install_signals(directory)
-        project.train_input = "input_standard.wav"
+        install_signals(directory, include_trunc=True)
+        project.train_input = "input_trunc.wav"
         save_project(project, directory)
         workspace = cls(directory)
         from .recipes import training_preset, preset_batch_size
 
         workspace.preferences.update(
-            epochs=50,
-            parametric_epochs=50,
+            epochs=200,
+            parametric_epochs=200,
             static_epochs=200,
             batch_size=preset_batch_size("HyperA2"),
             advanced_parametric=training_preset("HyperA2"),
