@@ -1,0 +1,37 @@
+name: Sync 0.7.2 draft release notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/release-0.7.2.md
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-draft-notes:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update existing draft without publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: '438947729'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID")"
+          if [[ "$(jq -r '.draft' <<< "$release")" != "true" ]]; then
+            echo "Release is not a draft; leaving it unchanged."
+            exit 0
+          fi
+          if [[ "$(jq -r '.tag_name' <<< "$release")" != "v0.7.2" ]]; then
+            echo "::error::Draft release ID no longer identifies v0.7.2."
+            exit 1
+          fi
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -f body="$(cat docs/release-0.7.2.md)" >/dev/null
+          echo "Updated draft release $RELEASE_ID; publication status unchanged."
