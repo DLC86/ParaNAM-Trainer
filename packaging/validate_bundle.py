@@ -227,7 +227,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     ), "Frozen worker did not preserve the damaged state"
     assert "State recovery:" in (job / "worker.log").read_text(encoding="utf-8")
     model = read_json(Path(progress["export"]))
-    assert model["architecture"] == "HyperA2"
+    assert model["architecture"] == "ParametricSlimmableContainer"
     assert [s["name"] for s in model["config"]["submodels"]] == ["lite", "full"]
     assert model["metadata"]["input_level_dbu"] == 18.0
     assert model["metadata"]["output_level_dbu"] == 12.0
@@ -246,7 +246,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     intermediate_result = read_json(job / "export-result.json")
     assert intermediate_result.get("ok"), intermediate_result
     snapshot = read_json(intermediate)
-    assert snapshot["architecture"] == "HyperA2"
+    assert snapshot["architecture"] == "ParametricSlimmableContainer"
     assert snapshot["config"]["params"]
     assert [s["name"] for s in snapshot["config"]["submodels"]] == ["lite", "full"]
     assert not intermediate.with_suffix(".nam").exists()
