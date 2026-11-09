@@ -46,6 +46,8 @@ def training_preset(name):
         condition_dilated_convolutions=False,
         branch_loss_reduction="sum" if hyper_a2 else "mean",
         optimizer="Adam" if hyper_a2 else "AdamW",
+        checkpoint_method="validation",
+        checkpoint_alpha=0.75,
         learning_rate=0.004 if hyper_a2 else 0.002,
         hypernetwork_learning_rate=0.001 if hyper_a2 else 0.002,
         lr_decay=0.994,
