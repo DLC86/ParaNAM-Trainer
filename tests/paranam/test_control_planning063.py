@@ -227,6 +227,8 @@ def test_silent_volume_capture_does_not_trigger_nonlinearity_warning(tmp_path):
     assert project.output_gain_state["warning_message"] == ""
     assert project.output_gain_state["status"] == "ready"
     assert project.output_gain is not None
+    # A noise-floor recording at mute is not an output gain, so its gain is 0.
+    assert project.output_gain["points"][0][1] == 0.0
 
 
 
