@@ -62,10 +62,14 @@ class ParamSpec:
     sampling_bias: str = "linear"
     simple_switch: bool = False
     clean_volume: bool = False
+    # Optional UI position. It never changes the neural-network input order.
+    index: _Optional[int] = None
 
     def __post_init__(self):
         if not self.name:
             raise ValueError("ParamSpec name must be non-empty")
+        if self.index is not None and (isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0):
+            raise ValueError("ParamSpec display index must be a non-negative integer")
         if self.type not in _VALID_TYPES:
             raise ValueError(
                 f"Unsupported ParamSpec type {self.type!r}; expected one of {_VALID_TYPES}"
@@ -181,6 +185,7 @@ class ParamSpec:
             "enum_names": None if self.enum_names is None else list(self.enum_names),
             "step": self.step,
             "avoid_zero": self.avoid_zero,
+            **({"index": self.index} if self.index is not None else {}),
         }
 
     @classmethod
@@ -208,5 +213,6 @@ class ParamSpec:
             enum_names=enum_names,
             step=config.get("step"),
             avoid_zero=config.get("avoid_zero", False),
+            index=config.get("index"),
         )
         return spec
