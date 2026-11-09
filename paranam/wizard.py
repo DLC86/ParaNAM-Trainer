@@ -669,6 +669,16 @@ class WizardWindow(
         form.addRow("Training LHS captures", self.n_train)
         form.addRow("LHS design", self.lhs_method)
         form.addRow("Validation captures", self.n_validation)
+        self.validation_method = QComboBox()
+        self.validation_method.addItem("Independent LHS (current)", "independent")
+        self.validation_method.addItem("Farthest from train (maximin)", "farthest")
+        self.validation_method.setToolTip(
+            "Independent LHS keeps the existing validation settings selection. "
+            "Farthest from train chooses on-grid validation points as far as possible "
+            "from training LHS/default and corners, balancing Simple Switch states. "
+            "Regenerating an existing plan archives its previous captures."
+        )
+        form.addRow("Validation selection", self.validation_method)
         form.addRow("Reproducible plan seed", self.seed)
         form.addRow(self.corners)
         self.rounds, self.additions = QSpinBox(), QSpinBox()
@@ -700,6 +710,7 @@ class WizardWindow(
             field.valueChanged.connect(self.save_preferences)
         self.corners.toggled.connect(self.save_preferences)
         self.lhs_method.currentIndexChanged.connect(self.save_preferences)
+        self.validation_method.currentIndexChanged.connect(self.save_preferences)
         self.mode.currentIndexChanged.connect(self.save_preferences)
 
     def _capture(self, layout):
@@ -879,6 +890,32 @@ class WizardWindow(
         self.advanced_fields["optimizer"] = optimizer
         advanced_form.insertRow(0, "Optimizer", optimizer)
         optimizer.currentIndexChanged.connect(self.save_preferences)
+
+        selection = QComboBox()
+        selection.addItem("Lowest Validation ESR (current)", "validation")
+        selection.addItem("Validation within 5%, then lowest Train ESR", "tolerance")
+        selection.addItem("Combined ESR (alpha × Validation + (1-alpha) × Train)", "combined")
+        selection.setToolTip(
+            "Choose the Full and Lite checkpoints separately. Train ESR uses "
+            "held-out audio at training knob settings. Tolerance chooses the "
+            "lowest Train ESR among epochs within 5% of best Validation ESR."
+        )
+        self.advanced_fields["checkpoint_method"] = selection
+        advanced_form.addRow("Checkpoint selection", selection)
+        selection.currentIndexChanged.connect(self.save_preferences)
+        selection.currentIndexChanged.connect(self.refresh_checkpoint_controls)
+        alpha = QDoubleSpinBox()
+        alpha.setDecimals(3)
+        alpha.setRange(0, 1)
+        alpha.setSingleStep(0.05)
+        alpha.setValue(0.75)
+        alpha.setToolTip(
+            "Combined ESR: alpha × Validation ESR + (1 - alpha) × Train ESR. "
+            "Enabled only for Combined ESR checkpoint selection."
+        )
+        self.advanced_fields["checkpoint_alpha"] = alpha
+        advanced_form.addRow("Checkpoint alpha", alpha)
+        alpha.valueChanged.connect(self.save_preferences)
         preset = QComboBox()
         preset.addItem("HyperA2", "HyperA2")
         preset.addItem("HyperWaveNet (Phillip Self)", "HyperWaveNet")
@@ -1208,7 +1245,18 @@ class WizardWindow(
             field.setChecked(False)
             field.blockSignals(False)
         self.refresh_hypernetwork_controls(kind)
+        self.refresh_checkpoint_controls()
         self.refresh_rate_preview(kind)
+
+    def refresh_checkpoint_controls(self, *_):
+        if not self.workspace:
+            return
+        parametric = self.workspace.preferences["capture_type"] == "parametric"
+        method = self.advanced_fields["checkpoint_method"].currentData()
+        self.advanced_fields["checkpoint_method"].setEnabled(parametric)
+        self.advanced_fields["checkpoint_alpha"].setEnabled(
+            parametric and method == "combined"
+        )
 
     def apply_rate_preset(self, *_):
         self.save_preferences()
@@ -1533,6 +1581,11 @@ class WizardWindow(
             self.corners.setChecked(prefs["corners"])
             self.lhs_method.setCurrentIndex(
                 max(0, self.lhs_method.findData(prefs.get("lhs_method", "standard")))
+            )
+            self.validation_method.setCurrentIndex(
+                max(0, self.validation_method.findData(
+                    prefs.get("validation_method", "independent")
+                ))
             )
             self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
             self.signal_mode.setCurrentIndex(
@@ -2137,6 +2190,7 @@ class WizardWindow(
             device=self.accelerator.currentData(),
             corners=self.corners.isChecked(),
             lhs_method=self.lhs_method.currentData(),
+            validation_method=self.validation_method.currentData(),
             input_mode=self.signal_mode.currentData(),
         )
         static = prefs["capture_type"] == "static"
@@ -2156,7 +2210,8 @@ class WizardWindow(
         )
         self.mode.setEnabled(not static)
         for widget in (
-            self.n_train, self.n_validation, self.seed, self.lhs_method, self.corners
+            self.n_train, self.n_validation, self.seed, self.lhs_method,
+            self.validation_method, self.corners
         ):
             widget.setEnabled(not static)
         self.training_title.setText(
@@ -2168,6 +2223,7 @@ class WizardWindow(
             self.n_validation,
             self.seed,
             self.lhs_method,
+            self.validation_method,
             self.corners,
             self.rounds,
             self.additions,
