@@ -15,7 +15,10 @@ from paranam.workspace import Workspace
 def workspace(tmp_path):
     ws = Workspace.create(tmp_path / "My rig", "My rig")
     ws.draft_controls = [KnobSpec("Gain", 0, 10).to_dict()]
+    # Most existing regression tests target the historical Standard recording
+    # window; test the new fresh-project Truncated default separately.
     ws.preferences.update(
+        input_mode="standard",
         n_train=2,
         n_validation=1,
         corners=False,
