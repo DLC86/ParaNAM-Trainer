@@ -184,7 +184,7 @@ def test_export_request_while_training_does_not_stop_training(
         return
     assert result.get("ok"), result
     model = read_json(target)
-    assert model["architecture"] == "HyperA2"
+    assert model["architecture"] == "ParametricSlimmableContainer"
     assert model["config"]["params"][0]["name"] == "Gain"
     assert not target.with_suffix(".nam").exists()
     assert len(model["config"]["submodels"]) == 2
@@ -275,7 +275,7 @@ def test_export_combines_independently_best_epochs_and_preserves_rng(
                 == expected[size]["config"]["submodels"][index]["model"]["weights"]
             )
     else:
-        assert exported["architecture"] == "HyperA2"
+        assert exported["architecture"] == "ParametricSlimmableContainer"
         restored = HyperA2.init_from_config(exported["config"]).eval()
         restored.import_weights(exported["weights"])
         assert restored.param_specs == models["full"].net.param_specs
