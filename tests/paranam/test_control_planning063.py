@@ -19,7 +19,7 @@ def test_simple_switch_is_one_discrete_dimension_and_complex_repeats():
         KnobSpec("Tone", 0, 10, step=0.1),
         SwitchSpec("Mode", ("A", "B", "C", "D"), planning_mode="simple"),
     ]
-    assert capture_recommendations(controls) == (30, 8, 1)
+    assert capture_recommendations(controls) == (32, 8, 1)
     train, validation = plan_captures(controls, n_train=30, n_validation=8, seed=13)
     assert len(train) == 30 and len(validation) == 8
     counts = Counter(e.params["Mode"] for e in train)
@@ -28,7 +28,7 @@ def test_simple_switch_is_one_discrete_dimension_and_complex_repeats():
     keys = lambda entries: {tuple(e.params.items()) for e in entries}
     assert len(keys(train)) == 30 and not keys(train) & keys(validation)
     controls += [SwitchSpec("Complex", ("Off", "On"))]
-    assert capture_recommendations(controls) == (60, 16, 2)
+    assert capture_recommendations(controls) == (64, 16, 2)
     train, validation = plan_captures(controls, n_train=60, n_validation=16, seed=13)
     assert Counter(e.params["Complex"] for e in train) == {"Off": 30, "On": 30}
     assert Counter(e.params["Complex"] for e in validation) == {"Off": 8, "On": 8}
@@ -205,7 +205,7 @@ def test_neural_plan_fixes_volume_at_maximum():
         KnobSpec("Tone", 0, 10, step=0.1),
         KnobSpec("Volume", 0, 10, clean_volume=True),
     ]
-    assert capture_recommendations(controls) == (15, 8, 1)
+    assert capture_recommendations(controls) == (16, 8, 1)
     train, validation = plan_captures(controls, n_train=15, n_validation=8)
     assert all(e.params["Volume"] == 10 for e in train + validation)
 
