@@ -76,6 +76,19 @@ Updated **NAM Parametric Plugin** and **NeuralAudio** can load:
 - Existing `HyperA2` models.
 - Existing `ParametricOutputGain` wrappers.
 
+### Control display order in PNAM exports
+
+New exports add an optional zero-based `index` to each neural control in
+`config.params`. The number is the **Plan-page display position**, shared
+with `extensions.linear_volume.index` when Clean/Linear Volume is present.
+The neural control array and weight-conditioning order are **not reordered**;
+Full and Lite include identical copies of the display metadata. Exports
+from resumed pre-update training sessions are annotated from the saved Plan
+control order as well. Old readers that ignore unknown param metadata still
+use the existing neural order; updated NAM Parametric Plugin and NeuralAudio
+can show controls in the specified order. Invalid/duplicate indices are
+rejected by the new readers instead of silently misrouting parameters.
+
 The plugin continues to support static baking with both model sizes
 and the chosen volume level. **Compatibility is backward-reading,
 not forward-reading:** older players that dispatch only `HyperA2`
