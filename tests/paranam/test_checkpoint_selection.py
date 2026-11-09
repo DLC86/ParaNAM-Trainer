@@ -115,7 +115,7 @@ def test_real_training_exports_selected_full_and_lite_checkpoints(
         assert Path(chosen[size]["path"]).is_file()
 
     export = read_json(Path(status["export"]))
-    assert export["architecture"] == "HyperA2"
+    assert export["architecture"] == "ParametricSlimmableContainer"
     summary = export["metadata"]["training"]
     assert summary["epoch_full"] == chosen["full"]["epoch"]
     assert summary["epoch_lite"] == chosen["lite"]["epoch"]
