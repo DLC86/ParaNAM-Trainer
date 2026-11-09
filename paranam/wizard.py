@@ -85,7 +85,9 @@ from .recovery_ui import RecoveryActions
 from .updates import UpdateActions
 from .queue_controller import QueueController
 from .ui_preferences import UIPreferences
-from .ui_widgets import CaptureTable, RecentProjectDelegate, navigation_icon
+from .ui_widgets import (
+    CaptureTable, PreserveSelectionTextDelegate, RecentProjectDelegate, navigation_icon
+)
 
 
 def label(text, style=None):
@@ -647,11 +649,25 @@ class WizardWindow(
         self.n_validation.setRange(0, 1000000)
         self.seed = QSpinBox()
         self.seed.setRange(0, 2**31 - 1)
+        self.lhs_method = QComboBox()
+        self.lhs_method.addItem("Standard", "standard")
+        self.lhs_method.addItem("Maximin", "maximin")
+        self.lhs_method.addItem("Orthogonal", "orthogonal")
+        self.lhs_method.addItem("Near-orthogonal", "near_orthogonal")
+        self.lhs_method.setToolTip(
+            "Standard: random stratified Latin hypercube. Maximin: maximize the closest-pair "
+            "distance over candidate designs. Orthogonal: strength-2 orthogonal-array LHS "
+            "requiring p² samples per split and Complex Switch state, for prime p and "
+            "at most p+1 dimensions (e.g. 9, 25, 49, 121). Near-orthogonal: minimize "
+            "pairwise control correlations without those count restrictions. "
+            "Anchors, switch mapping and knob-grid rounding may reduce the ideal properties."
+        )
         self.corners = QCheckBox(
             "Include range-extreme captures for every knob/switch combination (corners)"
         )
         self.corners.setChecked(True)
         form.addRow("Training LHS captures", self.n_train)
+        form.addRow("LHS design", self.lhs_method)
         form.addRow("Validation captures", self.n_validation)
         form.addRow("Reproducible plan seed", self.seed)
         form.addRow(self.corners)
@@ -683,6 +699,7 @@ class WizardWindow(
         ):
             field.valueChanged.connect(self.save_preferences)
         self.corners.toggled.connect(self.save_preferences)
+        self.lhs_method.currentIndexChanged.connect(self.save_preferences)
         self.mode.currentIndexChanged.connect(self.save_preferences)
 
     def _capture(self, layout):
@@ -769,6 +786,7 @@ class WizardWindow(
             QAbstractItemView.SelectionMode.SingleSelection
         )
         self.capture_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.capture_table.setItemDelegate(PreserveSelectionTextDelegate(self.capture_table))
         self.capture_table.setMinimumHeight(270)
         self.capture_table.itemSelectionChanged.connect(self.select_capture)
         layout.addWidget(self.capture_table, 1)
@@ -1052,6 +1070,7 @@ class WizardWindow(
             QAbstractItemView.SelectionMode.SingleSelection
         )
         self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.queue_table.setItemDelegate(PreserveSelectionTextDelegate(self.queue_table))
         self.queue_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive
         )
@@ -1512,6 +1531,9 @@ class WizardWindow(
             self.batch_size.setValue(workspace.training_batch_size())
             self.load_advanced_options()
             self.corners.setChecked(prefs["corners"])
+            self.lhs_method.setCurrentIndex(
+                max(0, self.lhs_method.findData(prefs.get("lhs_method", "standard")))
+            )
             self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
             self.signal_mode.setCurrentIndex(
                 max(0, self.signal_mode.findData(prefs["input_mode"]))
@@ -2114,6 +2136,7 @@ class WizardWindow(
             ),
             device=self.accelerator.currentData(),
             corners=self.corners.isChecked(),
+            lhs_method=self.lhs_method.currentData(),
             input_mode=self.signal_mode.currentData(),
         )
         static = prefs["capture_type"] == "static"
@@ -2132,7 +2155,9 @@ class WizardWindow(
             else "HyperA2 · Full + Lite nested in one .pnam file"
         )
         self.mode.setEnabled(not static)
-        for widget in (self.n_train, self.n_validation, self.seed, self.corners):
+        for widget in (
+            self.n_train, self.n_validation, self.seed, self.lhs_method, self.corners
+        ):
             widget.setEnabled(not static)
         self.training_title.setText(
             "Train your A2 batch." if static else "Train your HyperA2."
@@ -2142,6 +2167,7 @@ class WizardWindow(
             self.n_train,
             self.n_validation,
             self.seed,
+            self.lhs_method,
             self.corners,
             self.rounds,
             self.additions,
