@@ -230,6 +230,16 @@ def advance_calibration(project, root):
         raise ValueError(
             "Maximum-volume reference is silent; check the rig and recapture it"
         )
+    # Reclassify earlier captures before both warning checks and curve fitting.
+    # This also handles a warning that had already been dismissed.
+    for entry in main:
+        if (
+            entry.status == "captured"
+            and entry.params[control.name] == control.min
+            and not entry.user_metadata.get("output_gain", {}).get("silent_minimum")
+            and _muted_minimum_from_raw(project, root, entry)
+        ):
+            entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
     if state.get("screen_decision") != "accepted":
         discrepancies = []
         for entry in main:
@@ -239,12 +249,6 @@ def advance_calibration(project, root):
             # A noise-floor recording does not have a meaningful crest factor
             # and must not trigger a non-linearity warning.
             if entry.user_metadata.get("output_gain", {}).get("silent_minimum"):
-                continue
-            if (
-                entry.params[control.name] == control.min
-                and _muted_minimum_from_raw(project, root, entry)
-            ):
-                entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
                 continue
             peak, rms = _dbfs(_signal(project, root, entry))
             # A hard mute carries only interface noise (or digital zero), so its
@@ -273,8 +277,14 @@ def advance_calibration(project, root):
             state.update(screen_decision=None, warning_message="")
     if any(e.status != "captured" for e in entries):
         return 0
+    # A verified silent minimum contains interface noise, not amplified test
+    # signal: use zero gain instead of fitting its noise-floor RMS as attenuation.
     values = {
-        float(e.params[control.name]): 10 ** ((_dbfs(_signal(project, root, e))[1] - ref_rms) / 20)
+        float(e.params[control.name]): (
+            0.0
+            if e.user_metadata.get("output_gain", {}).get("silent_minimum")
+            else 10 ** ((_dbfs(_signal(project, root, e))[1] - ref_rms) / 20)
+        )
         for e in main
     }
     values[control.max] = 1.0
