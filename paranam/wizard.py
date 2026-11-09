@@ -2156,7 +2156,17 @@ class WizardWindow(
         next_input = self.signal_mode.currentData()
         current_epochs = self.epochs.value()
         prefs[previous_type + "_epochs"] = current_epochs
+        prefs[previous_type + "_input_mode"] = previous_input
         if previous_type != next_type:
+            next_input = prefs.get(
+                next_type + "_input_mode",
+                "trunc" if next_type == "parametric" else "standard",
+            )
+            self.signal_mode.blockSignals(True)
+            self.signal_mode.setCurrentIndex(
+                max(0, self.signal_mode.findData(next_input))
+            )
+            self.signal_mode.blockSignals(False)
             prefs["epochs"] = prefs.get(
                 next_type + "_epochs", recommended_epochs(next_type, next_input)
             )
@@ -2175,6 +2185,7 @@ class WizardWindow(
             self.epochs.blockSignals(True)
             self.epochs.setValue(prefs["epochs"])
             self.epochs.blockSignals(False)
+        prefs[next_type + "_input_mode"] = next_input
         old_options = self.workspace.training_options(previous_type)
         batch_key = "static_batch_size" if previous_type == "static" else "batch_size"
         prefs[batch_key] = self.batch_size.value()
