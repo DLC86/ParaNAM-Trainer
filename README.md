@@ -3,7 +3,7 @@
 Capture your gear, train a model, and compare it with the real rig in one desktop app.
 ParaNAM supports parametric models with knobs and switches, and batches of static models.
 
-**[Download ParaNAM Trainer 0.6.2 — development preview](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.6.2-preview)**
+**[Download ParaNAM Trainer](https://github.com/DLC86/ParaNAM-Trainer/releases)**
 
 | Model type | Result |
 | --- | --- |
@@ -13,15 +13,22 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
-## 0.7.1 preview
+## 0.7.2 preview
 
-[Find the 0.7.1 preview](https://github.com/DLC86/ParaNAM-Trainer/releases).
+[Find ParaNAM Trainer releases and drafts](https://github.com/DLC86/ParaNAM-Trainer/releases).
 
-This preview adds Simple/Complex Switch capture planning, biased knob
-sampling, Avoid max, measured clean output volume and **Truncated (Phillip Self)**
-input. It retains denser held-out validation and **ESR_worst** from the draft beta;
-the experimental Cosine schedules have been removed. The preview does not replace
-Latest. See [0.7.0 changes](docs/release-0.7.0.md) for the previous release notes.
+- Captures and Queue retain each row's original status text color while selected.
+- The Plan page offers Standard, Maximin, Orthogonal and Near-orthogonal LHS designs.
+- Recommended LHS capture counts increase from 15 to **16 per control**.
+- Existing plans keep their selected design (Standard for older projects) until regenerated.
+
+Orthogonal uses a strength-2 orthogonal-array LHS and requires a prime-square
+number of samples per split and Complex Switch combination (e.g. 9, 25 or 49)
+with no more than p+1 sampled dimensions for n=p². Anchoring, quantization,
+control bias and switch mapping may weaken the theoretical design properties.
+
+See [0.7.2 changes](docs/release-0.7.2.md) and
+[previous 0.7.0 changes](docs/release-0.7.0.md).
 
 ## Credits
 
