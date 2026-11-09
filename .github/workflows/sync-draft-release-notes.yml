@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - docs/release-0.7.2.md
+      - .github/workflows/sync-draft-release-notes.yml
   workflow_dispatch:
 
 permissions:
@@ -28,10 +29,13 @@ jobs:
             echo "Release is not a draft; leaving it unchanged."
             exit 0
           fi
-          if [[ "$(jq -r '.tag_name' <<< "$release")" != "v0.7.2" ]]; then
-            echo "::error::Draft release ID no longer identifies v0.7.2."
+          if [[ "$(jq -r '.name' <<< "$release")" != "ParaNAM Trainer 0.7.2" ]]; then
+            echo "::error::Draft release ID no longer identifies ParaNAM Trainer 0.7.2."
             exit 1
           fi
+          # GitHub can replace a draft's unattached tag with an untagged-*
+          # placeholder when only its body is updated. Restore the intended tag.
           gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -f tag_name="v0.7.2" \
             -f body="$(cat docs/release-0.7.2.md)" >/dev/null
           echo "Updated draft release $RELEASE_ID; publication status unchanged."
