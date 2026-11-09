@@ -244,7 +244,7 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
     )
     train = max(
         1,
-        15 * n_knobs,
+        16 * n_knobs,
         max(
             (
                 len(c.enum_names)
