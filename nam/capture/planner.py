@@ -312,6 +312,117 @@ def sample_unique_settings(
     )
 
 
+
+def _farthest_validation(
+    specs: _Sequence[_ParamSpec],
+    train: list[dict[str, _Any]],
+    reserved: set[tuple[_Any, ...]],
+    n_validation: int,
+    *,
+    seed: int,
+    default_step: float,
+) -> list[dict[str, _Any]]:
+    """Greedy maximin holdout against train *and* the training corner settings.
+
+    Candidates are sampled reproducibly on the actual capture grid, not in an
+    unquantized unit cube. Complex-switch combinations are handled separately by
+    plan_captures, which preserves their per-combination validation quotas.
+    """
+    if not n_validation:
+        return []
+
+    train_keys = {_settings_key(point, specs) for point in train}
+    excluded = train_keys | reserved
+    available = _grid_capacity(specs, default_step) - len(excluded)
+    if available < n_validation:
+        raise ValueError("Not enough non-training, non-corner settings for validation")
+    pool_size = min(available, max(n_validation, min(4096, max(256, 20 * n_validation))))
+    # The pool is another deterministic LHS draw. Even if the train uses a
+    # strength-2 orthogonal design, the pool need not have that special size.
+    candidates = sample_unique_settings(
+        specs, pool_size, seed=seed, default_step=default_step,
+        lhs_method="standard", exclude=excluded,
+    )
+
+    def vector(points):
+        columns = []
+        for spec in specs:
+            if spec.type == "switch":
+                values = _np.asarray(
+                    [spec.enum_names.index(point[spec.name]) for point in points],
+                    dtype=int,
+                )
+                # All different switch states have equal distance; numeric
+                # encoding would incorrectly make state 0 farther from 2 than 1.
+                columns.append(
+                    _np.eye(spec.num_inputs, dtype=float)[values] / _math.sqrt(2)
+                )
+            else:
+                columns.append(
+                    _np.asarray(
+                        [(point[spec.name] - spec.min) / (spec.max - spec.min)
+                         for point in points], dtype=float,
+                    )[:, None]
+                )
+        return _np.concatenate(columns, axis=1)
+
+    # A corner remains a train point even if it is appended after this function.
+    corners = [
+        dict(zip((spec.name for spec in specs), key))
+        for key in sorted(reserved, key=repr)
+        if key not in train_keys
+    ]
+    candidate_vectors = vector(candidates)
+    training_vectors = vector(train + corners) if train or corners else None
+    if training_vectors is None:
+        distances = _np.full(len(candidates), _np.inf)
+    else:
+        from scipy.spatial import cKDTree
+
+        distances = cKDTree(training_vectors).query(
+            candidate_vectors, k=1, workers=1
+        )[0] ** 2
+
+    # Prevent the greedy process from concentrating an entire validation split
+    # in one Simple Switch category while preserving switch-state coverage.
+    simple = [spec for spec in specs if spec.type == "switch"]
+    groups = [
+        tuple(point[spec.name] for spec in simple) for point in candidates
+    ]
+    capacities: dict[tuple[_Any, ...], int] = {}
+    for group in groups:
+        capacities[group] = capacities.get(group, 0) + 1
+    quotas = dict.fromkeys(capacities, 0)
+    for _ in range(n_validation):
+        group = min(
+            (g for g in capacities if quotas[g] < capacities[g]),
+            key=lambda g: (quotas[g], repr(g)),
+        )
+        quotas[group] += 1
+
+    selected: list[dict[str, _Any]] = []
+    used = _np.zeros(len(candidates), dtype=bool)
+    counts = dict.fromkeys(capacities, 0)
+    for _ in range(n_validation):
+        eligible = _np.asarray([
+            not used[i] and counts[group] < quotas[group]
+            for i, group in enumerate(groups)
+        ])
+        if not eligible.any():
+            eligible = ~used
+        score = _np.where(eligible, distances, -_np.inf)
+        index = int(_np.argmax(score))  # stable deterministic tie-break
+        selected.append(candidates[index])
+        used[index] = True
+        counts[groups[index]] += 1
+        sq = _np.sum(
+            (candidate_vectors - candidate_vectors[index]) ** 2, axis=1
+        )
+        distances = _np.minimum(distances, sq)
+    return selected
+
+
+
 def plan_unique_splits(
     specs: _Sequence[_ParamSpec],
     *,
@@ -320,6 +431,7 @@ def plan_unique_splits(
     seed: int,
     default_step: float,
     lhs_method: str = "standard",
+    validation_method: str = "independent",
     validation_exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
@@ -341,6 +453,8 @@ def plan_unique_splits(
         raise ValueError(f"n_train must be non-negative; got {n_train}")
     if n_validation < 0:
         raise ValueError(f"n_validation must be non-negative; got {n_validation}")
+    if validation_method not in ("independent", "farthest"):
+        raise ValueError("Unknown validation selection method")
     # The reservation only constrains the validation draw, so it costs nothing when there
     # is no validation split.
     reserved = (
@@ -376,6 +490,27 @@ def plan_unique_splits(
         )
 
     validation_seed = (seed + VALIDATION_SEED_OFFSET) % 2**32
+    if validation_method == "farthest" and n_validation:
+        # Training owns its original LHS design; unlike the independent method,
+        # validation must be picked *after* seeing the train locations.
+        train = sample_unique_settings(
+            specs, n_train, seed=seed, default_step=default_step,
+            lhs_method=lhs_method, anchor=anchor,
+        )
+        train_keys = {_settings_key(point, specs) for point in train}
+        if capacity - len(reserved | train_keys) < n_validation:
+            # On a very coarse grid train-first can consume every non-corner
+            # setting. Retain the old feasible reservation strategy in this case.
+            train, _ = plan_unique_splits(
+                specs, n_train=n_train, n_validation=n_validation, seed=seed,
+                default_step=default_step, lhs_method=lhs_method,
+                validation_method="independent",
+                validation_exclude=validation_exclude, anchor=anchor,
+            )
+        return train, _farthest_validation(
+            specs, train, reserved, n_validation, seed=validation_seed,
+            default_step=default_step,
+        )
     if not reserved:
         train = sample_unique_settings(
             specs, n_train, seed=seed, default_step=default_step, lhs_method=lhs_method
@@ -676,6 +811,7 @@ def plan_captures(
     n_validation: int,
     seed: int = 0,
     lhs_method: str = "standard",
+    validation_method: str = "independent",
 ) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
     """
     Generate the full capture plan: ``n_train`` Latin-Hypercube training settings and
@@ -709,7 +845,7 @@ def plan_captures(
             )
         t, v = plan_captures(
             inner, n_train=n_train, n_validation=n_validation, seed=seed,
-            lhs_method=lhs_method,
+            lhs_method=lhs_method, validation_method=validation_method,
         )
         fixed = {clean[0].name: clean[0].max}
         merged = lambda entries: [
@@ -767,6 +903,7 @@ def plan_captures(
                         n_validation=n_validation // count + (i < n_validation % count),
                         seed=(seed + i * 104729) % (2**32),
                         lhs_method=lhs_method,
+                        validation_method=validation_method,
                     )
                 except ValueError as exc:
                     raise ValueError(f"Switch combination {fixed}: {exc}") from exc
@@ -801,6 +938,7 @@ def plan_captures(
         seed=seed,
         default_step=_DEFAULT_KNOB_STEP,
         lhs_method=lhs_method,
+        validation_method=validation_method,
         validation_exclude=corner_keys,
         anchor={spec.name: spec.default for spec in specs},
     )
