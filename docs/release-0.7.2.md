@@ -46,6 +46,42 @@ Simple Switch dimension**, with separate coverage for Complex Switch
 combinations. The validation-count recommendation is unchanged. Existing
 saved capture counts remain as they were.
 
+### Default parametric input and epoch recommendations
+
+New **Parametric** projects now select **Truncated (Phillip Self)** as
+their initial training input, with **200 suggested epochs**. Selecting
+**Standard** or **TTS input v11** suggests **50 epochs** instead. The
+suggestion updates when switching input types only while the previous
+suggested budget is still in use: manually edited epoch counts are
+preserved. Static projects continue to default to Standard input and
+200 epochs, and the last input choice for each capture type is
+remembered separately. Existing capture plans and saved training
+instances are not silently changed.
+
+### ParametricSlimmableContainer model format
+
+New dual-size parametric exports use the top-level architecture
+**`ParametricSlimmableContainer`** instead of `HyperA2`, retaining
+the **same Lite/Full HyperWaveNet networks, neural control definitions,
+weight ordering and file schema version 1.0.0**.
+
+Measured Clean/Linear Volume attenuation is exported as an optional
+`extensions.linear_volume` PCHIP curve at the root of the model,
+outside `config.params`. The volume control therefore does not
+become an input to the hypernetwork; the runtime applies its smoothed
+attenuation after the neural signal.
+
+Updated **NAM Parametric Plugin** and **NeuralAudio** can load:
+- The new container, with or without `extensions.linear_volume`.
+- Existing `HyperA2` models.
+- Existing `ParametricOutputGain` wrappers.
+
+The plugin continues to support static baking with both model sizes
+and the chosen volume level. **Compatibility is backward-reading,
+not forward-reading:** older players that dispatch only `HyperA2`
+will reject the newly named container, even when no Linear Volume
+extension is present. Update the player before opening new exports.
+
 ## Training
 
 ### Alternative checkpoint selection for HyperA2
@@ -109,7 +145,10 @@ not removed by an update that does not reinstall them.
 - Existing projects, captures and exported models remain supported.
 - Independent validation LHS and the original lowest-Validation-ESR
   checkpoint rule remain the defaults.
-- HyperA2 Full/Lite and static A2 model architectures are unchanged.
+- The HyperA2 Full/Lite neural **topology and weights** and static A2
+  formats are unchanged. New parametric file exports use
+  `ParametricSlimmableContainer`; updated players keep reading
+  older `HyperA2` and `ParametricOutputGain` files.
 - Selecting new validation points requires a new capture plan; changing
   checkpoint selection requires a new training instance with matching
   settings for later resume.
