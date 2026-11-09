@@ -880,7 +880,8 @@ def plan_captures(
         )
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
         return _plan_simple_switches(
-            knobs, specs, n_train, n_validation, seed, lhs_method
+            knobs, specs, n_train, n_validation, seed, lhs_method,
+            validation_method,
         )
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
@@ -1225,7 +1226,10 @@ def _inverse_bias(unit, spec):
     return unit
 
 
-def _plan_simple_switches(controls, specs, n_train, n_validation, seed, lhs_method):
+def _plan_simple_switches(
+    controls, specs, n_train, n_validation, seed, lhs_method,
+    validation_method="independent",
+):
     complex_specs = tuple(
         s for s in specs if s.type == "switch" and not s.simple_switch
     )
@@ -1249,6 +1253,7 @@ def _plan_simple_switches(controls, specs, n_train, n_validation, seed, lhs_meth
                 n_validation=n_validation // count + (i < n_validation % count),
                 seed=(seed + i * 104729) % 2**32,
                 lhs_method=lhs_method,
+                validation_method=validation_method,
             )
             train.extend(
                 {name: ({**e.params, **fixed})[name] for name in names} for e in t
@@ -1272,6 +1277,7 @@ def _plan_simple_switches(controls, specs, n_train, n_validation, seed, lhs_meth
             seed=seed,
             default_step=_DEFAULT_KNOB_STEP,
             lhs_method=lhs_method,
+            validation_method=validation_method,
             validation_exclude=corners,
             anchor=anchor,
         )
