@@ -42,14 +42,33 @@ class PreserveSelectionTextDelegate(QStyledItemDelegate):
         if not option.state & QStyle.StateFlag.State_Selected:
             return super().paint(painter, option, index)
 
-        # Qt's stylesheet painter may replace HighlightedText with white even
-        # when initStyleOption supplies the item's foreground brush. Draw the
-        # selected background ourselves, then render the item without the
-        # selected text state so its ForegroundRole always wins.
-        unselected_text = QStyleOptionViewItem(option)
-        unselected_text.state &= ~QStyle.StateFlag.State_Selected
-        unselected_text.backgroundBrush = QBrush(QColor("#3f3f3f"))
-        super().paint(painter, unselected_text, index)
+        # Qt's native styles (and QStyleSheetStyle) can paint the OS selection
+        # blue even when State_Selected is removed from a copied style option.
+        # Capture and Queue cells contain plain text; paint BOTH the selected
+        # background and the original ForegroundRole ourselves so the result
+        # is identical on Windows, Linux, and macOS.
+        foreground = index.data(Qt.ItemDataRole.ForegroundRole)
+        brush = (
+            foreground if isinstance(foreground, QBrush)
+            else QBrush(foreground)
+            if isinstance(foreground, QColor)
+            else option.palette.brush(QPalette.ColorRole.Text)
+        )
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.fillRect(option.rect, QColor("#3f3f3f"))
+        painter.setPen(brush.color())
+        painter.setFont(option.font)
+        text_rect = option.rect.adjusted(5, 0, -5, 0)
+        alignment = index.data(Qt.ItemDataRole.TextAlignmentRole)
+        if alignment is None:
+            alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        text = painter.fontMetrics().elidedText(
+            text, Qt.TextElideMode.ElideRight, max(0, text_rect.width())
+        )
+        painter.drawText(text_rect, alignment, text)
+        painter.restore()
 
 
 class CaptureTable(QTableWidget):
