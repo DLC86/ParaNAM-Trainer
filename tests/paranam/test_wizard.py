@@ -45,6 +45,43 @@ def test_capture_modes_keep_independent_batch_defaults(window, tmp_path):
     assert not hasattr(window, "static_size")
 
 
+
+def test_input_specific_epoch_recommendations_preserve_custom_values(window, tmp_path):
+    from paranam.workspace import Workspace, recommended_epochs
+
+    ws = Workspace.create(tmp_path / "Input defaults", "Input defaults")
+    assert ws.preferences["input_mode"] == "trunc"
+    assert ws.preferences["epochs"] == 200
+    assert ws.project.train_input == "input_trunc.wav"
+    assert (ws.directory / "input_trunc.wav").exists()
+    assert recommended_epochs("parametric", "standard") == 50
+    assert recommended_epochs("parametric", "tts") == 50
+    assert recommended_epochs("parametric", "trunc") == 200
+    window._attach(ws)
+    assert window.signal_mode.currentData() == "trunc"
+    assert window.epochs.value() == 200
+
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("standard"))
+    assert window.epochs.value() == 50
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("tts"))
+    assert window.epochs.value() == 50
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("trunc"))
+    assert window.epochs.value() == 200
+
+    window.epochs.setValue(123)
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("standard"))
+    assert window.epochs.value() == 123
+
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert window.signal_mode.currentData() == "standard"
+    assert window.epochs.value() == 200
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
+    assert window.signal_mode.currentData() == "standard"
+    assert window.epochs.value() == 123
+    window.signal_mode.setCurrentIndex(window.signal_mode.findData("trunc"))
+    assert window.epochs.value() == 123  # customized, not overwritten
+    assert Workspace(ws.directory).preferences["parametric_input_mode"] == "trunc"
+
 def test_gpu_button_reflects_installed_component(window, monkeypatch):
     from paranam import gpu_runtime
 
