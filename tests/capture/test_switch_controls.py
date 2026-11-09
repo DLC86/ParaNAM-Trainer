@@ -48,7 +48,7 @@ def test_duplicate_control_names():
 
 def test_plan_balances_every_joint_state_and_keeps_validation_held_out():
     specs = controls()
-    assert capture_recommendations(specs) == (180, 48, 6)
+    assert capture_recommendations(specs) == (192, 48, 6)
     train, val = plan_captures(specs, n_train=181, n_validation=37, seed=8)
     assert (train, val) == plan_captures(specs, n_train=181, n_validation=37, seed=8)
     for entries, expected in ((train, [30] * 5 + [31]), (val, [6] * 5 + [7])):
