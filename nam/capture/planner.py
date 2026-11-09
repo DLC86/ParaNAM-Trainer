@@ -482,8 +482,11 @@ def latin_hypercube_unit(
     rng = _np.random.default_rng(seed)
     trials = 24 if n <= 2048 else 8 if n <= 20000 else 3
     best, best_score = None, None
-    for _ in range(trials):
-        candidate = _standard_lhs(n, dim, int(rng.integers(0, 2**32)))
+    for attempt in range(trials):
+        # Include the Standard design among the candidates: an optimized method
+        # must not score worse than Standard under the exact same seed.
+        candidate_seed = seed if attempt == 0 else int(rng.integers(0, 2**32))
+        candidate = _standard_lhs(n, dim, candidate_seed)
         if lhs_method == "maximin":
             nearest = cKDTree(candidate).query(candidate, k=2, workers=1)[0][:, 1]
             score = float(nearest.min())
