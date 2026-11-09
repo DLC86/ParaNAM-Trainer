@@ -182,7 +182,9 @@ def test_volume_calibration_uses_knob_grid_and_survives_reload(tmp_path):
     original = dict(architecture="HyperA2", config={"test": 1}, weights=[1, 2])
     wrapped = OutputGainExportHook(project.output_gain).apply(original)
     assert wrapped["weights"] is original["weights"]
-    assert wrapped["config"]["base_config"] == original["config"]
+    assert wrapped["config"] is original["config"]
+    assert wrapped["architecture"] == "HyperA2"
+    assert wrapped["extensions"]["linear_volume"] == project.output_gain
 
 
 def test_volume_peak_rms_warning_is_advisory_and_preserves_captures(tmp_path):
