@@ -36,6 +36,15 @@ quantization and duplicate resolution can weaken ideal LHS design properties.
 Selecting a different method does not silently modify existing recordings:
 applying a changed plan follows the normal capture-plan regeneration flow.
 
+## Clean output-volume silence handling
+
+A capture explicitly identified as a silent minimum by the capture session no
+longer contributes to the peak-versus-RMS non-linearity warning. Such a
+noise-floor capture has no meaningful crest factor relative to a normal signal.
+If a previously flagged capture is re-recorded and verified as silent, the
+obsolete warning is cleared. Non-silent captures still receive the existing
+0.20 dB diagnostic check.
+
 ## Recommended number of LHS captures
 
 The planning recommendation is now **16 training LHS captures per sampled knob
