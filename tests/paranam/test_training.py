@@ -145,7 +145,7 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     progress = training.job_progress(job)
     assert progress["status"] == "completed", progress
     final = read_json(Path(progress["export"]))
-    assert final["architecture"] == "HyperA2"
+    assert final["architecture"] == "ParametricSlimmableContainer"
     assert final["config"]["size"] == "full"
     assert [s["name"] for s in final["config"]["submodels"]] == ["lite", "full"]
     assert final["metadata"]["input_level_dbu"] == 18
@@ -312,7 +312,7 @@ def test_mid_epoch_pause_restarts_only_the_incomplete_epoch(
         snapshot = read_json(
             Path(training.export_saved_best(job, workspace.directory / "Paused.pnam"))
         )
-        assert snapshot["architecture"] == "HyperA2"
+        assert snapshot["architecture"] == "ParametricSlimmableContainer"
         assert snapshot["metadata"]["input_level_dbu"] == 18
         assert snapshot["metadata"]["training"]["validation_esr_full"] is not None
         assert snapshot["metadata"]["training"]["validation_esr_lite"] is not None
@@ -406,7 +406,7 @@ def test_real_active_learning_round_exports_nested_models_and_returns_to_capture
     assert progress["additions"] == 1
     for member in range(2):
         model = read_json(job / f"member-{member}" / "model_parametric.pnam")
-        assert model["architecture"] == "HyperA2"
+        assert model["architecture"] == "ParametricSlimmableContainer"
         assert len(model["config"]["submodels"]) == 2
     reopened = Workspace(workspace.directory)
     assert len(reopened.project.pending_entries()) == 1
