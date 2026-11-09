@@ -18,7 +18,7 @@ def test_validation_recommendations_per_joint_switch_state(knobs, expected):
         SwitchSpec("A", ("Off", "On")),
         SwitchSpec("B", ("One", "Two", "Three")),
     ]
-    assert capture_recommendations(controls) == (15 * knobs * 6, expected * 6, 6)
+    assert capture_recommendations(controls) == (16 * knobs * 6, expected * 6, 6)
     assert capture_recommendations([SwitchSpec("A", ("Off", "On"))]) == (2, 0, 2)
 
 
