@@ -63,13 +63,21 @@ def add_candidate(entries, candidate, method, alpha=DEFAULT_ALPHA):
         for old in entries
     ):
         return entries
-    return [
+    frontier = [
         old for old in entries
         if not (
             candidate["val"] <= old["val"]
             and candidate["train"] <= old["train"]
         )
     ] + [candidate]
+    # The minimum Validation ESR can only decrease in future epochs, so
+    # candidates already outside the current 5% band can NEVER become eligible.
+    # Pruning here also prevents storing hundreds of useless audio checkpoints.
+    current_min = min(item["val"] for item in frontier)
+    return [
+        item for item in frontier
+        if item["val"] <= current_min * (1 + TOLERANCE) + 1e-12
+    ]
 
 
 def saved_selection(checkpoint, method, alpha=DEFAULT_ALPHA):
