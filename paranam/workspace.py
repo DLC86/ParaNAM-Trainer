@@ -40,6 +40,7 @@ DEFAULTS = {
     "corners": True,
     "seed": 0,
     "lhs_method": "standard",
+    "validation_method": "independent",
     "input_mode": "standard",
     "custom_input": "",
 }
@@ -97,6 +98,8 @@ class Workspace:
         self.preferences = {**DEFAULTS, **stored}
         if "lhs_method" not in stored:
             self.preferences["lhs_method"] = self.project.lhs_method
+        if "validation_method" not in stored:
+            self.preferences["validation_method"] = self.project.validation_method
         current_kind = stored.get("capture_type", self.project.capture_type)
         if "epochs" not in stored:
             self.preferences["epochs"] = 200 if current_kind == "static" else 50
@@ -412,6 +415,7 @@ class Workspace:
             != len(self.project.entries_for_split("validation"))
             or self.preferences["seed"] != self.project.seed
             or self.preferences["lhs_method"] != self.project.lhs_method
+            or self.preferences["validation_method"] != self.project.validation_method
             or self.preferences["corners"] != self.project.include_initial_corners
         )
 
@@ -507,6 +511,7 @@ class Workspace:
             n_validation=0 if switches_only else validation_count,
             seed=prefs["seed"],
             lhs_method=prefs["lhs_method"],
+            validation_method=prefs["validation_method"],
             name=self.project.name,
             train_input=self.desired_train_input(),
             validation_input="input_validation.wav",
