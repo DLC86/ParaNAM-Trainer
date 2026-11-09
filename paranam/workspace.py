@@ -621,6 +621,8 @@ class Workspace:
             cudnn_benchmark=True,
             deterministic_training=False,
             optimizer="Adam",
+            checkpoint_method="validation",
+            checkpoint_alpha=0.75,
             learning_rate=0.004,
             lr_decay=0.994,
             ny=self.project.train_window.ny or 8192,
@@ -714,6 +716,13 @@ class Workspace:
         data["settings"]["batch_size"] = self.training_batch_size()
         if include_advanced:
             data["settings"]["advanced_training"] = self.training_options()
+            method = data["settings"]["advanced_training"].get("checkpoint_method")
+            # Preserve legacy fingerprints when only the new default options
+            # have been added to the settings dialog.
+            if method == "validation" or self.project.capture_type == "static":
+                data["settings"]["advanced_training"].pop("checkpoint_method", None)
+            if method != "combined" or self.project.capture_type == "static":
+                data["settings"]["advanced_training"].pop("checkpoint_alpha", None)
             if data["settings"]["advanced_training"].get("rate_preset") == "manual":
                 data["settings"]["advanced_training"].pop("rate_preset")
             if (
