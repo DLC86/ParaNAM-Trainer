@@ -114,7 +114,7 @@ def test_parametric_export_restore_and_scaling(tmp_path):
     exported = json.loads((tmp_path / "model.pnam").read_text())
     assert not (tmp_path / "model.nam").exists()
     assert all(exported["metadata"][key] == value for key, value in metadata.items())
-    assert exported["architecture"] == "HyperA2"
+    assert exported["architecture"] == "ParametricSlimmableContainer"
     restored = HyperA2.init_from_config({**exported["config"], "sample_rate": 48000})
     assert restored.import_weights(exported["weights"]) == len(exported["weights"])
     x = torch.randn(128)
@@ -215,7 +215,7 @@ def test_training_main_writes_dual_size_checkpoints_and_final_exports(tmp_path, 
         make_plots=False,
     )
     final = json.loads((outdir / "model_parametric.pnam").read_text())
-    assert final["architecture"] == "HyperA2"
+    assert final["architecture"] == "ParametricSlimmableContainer"
     assert final["metadata"]["input_level_dbu"] == 18.0
     assert final["metadata"]["output_level_dbu"] == 12.5
     assert len(final["config"]["submodels"]) == 2
