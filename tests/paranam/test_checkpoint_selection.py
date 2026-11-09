@@ -87,3 +87,44 @@ def test_selector_saves_only_useful_snapshots_and_resumes(tmp_path, method):
 def test_invalid_alpha_rejected(tmp_path):
     with pytest.raises(ValueError, match="alpha"):
         build_selector(object(), dict(checkpoint_method="combined", checkpoint_alpha=1.2), tmp_path)
+
+
+@pytest.mark.parametrize("method", ["combined", "tolerance"])
+def test_real_training_exports_selected_full_and_lite_checkpoints(
+    workspace, monkeypatch, method
+):
+    import torch
+    from paranam import training
+    from paranam.workspace import read_json
+    from tests.paranam.test_training import tiny_job
+
+    workspace.preferences["epochs"] = 2
+    workspace.preferences["advanced_parametric"] = {
+        "checkpoint_method": method,
+        "checkpoint_alpha": 0.75,
+    }
+    workspace.save()
+    job = tiny_job(workspace, monkeypatch)
+    training.run_job(job)
+    status = training.job_progress(job)
+    assert status["status"] == "completed", status
+    checkpoint = torch.load(job / "resume-0.ckpt", map_location="cpu", weights_only=False)
+    chosen = saved_selection(checkpoint, method, 0.75)
+    assert chosen and chosen["full"] and chosen["lite"]
+    for size in ("full", "lite"):
+        assert Path(chosen[size]["path"]).is_file()
+
+    export = read_json(Path(status["export"]))
+    assert export["architecture"] == "HyperA2"
+    summary = export["metadata"]["training"]
+    assert summary["epoch_full"] == chosen["full"]["epoch"]
+    assert summary["epoch_lite"] == chosen["lite"]["epoch"]
+    assert summary["validation_esr_full"] == pytest.approx(chosen["full"]["val"])
+    assert summary["validation_esr_lite"] == pytest.approx(chosen["lite"]["val"])
+
+    # Export from the resumable checkpoint must use the exact same choices.
+    paused = read_json(
+        Path(training.export_saved_best(job, workspace.directory / "Selected.pnam"))
+    )
+    assert paused["metadata"]["training"]["epoch_full"] == chosen["full"]["epoch"]
+    assert paused["metadata"]["training"]["epoch_lite"] == chosen["lite"]["epoch"]
