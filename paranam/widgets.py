@@ -369,30 +369,32 @@ class ControlDialog(QDialog):
         self.maximum.setValue(10)
         self.step.setValue(0.5)
         self.default.setValue(5)
-        self.avoid_zero, self.gain = QCheckBox(
-            "Avoid zero (mutes the signal)"
-        ), QCheckBox("Gain / Drive control")
+        self.sampling_bias = QComboBox()
+        self.sampling_bias.addItem("Uniform range", "linear")
+        self.sampling_bias.addItem("Most change heard in the lower half", "lower")
+        self.sampling_bias.addItem("Most change heard in the upper half", "upper")
+        self.gain = QCheckBox("Gain/Drive control")
+        self.clean_volume = QCheckBox("Linear volume control")
+        self.clean_volume.setToolTip(
+            "Train at maximum volume and measure a separate short-signal attenuation curve. "
+            "Use only for an output attenuator that does not change tone or distortion. "
+            "A silent minimum is identified by the absence of the timing test signal, "
+            "not by a zero-noise recording."
+        )
+        self.avoid_zero = QCheckBox("Avoid min")
+        self.avoid_max = QCheckBox("Avoid max")
         for label, field in (
             ("Minimum", self.minimum),
             ("Maximum", self.maximum),
             ("Step", self.step),
             ("Default", self.default),
-            ("", self.avoid_zero),
+            ("Capture density", self.sampling_bias),
             ("", self.gain),
+            ("", self.clean_volume),
+            ("", self.avoid_zero),
+            ("", self.avoid_max),
         ):
             knob_form.addRow(label, field)
-        self.avoid_max = QCheckBox("Avoid max")
-        knob_form.addRow("", self.avoid_max)
-        self.sampling_bias = QComboBox()
-        self.sampling_bias.addItem("Uniform range", "linear")
-        self.sampling_bias.addItem("Most change heard in the lower half", "lower")
-        self.sampling_bias.addItem("Most change heard in the upper half", "upper")
-        knob_form.addRow("Capture density", self.sampling_bias)
-        self.clean_volume = QCheckBox("Clean output volume (measured attenuation)")
-        self.clean_volume.setToolTip(
-            "Train at maximum volume and measure a separate short-signal attenuation curve. Use only for an output attenuator that does not change tone or distortion. Record the maximum-volume references first; a silent minimum measures noise and does not require timing alignment."
-        )
-        knob_form.addRow("", self.clean_volume)
         self.switch_mode = QComboBox()
         self.switch_mode.addItem(
             "Complex Switch — separate plan for every state", "complex"
@@ -445,7 +447,9 @@ class ControlDialog(QDialog):
                 self.switch_mode.findData(control.planning_mode)
             )
         self.clean_volume.toggled.connect(self._clean_volume_changed)
+        self.gain.toggled.connect(self._gain_changed)
         self._clean_volume_changed(self.clean_volume.isChecked(), reset_step=False)
+        self._gain_changed(self.gain.isChecked())
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -462,6 +466,12 @@ class ControlDialog(QDialog):
                 field.setChecked(False)
             field.setEnabled(not checked)
         self.sampling_bias.setEnabled(not checked)
+
+    def _gain_changed(self, checked):
+        # The same knob cannot be an input to the hypernetwork AND a
+        # post-network linear attenuator. Disabling the alternative in both
+        # directions prevents an invalid combination before Save.
+        self.clean_volume.setEnabled(not checked)
 
     def resize_positions(self, n):
         old = self.positions.rowCount()
