@@ -61,7 +61,6 @@ def windows_script(data, result):
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
         "/CLOSEAPPLICATIONS",
-        "/TASKS=",
         f'/DIR="{data["target"]}"',
         f'/LOG="{result.with_name("installer.log")}"',
     ]
