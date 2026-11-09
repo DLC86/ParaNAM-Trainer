@@ -34,7 +34,9 @@ _Settings = _Mapping[str, _RawParams] | _Sequence[tuple[str, _RawParams]]
 
 class _HyperA2ScaleOutputHook(_Dataset._ScaleOutputHook):
     def apply(self, model_dict: dict):
-        if model_dict["architecture"] != "HyperA2":
+        if model_dict["architecture"] not in (
+            "HyperA2", "ParametricSlimmableContainer"
+        ):
             return super().apply(model_dict)
         model_dict["config"]["head_scale"] *= self.scale
         for entry in model_dict["config"]["submodels"]:
