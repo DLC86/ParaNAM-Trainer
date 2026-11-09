@@ -106,6 +106,15 @@ class Workspace:
         if "validation_method" not in stored:
             self.preferences["validation_method"] = self.project.validation_method
         current_kind = stored.get("capture_type", self.project.capture_type)
+        if "input_mode" not in stored and current_kind == "static":
+            self.preferences["input_mode"] = "standard"
+        for kind, default_mode in (("parametric", "trunc"), ("static", "standard")):
+            key = kind + "_input_mode"
+            if key not in stored:
+                self.preferences[key] = (
+                    self.preferences["input_mode"]
+                    if kind == current_kind else default_mode
+                )
         if "epochs" not in stored:
             self.preferences["epochs"] = (
                 200 if current_kind == "static"
