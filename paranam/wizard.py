@@ -1251,7 +1251,9 @@ class WizardWindow(
     def refresh_checkpoint_controls(self, *_):
         if not self.workspace:
             return
-        parametric = self.workspace.preferences["capture_type"] == "parametric"
+        # The combo already reflects the new mode while save_preferences is
+        # still switching away from the previous workspace capture type.
+        parametric = self.capture_kind.currentData() == "parametric"
         method = self.advanced_fields["checkpoint_method"].currentData()
         self.advanced_fields["checkpoint_method"].setEnabled(parametric)
         self.advanced_fields["checkpoint_alpha"].setEnabled(
