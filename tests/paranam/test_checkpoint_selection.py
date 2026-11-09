@@ -19,7 +19,7 @@ def test_tolerance_selects_lowest_train_within_final_five_percent_band():
         candidate(1, 0.040, 0.025),
         candidate(2, 0.041, 0.015),
         candidate(3, 0.044, 0.012),
-        candidate(4, 0.039, 0.026),
+        candidate(4, 0.0392, 0.026),
     ]
     frontier = []
     for row in candidates:
