@@ -1572,16 +1572,30 @@ def run_job(job):
                     map_location="cpu",
                     weights_only=False,
                 )
-                best = [
-                    state.get("best_esr")
-                    for state in checkpoint.get("callbacks", {}).values()
-                    if isinstance(state, dict)
-                    and state.get("best_esr") is not None
-                    and state.get("validation_reference") == "full"
-                ]
-                quality.append(
-                    (min(float(v) for v in best) if best else float("inf"), member)
-                )
+                from .checkpoint_selection import saved_selection, candidate_score
+
+                settings = spec.get("preferences", {}).get("advanced_training", {})
+                method = settings.get("checkpoint_method", "validation")
+                alpha = settings.get("checkpoint_alpha", 0.75)
+                selected = saved_selection(checkpoint, method, alpha)
+                if selected and selected.get("full"):
+                    # The ensemble ranking follows the user-selected criterion
+                    # (the tolerance rule prioritizes validation across members).
+                    entry = selected["full"]
+                    score = (
+                        candidate_score(entry, method, alpha)
+                        if method == "combined" else entry["val"]
+                    )
+                else:
+                    best = [
+                        state.get("best_esr")
+                        for state in checkpoint.get("callbacks", {}).values()
+                        if isinstance(state, dict)
+                        and state.get("best_esr") is not None
+                        and state.get("validation_reference") == "full"
+                    ]
+                    score = min(float(v) for v in best) if best else float("inf")
+                quality.append((score, member))
             chosen = min(quality)[1]
             export = (
                 Path(spec.get("models_directory", str(workspace.directory / "models")))
