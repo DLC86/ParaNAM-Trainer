@@ -695,7 +695,7 @@ class WizardWindow(
         box.addWidget(
             label(
                 "Active learning trains independent HyperA2 members and compares their Full/Lite predictions to suggest new settings.\n"
-                "You return to the capture step for each new batch. Every exported model remains HyperA2 Full + Lite.",
+                "You return to the capture step for each new batch. Every new parametric export uses ParametricSlimmableContainer with Full + Lite.",
                 "muted",
             )
         )
@@ -808,7 +808,7 @@ class WizardWindow(
 
     def _training(self, layout):
         layout.addWidget(label("TURN CAPTURES INTO AN INSTRUMENT", "eyebrow"))
-        self.training_title = label("Train your HyperA2.", "title")
+        self.training_title = label("Train your ParametricSlimmableContainer.", "title")
         layout.addWidget(self.training_title)
         layout.addWidget(
             label(
@@ -2236,7 +2236,7 @@ class WizardWindow(
         self.model_format.setText(
             "A2 Full + Lite nested · one standard .nam per named capture"
             if static
-            else "HyperA2 · Full + Lite nested in one .pnam file"
+            else "ParametricSlimmableContainer · Full + Lite in one .pnam file"
         )
         self.mode.setEnabled(not static)
         for widget in (
@@ -2245,7 +2245,7 @@ class WizardWindow(
         ):
             widget.setEnabled(not static)
         self.training_title.setText(
-            "Train your A2 batch." if static else "Train your HyperA2."
+            "Train your A2 batch." if static else "Train your ParametricSlimmableContainer."
         )
         for widget in (
             self.mode,
@@ -2302,7 +2302,7 @@ class WizardWindow(
 
     def _model_format_label(self):
         self.model_format = label(
-            "HyperA2 · Full + Lite nested in one .pnam file", "eyebrow"
+            "ParametricSlimmableContainer · Full + Lite in one .pnam file", "eyebrow"
         )
         return self.model_format
 
