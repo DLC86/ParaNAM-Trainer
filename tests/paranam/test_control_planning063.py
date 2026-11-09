@@ -435,8 +435,11 @@ def test_parametric_export_preserves_output_curve_after_output_scaling(tmp_path)
     model.export_model_dict_post_hooks.append(hook)
     export_parametric(model, tmp_path, output_scale=2.0)
     saved = json.loads((tmp_path / "model.pnam").read_text())
-    assert saved["architecture"] == "ParametricOutputGain"
-    assert saved["config"]["base_architecture"] == "HyperA2"
-    assert saved["config"]["output_gain"] == curve
+    assert saved["architecture"] == "ParametricSlimmableContainer"
+    assert saved["extensions"]["linear_volume"] == curve
+    assert saved["config"]["params"][0]["name"] == "Tone"
+    assert len(saved["config"]["submodels"]) == 2
+    assert "Volume" not in [p["name"] for p in saved["config"]["params"]]
+    assert "base_config" not in saved["config"]
     assert model.export_model_dict_post_hooks[-1] is hook
 
