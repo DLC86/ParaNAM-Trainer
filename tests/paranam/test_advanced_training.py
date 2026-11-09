@@ -196,3 +196,32 @@ def test_041_resume_preserves_actual_legacy_optimizer(workspace, kind, old_optim
         "Adam" if old_optimizer == "AdamW" else "AdamW"
     )
     assert not training.job_can_resume(workspace, job)
+
+
+def test_validation_and_checkpoint_choices_are_opt_in_and_persist(window, workspace):
+    window._attach(workspace)
+    assert window.validation_method.currentData() == "independent"
+    assert window.advanced_fields["checkpoint_method"].currentData() == "validation"
+    assert not window.advanced_fields["checkpoint_alpha"].isEnabled()
+    window.validation_method.setCurrentIndex(
+        window.validation_method.findData("farthest")
+    )
+    assert workspace.preferences["validation_method"] == "farthest"
+    assert workspace.plan_changed()
+    method = window.advanced_fields["checkpoint_method"]
+    method.setCurrentIndex(method.findData("combined"))
+    alpha = window.advanced_fields["checkpoint_alpha"]
+    assert alpha.isEnabled()
+    alpha.setValue(0.65)
+    assert workspace.training_options()["checkpoint_method"] == "combined"
+    assert workspace.training_options()["checkpoint_alpha"] == pytest.approx(0.65)
+    method.setCurrentIndex(method.findData("tolerance"))
+    assert not alpha.isEnabled()
+    assert workspace.training_options()["checkpoint_method"] == "tolerance"
+    method.setCurrentIndex(method.findData("combined"))
+    assert alpha.value() == pytest.approx(0.65)
+
+    reopened = Workspace(workspace.directory)
+    assert reopened.preferences["validation_method"] == "farthest"
+    assert reopened.training_options()["checkpoint_method"] == "combined"
+    assert reopened.training_options()["checkpoint_alpha"] == pytest.approx(0.65)
