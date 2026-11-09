@@ -116,7 +116,7 @@ _CORNER_COUNT_ADVISORY = 32
 
 # Rule-of-thumb LHS training-capture count per knob, used as the default before a plan
 # has been generated.
-_RECOMMENDED_LHS_PER_KNOB = 15
+_RECOMMENDED_LHS_PER_KNOB = 16
 
 # Rule-of-thumb validation-capture count per knob, capped so validation doesn't grow
 # unbounded with the knob count the way training LHS does.
@@ -1511,7 +1511,7 @@ class MainWindow(_QMainWindow):
         self.corner_count_label.setText(text)
 
     def _refresh_n_train_recommendation(self) -> None:
-        """Update the "Recommended: n (15 * k Knobs)" label for the current knob count.
+        """Update the "Recommended: n (16 * k Knobs)" label for the current knob count.
 
         Always kept current, independent of whether the spinner's value tracks it --
         see ``_apply_n_train_recommendation`` for that.
