@@ -276,6 +276,42 @@ def _training_param_specs(project: CaptureProject) -> list[dict[str, _Any]]:
     return params
 
 
+
+def apply_model_display_indices(model: dict[str, _Any], plan_controls: list[dict[str, _Any]]) -> None:
+    """Preserve the Plan control order in final PNAMs, including resumed old jobs.
+
+    This changes only JSON display metadata. Neural config.params arrays retain their
+    original order, and the Full/Lite branch copies remain identical to the parent.
+    """
+    if model.get("architecture") not in (
+        "HyperWaveNet", "HyperA2", "ParametricSlimmableContainer", "ConcatWaveNet"
+    ):
+        return
+    config = model["config"]
+    neural = config["params"]
+    extension = model.get("extensions", {}).get("linear_volume")
+    volume_name = extension["name"] if extension is not None else None
+    names = [c["name"] for c in plan_controls
+             if not c.get("clean_volume", False) or c["name"] == volume_name]
+    neural_names = [param["name"] for param in neural]
+    expected = neural_names + ([volume_name] if volume_name is not None else [])
+    if len(names) != len(expected) or set(names) != set(expected) or len(set(names)) != len(names):
+        raise ValueError("Plan controls do not match exported model parameters")
+    positions = {name: index for index, name in enumerate(names)}
+
+    def assign(params):
+        if [p["name"] for p in params] != neural_names:
+            raise ValueError("Full/Lite parameter order differs from the parent model")
+        for param in params:
+            param["index"] = positions[param["name"]]
+
+    assign(neural)
+    for branch in config.get("submodels", []):
+        assign(branch["config"]["params"])
+    if extension is not None:
+        extension["index"] = positions[volume_name]
+
+
 def _calibration_metadata(project: CaptureProject) -> dict[str, _Any]:
     metadata = {
         **project.user_metadata,
