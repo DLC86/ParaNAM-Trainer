@@ -178,6 +178,34 @@ def _curve(points):
     return interpolation, [[float(x[i]), float(y[i])] for i in chosen]
 
 
+
+def _muted_minimum_from_raw(project, root, entry):
+    """Recheck an older capture using the actual played test blips, not a dB floor.
+
+    Earlier versions could save a muted minimum without its silent_minimum flag
+    when the interface's background noise was above an arbitrary RMS threshold.
+    Reuse the same amp-return detector as a live recording if its raw signal and
+    played preamble are available. Never infer silence from the trimmed WAV alone.
+    """
+    from .latency import measure_delay
+    from .session import played_preamble, raw_paths
+
+    raw, _ = raw_paths(root, entry.y_path)
+    if not raw.is_file():
+        return False
+    try:
+        import soundfile as sf
+
+        audio, rate = sf.read(raw, dtype="float32", always_2d=True)
+        if rate != project.sample_rate or audio.shape[1] != 1:
+            return False
+        preamble = played_preamble(root, entry.y_path, rate)
+        return not measure_delay(audio[:, 0], preamble).detected
+    except (OSError, ValueError, RuntimeError):
+        # Projects predating raw recordings cannot be reclassified reliably.
+        return False
+
+
 def advance_calibration(project, root):
     """Compare peak and RMS attenuation; warn only when they differ by >0.2 dB."""
     control = volume_control(project)
@@ -211,6 +239,12 @@ def advance_calibration(project, root):
             # A noise-floor recording does not have a meaningful crest factor
             # and must not trigger a non-linearity warning.
             if entry.user_metadata.get("output_gain", {}).get("silent_minimum"):
+                continue
+            if (
+                entry.params[control.name] == control.min
+                and _muted_minimum_from_raw(project, root, entry)
+            ):
+                entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
                 continue
             peak, rms = _dbfs(_signal(project, root, entry))
             # A hard mute carries only interface noise (or digital zero), so its
