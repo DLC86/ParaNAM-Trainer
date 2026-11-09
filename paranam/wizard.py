@@ -2148,13 +2148,30 @@ class WizardWindow(
             (self.epochs, "epochs"),
         ):
             prefs[key] = field.value()
+        from .workspace import recommended_epochs
+
         previous_type = prefs["capture_type"]
         next_type = self.capture_kind.currentData()
-        prefs[previous_type + "_epochs"] = self.epochs.value()
+        previous_input = prefs["input_mode"]
+        next_input = self.signal_mode.currentData()
+        current_epochs = self.epochs.value()
+        prefs[previous_type + "_epochs"] = current_epochs
         if previous_type != next_type:
             prefs["epochs"] = prefs.get(
-                next_type + "_epochs", 50 if next_type == "parametric" else 200
+                next_type + "_epochs", recommended_epochs(next_type, next_input)
             )
+            self.epochs.blockSignals(True)
+            self.epochs.setValue(prefs["epochs"])
+            self.epochs.blockSignals(False)
+        elif (
+            next_type == "parametric"
+            and previous_input != next_input
+            and current_epochs == recommended_epochs("parametric", previous_input)
+        ):
+            # Update the recommendation only while the user is still using the
+            # previous suggested value. Never overwrite a custom epoch budget.
+            prefs["epochs"] = recommended_epochs("parametric", next_input)
+            prefs["parametric_epochs"] = prefs["epochs"]
             self.epochs.blockSignals(True)
             self.epochs.setValue(prefs["epochs"])
             self.epochs.blockSignals(False)
