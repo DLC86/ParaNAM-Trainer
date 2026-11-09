@@ -34,7 +34,7 @@ def test_hypera2_preset_matches_every_saved_0252_advanced_field():
 def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_path):
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
     assert workspace.training_options() == requested_settings()
-    assert workspace.preferences["epochs"] == 50
+    assert workspace.preferences["epochs"] == 200
     assert workspace.training_batch_size() == 16
     workspace.preferences["advanced_parametric"] = training_preset("HyperWaveNet")
     workspace.save()
