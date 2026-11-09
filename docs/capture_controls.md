@@ -12,7 +12,7 @@ independent states, not interpolated knob values.
 Let K be the number of knobs and S the product of all switch position counts.
 For example, a three-position switch and a two-position switch give S = 6.
 
-* Recommended training LHS captures: **15 × K × S**.
+* Recommended training LHS captures: **16 × K × S**.
 * Recommended validation captures: **min(3 × K, 10) × S**.
 * Training must cover every switch combination: at least **S** captures. If
   validation is enabled, it must also have at least **S** captures.
