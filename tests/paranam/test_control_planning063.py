@@ -290,12 +290,78 @@ def test_muted_volume_minimum_can_be_recorded_without_loopback(tmp_path):
     assert minimum.status == "captured" and qa.end_timing_detected is None
     assert minimum.user_metadata["output_gain"]["silent_minimum"]
     assert not qa.messages
-    assert not session._silent_volume_minimum(minimum, signal * 0.0001)
+    from nam.capture.latency import LatencyResult
+
+    detected = LatencyResult(
+        delay=480, detected=True, disagreement_too_high=False, safety_factor=1
+    )
+    undetected = LatencyResult(
+        delay=None, detected=False, disagreement_too_high=False, safety_factor=1
+    )
+    # A test blip is signal even at very low gain; an ordinary missing return
+    # must never count as an intentional muted volume control.
+    assert not session._silent_volume_minimum(minimum, detected)
+    assert session._silent_volume_minimum(minimum, undetected)
     ordinary = next(e for e in project.entries if e.params["Volume"] == 5)
-    assert not session._silent_volume_minimum(ordinary, np.zeros(48000))
+    assert not session._silent_volume_minimum(ordinary, undetected)
     from nam.capture.session import audit_captures
 
     assert minimum.y_path not in {a.y_path for a in audit_captures(project, tmp_path)}
+
+
+
+@pytest.mark.parametrize("loopback", [False, True])
+def test_noisy_muted_volume_uses_missing_test_blips_not_absolute_noise(tmp_path, loopback):
+    from nam.capture.session import CaptureSession
+    from tests.capture.test_session import _FakeRecorder
+
+    project = volume_project()
+    initialize_calibration(project)
+    if loopback:
+        project.audio.output_channel = 1
+        project.audio.input_channel = 1
+        project.audio.loopback_input_channel = 2
+        project.audio.loopback_output_channel = 2
+    else:
+        project.audio.loopback_input_channel = None
+        project.audio.loopback_output_channel = None
+    signal = np.random.default_rng(32).normal(0, 0.1, 48000).astype(np.float32)
+    for path in (project.train_input, project.validation_input):
+        sf.write(tmp_path / path, signal, 48000, subtype="FLOAT")
+    recorder = _FakeRecorder(480, noise=0)
+    session = CaptureSession(project, tmp_path, recorder=recorder)
+    reference = next(
+        e for e in project.entries if e.params == {"Tone": 10, "Volume": 10}
+    )
+    session.capture_entry(reference)
+    minimum = next(
+        e for e in project.entries if e.params == {"Tone": 10, "Volume": 0}
+    )
+    # Background noise is only ~45 dB below the reference, well above the
+    # old -60 dB mute test. No played blips actually reach the amp return.
+    recorder.gain = 0
+    recorder.noise = 2e-4
+    qa = session.capture_entry(minimum)
+    assert minimum.status == "captured"
+    assert minimum.user_metadata["output_gain"]["silent_minimum"] is True
+    assert qa.amp_return_delay is None
+    assert qa.end_timing_detected is (True if loopback else None)
+
+    # The noisy minimum must not raise a crest-factor warning.
+    advance_calibration(project, tmp_path)
+    assert project.output_gain_state.get("screen_decision") is None
+
+    # Simulate a saved 0.7.2 capture with an obsolete warning and no marker:
+    # re-evaluate its recorded test blips rather than requiring a recapture.
+    minimum.user_metadata["output_gain"].pop("silent_minimum")
+    project.output_gain_state.update(
+        screen_decision="warning",
+        warning_message="At volume 0, peak and RMS attenuation differ.",
+    )
+    advance_calibration(project, tmp_path)
+    assert minimum.user_metadata["output_gain"]["silent_minimum"] is True
+    assert project.output_gain_state["screen_decision"] is None
+    assert project.output_gain_state["warning_message"] == ""
 
 
 def test_truncated_input_preserves_original_and_standard_validation(tmp_path):
