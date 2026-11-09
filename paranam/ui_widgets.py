@@ -5,6 +5,7 @@ import math
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF
 from PySide6.QtGui import (
     QColor,
+    QBrush,
     QFont,
     QFontMetrics,
     QIcon,
@@ -35,6 +36,20 @@ class PreserveSelectionTextDelegate(QStyledItemDelegate):
                 QPalette.ColorGroup.Disabled,
             ):
                 option.palette.setBrush(group, QPalette.ColorRole.HighlightedText, brush)
+
+
+    def paint(self, painter, option, index):
+        if not option.state & QStyle.StateFlag.State_Selected:
+            return super().paint(painter, option, index)
+
+        # Qt's stylesheet painter may replace HighlightedText with white even
+        # when initStyleOption supplies the item's foreground brush. Draw the
+        # selected background ourselves, then render the item without the
+        # selected text state so its ForegroundRole always wins.
+        unselected_text = QStyleOptionViewItem(option)
+        unselected_text.state &= ~QStyle.StateFlag.State_Selected
+        unselected_text.backgroundBrush = QBrush(QColor("#3f3f3f"))
+        super().paint(painter, unselected_text, index)
 
 
 class CaptureTable(QTableWidget):
