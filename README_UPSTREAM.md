@@ -78,7 +78,7 @@ set the number of positions and a distinct name for each position; use its
 **Plan.** Two things go into a plan, and you want both:
 
 - **LHS points** — a Latin hypercube over the knob space. Space-filling, so coverage stays even as
-  the knob count grows, where a grid would need kⁿ captures. The app recommends `15 × knobs`
+  the knob count grows, where a grid would need kⁿ captures. The app recommends `16 × knobs`
   training points and `min(3 × knobs, 10)` validation points **per switch combination**.
   Every combination gets separate knob coverage; both enabled splits must cover all
   combinations. With switches only, capture each combination once with validation set to zero.
