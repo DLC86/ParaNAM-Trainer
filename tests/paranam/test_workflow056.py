@@ -423,7 +423,9 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
 ):
     fresh = Workspace.create(tmp_path / "Fresh", "Fresh")
     options = fresh.training_options()
-    assert fresh.preferences["epochs"] == 50
+    assert fresh.preferences["epochs"] == 200
+    assert fresh.preferences["input_mode"] == "trunc"
+    assert fresh.project.train_input == "input_trunc.wav"
     assert fresh.training_batch_size() == 16
     assert options["hypernetwork_recipe"] == "HyperA2"
     assert options["rate_preset"] == "a2_updates"
@@ -433,7 +435,7 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert options["learning_rate"] == 0.004
     assert options["hypernetwork_learning_rate"] == 0.001
     window._attach(fresh)
-    assert window.epochs.value() == 50
+    assert window.epochs.value() == 200
     assert window.advanced_fields["hypernetwork_recipe"].currentData() == "HyperA2"
     assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
     fresh.preferences.update(
