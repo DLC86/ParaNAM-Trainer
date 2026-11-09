@@ -324,6 +324,13 @@ def make_job(workspace, resume=False, job_directory=None):
                 raise ValueError(f"{key} must be true or false")
         if options["optimizer"] not in ("Adam", "AdamW"):
             raise ValueError("Choose Adam or AdamW as the training optimizer")
+        if options.get("checkpoint_method", "validation") not in (
+            "validation", "tolerance", "combined"
+        ):
+            raise ValueError("Choose a listed checkpoint selection method")
+        alpha = options.get("checkpoint_alpha", 0.75)
+        if not isinstance(alpha, (int, float)) or not math.isfinite(alpha) or not 0 <= alpha <= 1:
+            raise ValueError("Checkpoint alpha must be between 0 and 1")
         if options.get("rate_preset", "manual") not in (
             "manual",
             "a2_updates",
@@ -663,14 +670,24 @@ def export_best_model(trainer, spec, member, target, selection=None):
             size: entries[i]["best_metric"] for size, i in (("lite", 0), ("full", 1))
         }
     else:
-        callbacks = {c.monitor: c for c in trainer.checkpoint_callbacks}
-        paths = {
-            size: callbacks[f"ESR_{size}"].best_model_path for size in ("full", "lite")
-        }
-        scores = {
-            size: float(callbacks[f"ESR_{size}"].best_model_score)
-            for size in ("full", "lite")
-        }
+        selector = next(
+            (callback for callback in trainer.callbacks
+             if callable(getattr(callback, "selected_checkpoints", None))),
+            None,
+        )
+        selected = selector.selected_checkpoints() if selector is not None else None
+        if selected and all(selected.values()):
+            paths = {size: selected[size]["path"] for size in ("full", "lite")}
+            scores = {size: selected[size]["val"] for size in ("full", "lite")}
+        else:
+            callbacks = {c.monitor: c for c in trainer.checkpoint_callbacks}
+            paths = {
+                size: callbacks[f"ESR_{size}"].best_model_path for size in ("full", "lite")
+            }
+            scores = {
+                size: float(callbacks[f"ESR_{size}"].best_model_score)
+                for size in ("full", "lite")
+            }
     if not all(paths.values()) or not all(
         math.isfinite(value) for value in scores.values()
     ):
@@ -797,6 +814,14 @@ def export_saved_best(job, target):
             size: callbacks.get(f"ESR_{size}", {}).get("best_model_score")
             for size in ("full", "lite")
         }
+        from .checkpoint_selection import saved_selection
+
+        settings = spec.get("preferences", {}).get("advanced_training", {})
+        method = settings.get("checkpoint_method", "validation")
+        chosen = saved_selection(saved, method, settings.get("checkpoint_alpha", 0.75))
+        if chosen and all(chosen.values()):
+            paths = {size: chosen[size]["path"] for size in ("full", "lite")}
+            scores = {size: chosen[size]["val"] for size in ("full", "lite")}
         del saved
     if not all(path and Path(path).is_file() for path in paths.values()) or any(
         value is None or not math.isfinite(float(value)) for value in scores.values()
@@ -1481,6 +1506,15 @@ def run_job(job):
                     learning["trainer_fit_kwargs"]["ckpt_path"] = str(checkpoint)
                 shared["elapsed"] = elapsed_base + time.monotonic() - clock_start
                 progress = build_progress_callback(job, spec, member, shared)
+                selector = None
+                if not spec.get("static_captures"):
+                    from .checkpoint_selection import build_selector
+
+                    selector = build_selector(
+                        progress,
+                        spec.get("preferences", {}).get("advanced_training", {}),
+                        output,
+                    )
                 train(
                     spec["data"],
                     spec["model"],
@@ -1490,9 +1524,24 @@ def run_job(job):
                     make_plots=False,
                     extra_callbacks=[
                         progress,
+                        *([selector] if selector is not None else []),
                         epoch_checkpoint(progress, job),
                     ],
                 )
+                if selector is not None:
+                    chosen = selector.selected_checkpoints()
+                    if all(chosen.values()):
+                        full, lite = chosen["full"], chosen["lite"]
+                        progress.best = full["val"]
+                        progress.best_metrics = dict(
+                            epoch=full["epoch"], epoch_full=full["epoch"],
+                            epoch_lite=lite["epoch"], full=full["val"],
+                            lite=lite["val"], mean=(full["val"] + lite["val"]) / 2,
+                            train_full=full["train"], train_lite=lite["train"],
+                        )
+                        progress.best_lite_metrics = dict(
+                            epoch=lite["epoch"], lite=lite["val"]
+                        )
                 for filename in ("model_parametric.pnam", "model.nam"):
                     exported = output / filename
                     if exported.exists():
