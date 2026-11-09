@@ -1361,11 +1361,21 @@ def main(
         # export the best model. A hard training error instead propagates past this block
         # (skipping export so a secondary bake/export failure can't mask the real error)
         # while the outer `finally` still tears the datasets down.
+        selector = next(
+            (cb for cb in trainer.callbacks
+             if callable(getattr(cb, "selected_checkpoints", None))),
+            None,
+        )
+        selected = selector.selected_checkpoints() if selector is not None else None
         checkpoint_callback = trainer.checkpoint_callback
         best_checkpoint = (
-            checkpoint_callback.best_model_path
-            if isinstance(checkpoint_callback, _ModelCheckpoint)
-            else ""
+            selected["full"]["path"]
+            if selected and selected.get("full")
+            else (
+                checkpoint_callback.best_model_path
+                if isinstance(checkpoint_callback, _ModelCheckpoint)
+                else ""
+            )
         )
         if best_checkpoint != "":
             model = _ParametricLightningModule.load_from_checkpoint(
@@ -1376,13 +1386,17 @@ def main(
         if isinstance(net, _HyperA2) and learning_config.get(
             "separate_size_checkpoints"
         ):
-            lite_checkpoint = next(
-                (
-                    callback.best_model_path
-                    for callback in trainer.checkpoint_callbacks
-                    if callback.monitor == "ESR_lite"
-                ),
-                "",
+            lite_checkpoint = (
+                selected["lite"]["path"]
+                if selected and selected.get("lite")
+                else next(
+                    (
+                        callback.best_model_path
+                        for callback in trainer.checkpoint_callbacks
+                        if callback.monitor == "ESR_lite"
+                    ),
+                    "",
+                )
             )
             if lite_checkpoint:
                 lite_model = _ParametricLightningModule.load_from_checkpoint(
