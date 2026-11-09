@@ -17,6 +17,8 @@ def requested_settings():
     return {
         **saved,
         "hypernetwork_recipe": "HyperA2",
+        "checkpoint_method": "validation",
+        "checkpoint_alpha": 0.75,
         "rate_preset": "a2_updates",
         "hypernetwork_rate_preset": "a2_updates",
         "hypernetwork_learning_rate": 0.001,
