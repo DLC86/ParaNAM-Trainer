@@ -271,6 +271,13 @@ def sample_unique_settings(
     # in the gaps while preserving space-filling coverage.
     rng = _np.random.default_rng(seed)
     batch = max(n, 256)
+    if lhs_method == "orthogonal":
+        # The collision-recovery batches must also satisfy the strict
+        # strength-2 OA size requirement. The ordinary 256 batch is invalid.
+        p = max(2, _math.isqrt(batch - 1) + 1, len(specs) - 1)
+        while any(p % divisor == 0 for divisor in range(2, _math.isqrt(p) + 1)):
+            p += 1
+        batch = p * p
     for _ in range(_OVERSAMPLE_BATCHES):
         if _consume(
             sample_raw_settings(
