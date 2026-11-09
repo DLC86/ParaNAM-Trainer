@@ -379,7 +379,13 @@ def make_job(workspace, resume=False, job_directory=None):
         else:
             model = build_hyper_a2_model_config(workspace.project)
             if workspace.project.output_gain:
-                model["output_gain"] = workspace.project.output_gain
+                # Reconcile saved calibration with the current Plan display order.
+                curve = dict(workspace.project.output_gain)
+                curve["index"] = next(
+                    i for i, control in enumerate(workspace.project.control_specs())
+                    if control.name == curve["name"]
+                )
+                model["output_gain"] = curve
             if options["hypernetwork_recipe"] not in ("HyperA2", "HyperWaveNet"):
                 raise ValueError(
                     "Choose HyperA2 or HyperWaveNet as the training preset"
@@ -727,11 +733,11 @@ def export_best_model(trainer, spec, member, target, selection=None):
             else:
                 export_parametric(export_net, Path(directory), basename="snapshot")
             exported = read_json(Path(directory) / ("snapshot" + extension))
-        source = (
-            read_json(Path(spec["project"]) / "capture_project.json", {})
-            if static
-            else {}
-        )
+        source = read_json(Path(spec["project"]) / "capture_project.json", {})
+        if not static and source.get("knobs"):
+            # Also upgrade exports from checkpoints trained before display indices existed.
+            from nam.capture.export import apply_model_display_indices
+            apply_model_display_indices(exported, source["knobs"])
         metadata = {
             **source.get("user_metadata", {}),
             **spec["model"].get("metadata", {}),
