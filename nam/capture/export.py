@@ -260,10 +260,13 @@ def concat_wavenet_channels(num_params: int) -> int:
 
 def _training_param_specs(project: CaptureProject) -> list[dict[str, _Any]]:
     params = []
-    for knob in project.knob_specs():
+    # The Plan page stores controls in display order. Keep neural specs in their
+    # original (volume-excluded) order, but preserve the full display positions.
+    for index, knob in enumerate(project.knob_specs()):
         if getattr(knob, "clean_volume", False):
             continue
         spec = knob.to_param_spec().to_dict()
+        spec["index"] = index
         # enum_names is a switch-only field; continuous-only projects don't carry it.
         if spec["type"] != "switch":
             del spec["enum_names"]
