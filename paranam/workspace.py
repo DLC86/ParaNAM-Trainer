@@ -35,7 +35,7 @@ DEFAULTS = {
     "rounds": 2,
     "additions": 8,
     "ensemble_members": 2,
-    "n_train": 30,
+    "n_train": 32,
     "n_validation": 12,
     "corners": True,
     "seed": 0,
