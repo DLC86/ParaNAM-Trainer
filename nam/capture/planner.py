@@ -333,7 +333,15 @@ def _farthest_validation(
 
     train_keys = {_settings_key(point, specs) for point in train}
     excluded = train_keys | reserved
-    available = _grid_capacity(specs, default_step) - len(excluded)
+    # A user-defined default can be off the capture grid. It belongs to train
+    # but cannot consume a grid candidate from this validation pool.
+    grid_exclusions = sum(
+        settings_on_capture_grid(
+            dict(zip((spec.name for spec in specs), key)), specs, default_step
+        )
+        for key in excluded
+    )
+    available = _grid_capacity(specs, default_step) - grid_exclusions
     if available < n_validation:
         raise ValueError("Not enough non-training, non-corner settings for validation")
     pool_size = min(available, max(n_validation, min(4096, max(256, 20 * n_validation))))
