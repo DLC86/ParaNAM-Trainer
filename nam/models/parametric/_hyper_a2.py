@@ -159,6 +159,12 @@ class HyperA2(_ParametricNet):
     def _run_conditioned(self, x, p):
         return self.branch(self.size)._run_conditioned(x, p)
 
+    def _get_export_architecture(self):
+        # Keep the HyperA2 training topology and its two HyperWaveNet branches,
+        # but give new files a descriptive top-level container discriminator.
+        # Readers accept both this and historical "HyperA2".
+        return "ParametricSlimmableContainer"
+
     def _export_inner_config(self):
         branch = self.branch("full")
         return {
