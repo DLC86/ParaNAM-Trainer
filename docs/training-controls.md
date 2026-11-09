@@ -25,8 +25,9 @@ audio enters gradient training. This layout also applies to TTS input v11;
 custom inputs must retain the same initial/final structure. Validation captures
 continue to use their whole separate validation recording. Queue shows separate
 **Best Validation ESR (Full)** and **Best Train ESR (Full)** cards; the minima
-can occur at different epochs. Best checkpoint selection and export continue to
-use Validation ESR only.
+can occur at different epochs. By default, best checkpoint selection and
+export use Validation ESR only. Optional parametric checkpoint selectors are
+available in Advanced Training Settings.
 
 Jobs made before this split change require a new run, since their weights have
 already learned the reserved segments. Existing recordings can be reused.
@@ -45,7 +46,38 @@ nonfinite values break a curve rather than becoming a misleading point. History
 is saved with progress and checkpoints and survives pause/resume. Each static
 capture or ensemble member has its own displayed history.
 
+## Validation selection in Plan
+
+The Plan page keeps **Independent LHS** as its default: validation captures are
+held-out combinations with a different seeded LHS stream. **Farthest from train
+(maximin)** is an opt-in alternative: generate training LHS first, then choose
+validation points from a deterministic pool of quantized candidates, greedily
+maximizing the nearest-point distance to training settings, reserved corners,
+and previously selected validation settings. All knobs are normalized to their
+ranges and categorical switch states have equal distance. Simple Switch states
+are balanced and each Complex Switch combination is planned independently.
+This is a stress test of interpolation, not an unbiased estimate of average
+generalization across knob settings. Regenerating a saved plan replaces the
+settings and archives the previous capture files.
+
 ## Advanced training settings
+
+For parametric HyperA2 training, **Checkpoint selection** can use:
+- **Lowest Validation ESR** (the unchanged default): independently picks the
+  minimum held-out-combination Validation ESR for Full and Lite.
+- **Validation within 5%, then lowest Train ESR**: considers epochs whose
+  Validation ESR is no more than 5% above the lowest completed Validation ESR
+  for that size, then chooses the one with the lowest Train ESR on held-out
+  training-combination audio. Only useful non-dominated checkpoints are retained.
+- **Combined ESR**: minimizes `alpha × Validation ESR + (1-alpha) × Train ESR`
+  for each size independently. **Checkpoint alpha** is configurable from 0 to 1
+  (default 0.75) and is enabled only for this option.
+
+All three methods leave optimizer gradients, LR schedules, and ESR computation
+unchanged. Only checkpoint ranking/export changes. Selected Full/Lite epochs
+may differ. These alternatives are not yet applied to static training jobs.
+Changing the selection criterion creates a different training recipe and should
+not be used to resume an incompatible saved job.
 
 The base **Learning Rate** and **Hypernetwork Learning Rate** are independently
 editable. Beside each respective **decay** field, select **per epoch** or **per 62 optimizer updates
