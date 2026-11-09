@@ -671,7 +671,7 @@ def export_best_model(trainer, spec, member, target, selection=None):
         }
     else:
         selector = next(
-            (callback for callback in trainer.callbacks
+            (callback for callback in getattr(trainer, "callbacks", [])
              if callable(getattr(callback, "selected_checkpoints", None))),
             None,
         )
