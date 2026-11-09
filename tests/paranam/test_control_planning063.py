@@ -200,6 +200,36 @@ def test_volume_peak_rms_warning_is_advisory_and_preserves_captures(tmp_path):
     assert all((tmp_path / e.y_path).is_file() for e in project.entries)
 
 
+
+def test_silent_volume_capture_does_not_trigger_nonlinearity_warning(tmp_path):
+    project = volume_project()
+    initialize_calibration(project)
+    record_pending(project, tmp_path)
+    minimum = next(
+        entry for entry in project.entries if entry.params["Volume"] == 0
+    )
+
+    # A verified noise-floor recording can have a very different crest factor
+    # from the live amp signal while remaining much quieter than the reference.
+    noise = np.random.default_rng(72).normal(0, 1e-5, 4096)
+    noise[0] = 3e-4  # Peak and RMS do not track the reference.
+    sf.write(tmp_path / minimum.y_path, noise, 48000, subtype="FLOAT")
+
+    advance_calibration(project, tmp_path)
+    assert project.output_gain_state["screen_decision"] == "warning"
+    assert "volume 0" in project.output_gain_state["warning_message"]
+
+    # The session's per-capture silent flag takes precedence over crest factor
+    # comparisons, including when it is set after an earlier warning.
+    minimum.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
+    advance_calibration(project, tmp_path)
+    assert project.output_gain_state["screen_decision"] is None
+    assert project.output_gain_state["warning_message"] == ""
+    assert project.output_gain_state["status"] == "ready"
+    assert project.output_gain is not None
+
+
+
 def test_neural_plan_fixes_volume_at_maximum():
     controls = [
         KnobSpec("Tone", 0, 10, step=0.1),
