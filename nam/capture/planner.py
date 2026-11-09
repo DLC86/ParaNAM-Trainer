@@ -195,6 +195,7 @@ def sample_unique_settings(
     *,
     seed: int,
     default_step: float,
+    lhs_method: str = "standard",
     exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
 ) -> list[dict[str, _Any]]:
@@ -239,7 +240,7 @@ def sample_unique_settings(
 
     # The first batch reproduces the historical LHS stream exactly, so a plan with no grid
     # collisions is byte-for-byte identical to the pre-deduplication behavior.
-    raw = sample_raw_settings(specs, n, seed=seed)
+    raw = sample_raw_settings(specs, n, seed=seed, lhs_method=lhs_method)
     if anchor is not None:
         # Keep the default row's stratum occupied in every dimension. Swapping
         # coordinates preserves the other Latin strata before grid quantization.
@@ -272,7 +273,9 @@ def sample_unique_settings(
     batch = max(n, 256)
     for _ in range(_OVERSAMPLE_BATCHES):
         if _consume(
-            sample_raw_settings(specs, batch, seed=int(rng.integers(0, 2**32)))
+            sample_raw_settings(
+                specs, batch, seed=int(rng.integers(0, 2**32)), lhs_method=lhs_method
+            )
         ):
             return ordered
 
@@ -309,6 +312,7 @@ def plan_unique_splits(
     n_validation: int,
     seed: int,
     default_step: float,
+    lhs_method: str = "standard",
     validation_exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
@@ -367,13 +371,14 @@ def plan_unique_splits(
     validation_seed = (seed + VALIDATION_SEED_OFFSET) % 2**32
     if not reserved:
         train = sample_unique_settings(
-            specs, n_train, seed=seed, default_step=default_step
+            specs, n_train, seed=seed, default_step=default_step, lhs_method=lhs_method
         )
         validation = sample_unique_settings(
             specs,
             n_validation,
             seed=validation_seed,
             default_step=default_step,
+            lhs_method=lhs_method,
             exclude={_settings_key(params, specs) for params in train},
         )
         return train, validation
@@ -386,6 +391,7 @@ def plan_unique_splits(
         n_validation,
         seed=validation_seed,
         default_step=default_step,
+        lhs_method=lhs_method,
         exclude=reserved,
     )
     train = sample_unique_settings(
@@ -393,10 +399,29 @@ def plan_unique_splits(
         n_train,
         seed=seed,
         default_step=default_step,
+        lhs_method=lhs_method,
         exclude={_settings_key(params, specs) for params in validation},
         anchor=anchor,
     )
     return train, validation
+
+
+LHS_METHODS = ("standard", "maximin", "orthogonal", "near_orthogonal")
+
+
+def _standard_lhs(n: int, dim: int, seed: int) -> _np.ndarray:
+    """Preserve existing seeded LHS behavior for older projects."""
+    try:
+        from scipy.stats import qmc
+
+        sampler = qmc.LatinHypercube(d=dim, rng=_np.random.default_rng(seed))
+        return _np.asarray(sampler.random(n=n), dtype=_np.float64)
+    except (ImportError, TypeError):
+        rng = _np.random.default_rng(seed)
+        samples = _np.empty((n, dim), dtype=_np.float64)
+        for column in range(dim):
+            samples[:, column] = (rng.permutation(n) + rng.random(n)) / n
+        return samples
 
 
 def latin_hypercube_unit(
@@ -404,28 +429,72 @@ def latin_hypercube_unit(
     dim: int,
     *,
     seed: int,
+    lhs_method: str = "standard",
 ) -> _np.ndarray:
+    """Create a reproducible Latin hypercube with an optional design criterion.
+
+    Design properties apply before the default anchor, quantization, bias and
+    switch mapping, which can weaken pairwise coverage/orthogonality.
+    """
+    if lhs_method not in LHS_METHODS:
+        raise ValueError(f"Unknown LHS method {lhs_method!r}; choose from {LHS_METHODS}")
     if n <= 0:
         raise ValueError(f"n must be positive; got {n}")
     if dim < 0:
         raise ValueError(f"dim must be non-negative; got {dim}")
     if dim == 0:
         return _np.zeros((n, 0), dtype=_np.float64)
+    if lhs_method == "standard" or n == 1:
+        return _standard_lhs(n, dim, seed)
 
-    try:
-        from scipy.stats import qmc
-
-        sampler = qmc.LatinHypercube(d=dim, rng=_np.random.default_rng(seed))
+    if lhs_method == "orthogonal":
+        # A strength-2 orthogonal-array LHS has n=p**2 for prime p,
+        # with dim <= p+1. Do not silently fall back to ordinary LHS.
+        p = _math.isqrt(n)
+        prime = p >= 2 and all(p % i for i in range(2, _math.isqrt(p) + 1))
+        if p * p != n or not prime or dim > p + 1:
+            raise ValueError(
+                f"Orthogonal LHS with {dim} dimensions requires n=p² captures "
+                f"per split and Complex Switch combination, where p is prime "
+                f"and dimensions <= p+1 (received n={n}). "
+                "Adjust training and validation counts or choose Near-orthogonal."
+            )
+        try:
+            from scipy.stats import qmc
+        except ImportError as error:
+            raise ValueError("Orthogonal LHS requires scipy") from error
+        try:
+            sampler = qmc.LatinHypercube(
+                d=dim, strength=2, rng=_np.random.default_rng(seed)
+            )
+        except TypeError:
+            sampler = qmc.LatinHypercube(d=dim, strength=2, seed=seed)
         return _np.asarray(sampler.random(n=n), dtype=_np.float64)
-    except (ImportError, TypeError):
-        # ImportError: scipy absent. TypeError: scipy < 1.15 predates the ``rng=`` kwarg
-        # (it used ``seed=``); rather than special-case the version, fall back to the
-        # stratified-numpy sampler, which needs no scipy at all.
-        rng = _np.random.default_rng(seed)
-        samples = _np.empty((n, dim), dtype=_np.float64)
-        for i in range(dim):
-            samples[:, i] = (rng.permutation(n) + rng.random(n)) / n
-        return samples
+
+    if dim == 1:
+        return _standard_lhs(n, dim, seed)
+
+    # Bounded best-of candidate search. Both criteria keep the Latin strata;
+    # maximin increases the closest pair distance and near-orthogonal reduces
+    # the sum of squared pairwise correlations between columns.
+    from scipy.spatial import cKDTree
+
+    rng = _np.random.default_rng(seed)
+    trials = 24 if n <= 2048 else 8 if n <= 20000 else 3
+    best, best_score = None, None
+    for _ in range(trials):
+        candidate = _standard_lhs(n, dim, int(rng.integers(0, 2**32)))
+        if lhs_method == "maximin":
+            nearest = cKDTree(candidate).query(candidate, k=2, workers=1)[0][:, 1]
+            score = float(nearest.min())
+            improved = best_score is None or score > best_score
+        else:
+            correlations = _np.corrcoef(candidate, rowvar=False)
+            score = float(_np.sum(_np.triu(correlations**2, k=1)))
+            improved = best_score is None or score < best_score
+        if improved:
+            best, best_score = candidate, score
+    return best
 
 
 def _scale_continuous_samples(
@@ -503,6 +572,7 @@ def sample_raw_settings(
     *,
     seed: int = 0,
     full_grid: bool = False,
+    lhs_method: str = "standard",
 ) -> list[_np.ndarray]:
     specs = tuple(specs)
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
@@ -510,7 +580,7 @@ def sample_raw_settings(
             raise ValueError(
                 "Simple switches use LHS dimensions, not switch-grid replication"
             )
-        unit = latin_hypercube_unit(n, len(specs), seed=seed)
+        unit = latin_hypercube_unit(n, len(specs), seed=seed, lhs_method=lhs_method)
         raw = _np.empty_like(unit)
         for i, spec in enumerate(specs):
             raw[:, i] = (
@@ -526,7 +596,9 @@ def sample_raw_settings(
     continuous_seed = int(rng.integers(0, 2**32))
     switch_seed = int(rng.integers(0, 2**32))
     continuous_samples = _scale_continuous_samples(
-        latin_hypercube_unit(n, len(continuous_specs), seed=continuous_seed),
+        latin_hypercube_unit(
+            n, len(continuous_specs), seed=continuous_seed, lhs_method=lhs_method
+        ),
         continuous_specs,
     )
 
@@ -593,6 +665,7 @@ def plan_captures(
     n_train: int,
     n_validation: int,
     seed: int = 0,
+    lhs_method: str = "standard",
 ) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
     """
     Generate the full capture plan: ``n_train`` Latin-Hypercube training settings and
@@ -625,7 +698,8 @@ def plan_captures(
                 "Parametric capture needs another tone/drive/switch control besides clean volume"
             )
         t, v = plan_captures(
-            inner, n_train=n_train, n_validation=n_validation, seed=seed
+            inner, n_train=n_train, n_validation=n_validation, seed=seed,
+            lhs_method=lhs_method,
         )
         fixed = {clean[0].name: clean[0].max}
         merged = lambda entries: [
@@ -651,7 +725,9 @@ def plan_captures(
             "Choose a default below maximum for controls with Avoid max enabled"
         )
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
-        return _plan_simple_switches(knobs, specs, n_train, n_validation, seed)
+        return _plan_simple_switches(
+            knobs, specs, n_train, n_validation, seed, lhs_method
+        )
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
         continuous = [
@@ -680,6 +756,7 @@ def plan_captures(
                         n_train=n_train // count + (i < n_train % count),
                         n_validation=n_validation // count + (i < n_validation % count),
                         seed=(seed + i * 104729) % (2**32),
+                        lhs_method=lhs_method,
                     )
                 except ValueError as exc:
                     raise ValueError(f"Switch combination {fixed}: {exc}") from exc
@@ -713,6 +790,7 @@ def plan_captures(
         n_validation=n_validation,
         seed=seed,
         default_step=_DEFAULT_KNOB_STEP,
+        lhs_method=lhs_method,
         validation_exclude=corner_keys,
         anchor={spec.name: spec.default for spec in specs},
     )
@@ -991,7 +1069,7 @@ def _inverse_bias(unit, spec):
     return unit
 
 
-def _plan_simple_switches(controls, specs, n_train, n_validation, seed):
+def _plan_simple_switches(controls, specs, n_train, n_validation, seed, lhs_method):
     complex_specs = tuple(
         s for s in specs if s.type == "switch" and not s.simple_switch
     )
@@ -1014,6 +1092,7 @@ def _plan_simple_switches(controls, specs, n_train, n_validation, seed):
                 n_train=n_train // count + (i < n_train % count),
                 n_validation=n_validation // count + (i < n_validation % count),
                 seed=(seed + i * 104729) % 2**32,
+                lhs_method=lhs_method,
             )
             train.extend(
                 {name: ({**e.params, **fixed})[name] for name in names} for e in t
@@ -1036,6 +1115,7 @@ def _plan_simple_switches(controls, specs, n_train, n_validation, seed):
             n_validation=n_validation,
             seed=seed,
             default_step=_DEFAULT_KNOB_STEP,
+            lhs_method=lhs_method,
             validation_exclude=corners,
             anchor=anchor,
         )
