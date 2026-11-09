@@ -334,15 +334,17 @@ class OutputGainExportHook:
         self.curve = curve
 
     def apply(self, model):
-        if model["architecture"] not in ("HyperA2", "HyperWaveNet"):
+        if model["architecture"] not in (
+            "HyperA2", "HyperWaveNet", "ParametricSlimmableContainer"
+        ):
             raise ValueError("Output-gain export requires a parametric neural effect")
-        return {
-            **model,
-            "architecture": "ParametricOutputGain",
-            "config": {
-                "base_architecture": model["architecture"],
-                "base_config": model["config"],
-                "output_gain": self.curve,
-            },
-        }
+        # A linear attenuator must never become a hypernetwork input. Keep the
+        # original neural params, weights and branch offsets unchanged and
+        # store the DSP stage in an optional top-level extension. Legacy
+        # ParametricOutputGain wrappers remain readable in updated players.
+        extensions = dict(model.get("extensions", {}))
+        if "linear_volume" in extensions:
+            raise ValueError("Duplicate linear_volume extension")
+        extensions["linear_volume"] = self.curve
+        return {**model, "extensions": extensions}
 
