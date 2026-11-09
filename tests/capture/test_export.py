@@ -72,6 +72,48 @@ def test_hyper_a2_configs_keep_project_controls_and_both_sizes(tmp_path):
     assert learning == build_hyper_a2_learning_config(project)
 
 
+def test_plan_display_indices_include_clean_volume_and_resumed_exports():
+    from nam.capture.export import (
+        apply_model_display_indices,
+        build_hyper_a2_model_config,
+    )
+    from nam.capture.project import KnobModel
+
+    project = _project()
+    # Plan layout: Tone, Volume, Gain; neural training order: Tone, Gain.
+    project.knobs = [
+        project.knobs[1],
+        KnobModel(name="Volume", min=0, max=10, step=0.5,
+                  default=10, clean_volume=True),
+        project.knobs[0],
+    ]
+    neural = build_hyper_a2_model_config(project)["net"]["config"]["params"]
+    assert [(p["name"], p["index"]) for p in neural] == [("Tone", 0), ("Gain", 2)]
+
+    # Old paused training jobs might still export param specs without indices.
+    parent = [{"name": "Gain"}, {"name": "Tone"}]
+    exported = {
+        "architecture": "ParametricSlimmableContainer",
+        "config": {
+            "params": [dict(p) for p in parent],
+            "submodels": [
+                {"config": {"params": [dict(p) for p in parent]}}
+                for _ in range(2)
+            ],
+        },
+        "extensions": {"linear_volume": {"name": "Volume", "index": 0}},
+    }
+    apply_model_display_indices(
+        exported, [knob.model_dump() for knob in project.knobs]
+    )
+    assert [(p["name"], p["index"]) for p in exported["config"]["params"]] == [
+        ("Gain", 2), ("Tone", 0)
+    ]
+    for child in exported["config"]["submodels"]:
+        assert child["config"]["params"] == exported["config"]["params"]
+    assert exported["extensions"]["linear_volume"]["index"] == 1
+
+
 def test_level_calibration_is_optional_and_exported_for_every_architecture(tmp_path):
     from nam.capture.export import build_hyper_a2_model_config
     from nam.capture.project import load_project, save_project
