@@ -207,6 +207,11 @@ def advance_calibration(project, root):
         for entry in main:
             if entry is reference_entry or entry.status != "captured":
                 continue
+            # CaptureSession explicitly identifies a verified silent minimum.
+            # A noise-floor recording does not have a meaningful crest factor
+            # and must not trigger a non-linearity warning.
+            if entry.user_metadata.get("output_gain", {}).get("silent_minimum"):
+                continue
             peak, rms = _dbfs(_signal(project, root, entry))
             # A hard mute carries only interface noise (or digital zero), so its
             # measured crest factor cannot describe the pedal's attenuation curve.
@@ -228,6 +233,10 @@ def advance_calibration(project, root):
                 status="measuring",
             )
             return 0
+        # A previously flagged capture may have been re-recorded as silent.
+        # Do not preserve an obsolete warning after reevaluation.
+        if state.get("screen_decision") == "warning":
+            state.update(screen_decision=None, warning_message="")
     if any(e.status != "captured" for e in entries):
         return 0
     values = {
