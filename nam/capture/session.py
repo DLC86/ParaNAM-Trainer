@@ -1285,6 +1285,10 @@ class CaptureSession:
             input_samples=len(x),
         )
         self._write_capture_wav(entry, y, sample_rate)
+        if entry.split == "gain" and not silent_volume:
+            # Re-recording a previously muted position must invalidate its
+            # silence marker; only the current recording may suppress warnings.
+            entry.user_metadata.get("output_gain", {}).pop("silent_minimum", None)
         _mark_captured(
             entry,
             delay=delay,
