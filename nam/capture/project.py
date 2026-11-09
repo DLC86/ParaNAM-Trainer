@@ -412,6 +412,7 @@ class CaptureProject(_BaseModel):
     # planned LHS size drift every time the project is reopened.
     n_train_lhs: int = 0
     lhs_method: Literal["standard", "maximin", "orthogonal", "near_orthogonal"] = "standard"
+    validation_method: Literal["independent", "farthest"] = "independent"
     include_initial_corners: bool = False
     # The lead this project's captures are labelled against, when it is not the current
     # constant. Absent for anything captured under the stateless timebase, which is the
@@ -485,6 +486,7 @@ def new_project(
     n_validation: int,
     seed: int = 0,
     lhs_method: str = "standard",
+    validation_method: str = "independent",
     name: str = "",
     train_input: str = "input_train.wav",
     validation_input: str = "input_validation.wav",
@@ -496,6 +498,7 @@ def new_project(
     train, validation = _plan_captures(
         knobs, n_train=n_train, n_validation=n_validation, seed=seed,
         lhs_method=lhs_method,
+        validation_method=validation_method,
     )
     entries = [
         CaptureEntryModel(
@@ -515,6 +518,7 @@ def new_project(
         entries=entries,
         n_train_lhs=n_train,
         lhs_method=lhs_method,
+        validation_method=validation_method,
         created_with_version=_CAPTURE_APP_VERSION,
     )
 
