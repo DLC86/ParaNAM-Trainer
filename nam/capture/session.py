@@ -1218,7 +1218,10 @@ class CaptureSession:
             end_latency=end_latency,
         )
 
-        silent_volume = not loopback_used and self._silent_volume_minimum(entry, y)
+        verified_silent_volume = self._silent_volume_minimum(entry, y)
+        silent_volume = verified_silent_volume and not loopback_used
+        if verified_silent_volume:
+            entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
         if silent_volume:
             # This clip measures the noise floor, not neural fitting data. A muted
             # output has no timing information and does not need sample alignment.
@@ -1230,7 +1233,6 @@ class CaptureSession:
             qa.end_delay = None
             delay = None
             qa.messages = []
-            entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
         if not silent_volume and (
             not latency.ok
             or not end_latency.ok
@@ -1285,7 +1287,7 @@ class CaptureSession:
             input_samples=len(x),
         )
         self._write_capture_wav(entry, y, sample_rate)
-        if entry.split == "gain" and not silent_volume:
+        if entry.split == "gain" and not verified_silent_volume:
             # Re-recording a previously muted position must invalidate its
             # silence marker; only the current recording may suppress warnings.
             entry.user_metadata.get("output_gain", {}).pop("silent_minimum", None)
