@@ -38,3 +38,14 @@ def test_selected_cell_default_foreground_remains_unchanged(qapp):
     delegate.initStyleOption(option, table.model().index(0, 0))
     assert table.item(0, 0).data(Qt.ItemDataRole.ForegroundRole) is None
     assert option.palette.brush(QPalette.ColorRole.HighlightedText) == expected
+
+
+def test_plan_lhs_selection_is_saved_and_detected_as_a_plan_change(window, workspace):
+    from paranam.workspace import Workspace
+
+    window._attach(workspace)
+    assert window.lhs_method.currentData() == "standard"
+    window.lhs_method.setCurrentIndex(window.lhs_method.findData("maximin"))
+    assert workspace.preferences["lhs_method"] == "maximin"
+    assert workspace.plan_changed()
+    assert Workspace(workspace.directory).preferences["lhs_method"] == "maximin"
