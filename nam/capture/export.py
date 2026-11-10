@@ -277,7 +277,11 @@ def _training_param_specs(project: CaptureProject) -> list[dict[str, _Any]]:
 
 
 
-def apply_model_display_indices(model: dict[str, _Any], plan_controls: list[dict[str, _Any]]) -> None:
+def apply_model_display_indices(
+    model: dict[str, _Any],
+    plan_controls: list[dict[str, _Any]],
+    output_gain: dict[str, _Any] | None = None,
+) -> None:
     """Preserve the Plan control order in final PNAMs, including resumed old jobs.
 
     This changes only JSON display metadata. Neural config.params arrays retain their
@@ -303,7 +307,15 @@ def apply_model_display_indices(model: dict[str, _Any], plan_controls: list[dict
         return
     config = model["config"]
     neural = config["params"]
-    extension = model.get("extensions", {}).get("linear_volume")
+    extensions = model.get("extensions", {})
+    if not isinstance(extensions, dict):
+        raise ValueError("Invalid parametric model extensions")
+    extension = extensions.get("linear_volume")
+    if extension is None and output_gain is not None:
+        # Repair historic checkpoint exports which kept the saved volume curve
+        # in their training recipe but failed to serialize its DSP extension.
+        extension = dict(output_gain)
+        model.setdefault("extensions", {})["linear_volume"] = extension
     volume_name = extension["name"] if extension is not None else None
     names = [c["name"] for c in plan_controls
              if not c.get("clean_volume", False) or c["name"] == volume_name]
