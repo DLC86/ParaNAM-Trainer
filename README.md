@@ -7,11 +7,32 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 
 | Model type | Result |
 | --- | --- |
-| **Parametric** | One `.pnam` containing **HyperA2 Full + Lite**, with the controls you defined |
+| **Parametric** | One `.pnam` with **ParametricSlimmableContainer Full + Lite**, with the controls you defined |
 | **Static** | An independent `.nam` containing **A2 Full + Lite** for each named capture |
 
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
+
+## 1.0.0 draft
+
+The 1.0.0 release is being prepared as an unpublished GitHub Release draft;
+its five native installers will be attached only after their platform tests
+and frozen-application checks have passed.
+
+- Parametric capture planning temporarily offers **Normal** only. The
+  Training method selector, Active Learning fields and explanation are hidden,
+  but the existing Active Learning implementation remains in the source for
+  future restoration. Opening old projects in the UI uses Normal for new captures;
+  existing independently queued training instances retain their frozen settings.
+- **Compare** centers the model's controls within each wrapped row, including
+  rows with fewer controls than the available panel width.
+- **Capture** paints the entire selected running row pure bright green
+  (`#00FF00`), including warnings, labels and control settings.
+- PNAM exports include the Plan display `index` for every neural control,
+  sharing the sequence with Linear Volume while retaining the original
+  hypernetwork input order.
+
+The original 0.7.2 release remains available.
 
 ## 0.7.2 preview
 
