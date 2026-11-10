@@ -737,7 +737,10 @@ def export_best_model(trainer, spec, member, target, selection=None):
         if not static and source.get("knobs"):
             # Also upgrade exports from checkpoints trained before display indices existed.
             from nam.capture.export import apply_model_display_indices
-            apply_model_display_indices(exported, source["knobs"])
+            apply_model_display_indices(
+                exported, source["knobs"],
+                output_gain=spec["model"].get("output_gain") or source.get("output_gain"),
+            )
         metadata = {
             **source.get("user_metadata", {}),
             **spec["model"].get("metadata", {}),
@@ -1552,6 +1555,17 @@ def run_job(job):
                     exported = output / filename
                     if exported.exists():
                         model_dict = read_json(exported)
+                        if exported.name == "model_parametric.pnam" and not spec.get("static_captures"):
+                            # Normal training's final exporter does not use the
+                            # intermediate/snapshot path. Repair *every* member's
+                            # full model here, including jobs begun before v1.0.0.
+                            from nam.capture.export import apply_model_display_indices
+                            apply_model_display_indices(
+                                model_dict,
+                                [control.model_dump() for control in workspace.project.knobs],
+                                output_gain=spec["model"].get("output_gain")
+                                or workspace.project.output_gain,
+                            )
                         annotate_validation_metadata(
                             model_dict,
                             progress.best_metrics,
@@ -1615,14 +1629,25 @@ def run_job(job):
                 source = source.with_suffix(".nam")
             from .model_names import model_basename
 
-            model_metadata = read_json(source).get("metadata", {})
+            selected_model = read_json(source)
+            model_metadata = selected_model.get("metadata", {})
             destination = export / (
                 model_basename(model_metadata.get("name"), "ParaNAM_HyperA2") + ".pnam"
             )
-            shutil.copy2(source, destination)
+            # Re-finalize even a previously completed member: on resume it
+            # might have been exported by an older trainer, and is skipped in
+            # the per-member loop above. Never copy an unannotated PNAM.
+            from nam.capture.export import apply_model_display_indices
+            apply_model_display_indices(
+                selected_model,
+                [control.model_dump() for control in workspace.project.knobs],
+                output_gain=spec["model"].get("output_gain")
+                or workspace.project.output_gain,
+            )
+            atomic_write_json(destination, selected_model)
             shared.update(export=str(destination))
             exported_validation = (
-                read_json(destination).get("metadata", {}).get("training", {})
+                selected_model.get("metadata", {}).get("training", {})
             )
             if (
                 isinstance(exported_validation, dict)
