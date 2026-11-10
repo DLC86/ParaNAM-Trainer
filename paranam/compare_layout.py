@@ -87,7 +87,10 @@ class ControlFlowLayout(QLayout):
         area = rect.adjusted(
             margins.left(), margins.top(), -margins.right(), -margins.bottom()
         )
-        x, y, height = area.x(), area.y(), 0
+        # Measure each wrapped row before placing it, centering every row.
+        rows = []
+        row, row_width, row_height = [], 0, 0
+        gap = self.spacing()
         for item in self.items:
             widget = item.widget()
             size = (
@@ -95,13 +98,27 @@ class ControlFlowLayout(QLayout):
                 if widget
                 else item.sizeHint().expandedTo(item.minimumSize())
             )
-            if x > area.x() and x + size.width() > area.right() + 1:
-                x, y, height = area.x(), y + height + self.spacing(), 0
-            if apply:
-                item.setGeometry(QRect(x, y, size.width(), size.height()))
-            x += size.width() + self.spacing()
-            height = max(height, size.height())
-        return y + height - rect.y() + margins.bottom()
+            next_width = row_width + (gap if row else 0) + size.width()
+            if row and next_width > area.width():
+                rows.append((row, row_width, row_height))
+                row, row_width, row_height = [], 0, 0
+            row_width += (gap if row else 0) + size.width()
+            row_height = max(row_height, size.height())
+            row.append((item, size))
+        if row:
+            rows.append((row, row_width, row_height))
+
+        y = area.y()
+        for row, row_width, row_height in rows:
+            x = area.x() + max(0, (area.width() - row_width) // 2)
+            for item, size in row:
+                if apply:
+                    item.setGeometry(QRect(x, y, size.width(), size.height()))
+                x += size.width() + gap
+            y += row_height + gap
+        if rows:
+            y -= gap
+        return y - rect.y() + margins.bottom()
 
 
 class AssetList(QListWidget):
