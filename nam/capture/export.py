@@ -283,6 +283,20 @@ def apply_model_display_indices(model: dict[str, _Any], plan_controls: list[dict
     This changes only JSON display metadata. Neural config.params arrays retain their
     original order, and the Full/Lite branch copies remain identical to the parent.
     """
+    if model.get("architecture") == "ParametricOutputGain":
+        # Convert old wrapper-based snapshots from resumed training jobs into
+        # the extension-only schema. This changes JSON routing, never weights.
+        legacy = model["config"]
+        extensions = model.setdefault("extensions", {})
+        if not isinstance(extensions, dict) or "linear_volume" in extensions:
+            raise ValueError("Legacy output-volume wrapper duplicates linear_volume")
+        if legacy["base_architecture"] not in (
+            "HyperWaveNet", "HyperA2", "ParametricSlimmableContainer"
+        ):
+            raise ValueError("Legacy output-volume wrapper has invalid neural architecture")
+        extensions["linear_volume"] = legacy["output_gain"]
+        model["architecture"] = legacy["base_architecture"]
+        model["config"] = legacy["base_config"]
     if model.get("architecture") not in (
         "HyperWaveNet", "HyperA2", "ParametricSlimmableContainer", "ConcatWaveNet"
     ):
@@ -295,6 +309,9 @@ def apply_model_display_indices(model: dict[str, _Any], plan_controls: list[dict
              if not c.get("clean_volume", False) or c["name"] == volume_name]
     neural_names = [param["name"] for param in neural]
     expected = neural_names + ([volume_name] if volume_name is not None else [])
+    # The volume is a DSP output extension, not a neural-control dimension.
+    if volume_name is not None and volume_name in neural_names:
+        raise ValueError("Linear Volume must not be a neural network parameter")
     if len(names) != len(expected) or set(names) != set(expected) or len(set(names)) != len(names):
         raise ValueError("Plan controls do not match exported model parameters")
     positions = {name: index for index, name in enumerate(names)}
