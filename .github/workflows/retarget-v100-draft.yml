@@ -32,9 +32,11 @@ jobs:
             sleep 5
           done
           test "$status" = completed
-          release_id=$(gh api "repos/$GH_REPO/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == "v1.0.0" and .draft == true and .prerelease == true) | .id')
-          test "$release_id" = 441009567
+          release_id=441009567
+          # Draft releases may temporarily have an untagged-* API name after
+          # retargeting. Use the existing verified release ID as the source of truth.
+          test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .draft)" = true
+          test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .prerelease)" = true
           tag_sha=$(gh api "repos/$GH_REPO/git/ref/tags/v1.0.0" --jq '.object.sha')
           if [ "$tag_sha" != "$GITHUB_SHA" ]; then
             test "$tag_sha" = "b50b2e8f6c182bfe22bd3496f314eefc7aaebbf0"
@@ -42,8 +44,9 @@ jobs:
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
           fi
           gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
-            -f target_commitish="$GITHUB_SHA" >/dev/null
+            -f tag_name=v1.0.0 -f target_commitish="$GITHUB_SHA" >/dev/null
           test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .target_commitish)" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .tag_name)" = v1.0.0
           gh workflow run paranam-installers.yml --ref v1.0.0 \
             -f target=all -f keep_draft=true -f release_id="$release_id"
           echo "Rebuilt source: $GITHUB_SHA; draft $release_id left unpublished"
