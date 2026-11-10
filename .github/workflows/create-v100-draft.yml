@@ -1,0 +1,108 @@
+name: Create ParaNAM Trainer 1.0.0 draft and build native installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/create-v100-draft.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  launch:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      NOTES: |
+        # ParaNAM Trainer 1.0.0
+
+        This release updates the ParaNAM desktop workflow and native model export
+        handling. It is intentionally left as a **draft** for verification.
+
+        ## Plan: Normal training only (temporary)
+
+        - The **Training method** selector is hidden for now: new parametric
+          capture plans always use **Normal**.
+        - Active Learning rounds and additional-capture controls, together with
+          their explanatory text, are hidden from the Plan interface.
+        - Active Learning code and its settings remain in the project so the
+          feature can be restored later. Opening older projects in the new UI
+          uses Normal for new captures; previously queued training jobs retain
+          their own saved, independent training configurations.
+
+        ## Compare: centered model controls
+
+        - Neural knobs, switch controls, and Clean/Linear Volume are now
+          **horizontally centered** within their Compare control panel.
+        - Every wrapped row is independently centered, preserving the original
+          control order, spacing, values, and audio processing behavior.
+
+        ## Capture: bright green running row
+
+        - The **entire running capture row** uses pure **#00FF00**, including
+          Type, Control settings, Status, Latency, Peak and Warnings.
+        - The selected row no longer loses its running-state color: the active
+          capture stays green, even if warnings are present.
+        - Other status colors, including captured cyan and warning yellow,
+          remain unchanged when the capture is not running.
+
+        ## PNAM control display indices
+
+        - Parametric exports include an optional zero-based `index` on neural
+          controls, matching the display order set on Plan.
+        - A single display index sequence includes Clean/Linear Volume.
+          The neural-network parameter order and weights remain unchanged.
+        - Full/Lite containers receive matching display metadata; exports
+          from resumed older training sessions are also supported.
+        - Updated NAM Parametric Plugin and NeuralAudio runtimes use these
+          indices for GUI/control API order. Older runtimes that ignore
+          unrecognized fields continue using their original ordering.
+
+        ## Native installers
+
+        Five native downloads are produced from the same Git commit after
+        automated tests, frozen-app checks, and platform-specific validation:
+
+        - **Windows x64**: setup executable (CPU, optional NVIDIA support).
+        - **macOS Apple Silicon**: arm64 DMG (Metal/CPU).
+        - **macOS Intel**: x86_64 DMG (CPU).
+        - **Linux x86_64**: Debian package and portable tarball (CPU,
+          optional NVIDIA support).
+
+        The macOS bundles are unsigned/not notarized; system installation
+        confirmation may be required. Previous releases and project captures
+        are not removed or automatically regenerated.
+
+        This 1.0.0 draft follows [v0.7.2](https://github.com/DLC86/ParaNAM-Trainer/releases/tag/v0.7.2).
+        **Do not publish the draft until explicitly approved.**
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release revision and create draft with embedded release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx '__version__ = "1.0.0"' paranam/__init__.py
+          grep -Fx 'version = "1.0.0"' pyproject.toml
+          if gh api "repos/$GH_REPO/git/ref/tags/v1.0.0" > /dev/null 2>&1; then
+            echo "v1.0.0 tag already exists; refusing to move it" >&2
+            exit 1
+          fi
+          if gh api "repos/$GH_REPO/releases/tags/v1.0.0" > /dev/null 2>&1; then
+            echo "v1.0.0 release already exists" >&2
+            exit 1
+          fi
+          gh api -X POST "repos/$GH_REPO/git/refs" \
+            -f ref=refs/tags/v1.0.0 -f sha="$GITHUB_SHA"
+          gh release create v1.0.0 --verify-tag --draft --prerelease \
+            --latest=false --target "$GITHUB_SHA" \
+            --title "ParaNAM Trainer 1.0.0" --notes "$NOTES"
+          release_id=$(gh api "repos/$GH_REPO/releases/tags/v1.0.0" --jq .id)
+          test "$release_id" -gt 0
+          echo "Created draft release $release_id at commit $GITHUB_SHA"
+          gh workflow run paranam-installers.yml --ref v1.0.0 \
+            -f target=all -f keep_draft=true -f release_id="$release_id"
+          echo "Dispatched installer matrix for draft $release_id"
