@@ -117,6 +117,57 @@ def test_selected_capture_row_preserves_warning_and_completed_text(qapp):
     table.close()
 
 
+
+def test_real_running_capture_row_is_bright_green_even_with_warning(window, workspace, qapp):
+    """Check the actual Capture renderer, including the selected row."""
+    window._attach(workspace)
+    entry = window._capture_entries[0]
+    entry.status = "pending"
+    entry.qa = None
+    # Simulate a capture with a warning. Running must always take priority.
+    from types import SimpleNamespace
+    entry.qa = SimpleNamespace(
+        messages=["Capture level warning"], peak=None, loopback_delay=None,
+        subsample_shift=None,
+    )
+    window.worker = object()
+    window._recorded_capture_path = entry.y_path
+    # The production row-rendering path; avoid playback-worker setup in this UI test.
+    original_update = window.update_enabled
+    window.update_enabled = lambda: None
+    try:
+        window.refresh_captures()
+        row = next(i for i, candidate in enumerate(window._capture_entries)
+                   if candidate.y_path == entry.y_path)
+        assert window.capture_table.currentRow() == row
+        assert window.capture_table.item(row, 2).text() == "Running"
+        for column in range(window.capture_table.columnCount()):
+            item = window.capture_table.item(row, column)
+            assert item.foreground().color() == QColor("#00ff00"), (
+                column, item.text(), item.foreground().color().name()
+            )
+        window.navigate(2)
+        window.show()
+        qapp.processEvents()
+        image = window.capture_table.viewport().grab().toImage()
+        for column in range(window.capture_table.columnCount()):
+            rect = window.capture_table.visualItemRect(
+                window.capture_table.item(row, column)
+            )
+            if not rect.isValid() or rect.width() < 30:
+                continue
+            pixels = [
+                image.pixelColor(x, y)
+                for y in range(max(0, rect.top() + 2), min(image.height(), rect.bottom()))
+                for x in range(max(0, rect.left() + 2), min(image.width(), rect.right()))
+            ]
+            assert any(p.green() > 175 and p.red() < 110 and p.blue() < 110
+                       for p in pixels), column
+    finally:
+        window.worker = None
+        window._recorded_capture_path = None
+        window.update_enabled = original_update
+
 def test_plan_lhs_selection_is_saved_and_detected_as_a_plan_change(window, workspace):
     from paranam.workspace import Workspace
 
