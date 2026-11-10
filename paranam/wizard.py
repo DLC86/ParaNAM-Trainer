@@ -630,7 +630,7 @@ class WizardWindow(
         self.metadata_editor.changed.connect(self.save_metadata)
         metadata_box.addWidget(self.metadata_editor)
         layout.addWidget(self.metadata_card)
-        self.plan_card, box = card("Capture plan & learning method")
+        self.plan_card, box = card("Capture plan")
         form = QFormLayout()
         self.mode = QComboBox()
         self.mode.addItem("Normal — capture the plan, then train", "normal")
@@ -639,7 +639,9 @@ class WizardWindow(
             "active_learning",
         )
         self.plan_form = form
+        # The selector and active-learning implementation are retained for later.
         form.addRow("Training method", self.mode)
+        form.setRowVisible(self.mode, False)
         form.addRow(
             "Model format",
             self._model_format_label(),
@@ -699,6 +701,9 @@ class WizardWindow(
                 "muted",
             )
         )
+        # Keep the explanation for future restoration, but hide it for Normal-only training.
+        self.active_learning_help = box.itemAt(box.count() - 1).widget()
+        self.active_learning_help.hide()
         layout.addWidget(self.plan_card)
         for field in (
             self.n_train,
@@ -1589,7 +1594,8 @@ class WizardWindow(
                     prefs.get("validation_method", "independent")
                 ))
             )
-            self.mode.setCurrentIndex(max(0, self.mode.findData(prefs["mode"])))
+            # Hidden training method is pinned to Normal for all parametric captures.
+            self.mode.setCurrentIndex(self.mode.findData("normal"))
             self.signal_mode.setCurrentIndex(
                 max(0, self.signal_mode.findData(prefs["input_mode"]))
             )
@@ -2212,11 +2218,7 @@ class WizardWindow(
             self.load_advanced_options(next_type)
         prefs.update(
             capture_type=self.capture_kind.currentData(),
-            mode=(
-                "normal"
-                if self.capture_kind.currentData() == "static"
-                else self.mode.currentData()
-            ),
+            mode="normal",  # Active Learning remains implemented but unavailable.
             device=self.accelerator.currentData(),
             corners=self.corners.isChecked(),
             lhs_method=self.lhs_method.currentData(),
@@ -2258,9 +2260,11 @@ class WizardWindow(
             self.rounds,
             self.additions,
         ):
-            self.plan_form.setRowVisible(widget, not static)
-        self.rounds.setEnabled(not static and prefs["mode"] == "active_learning")
-        self.additions.setEnabled(prefs["mode"] == "active_learning")
+            self.plan_form.setRowVisible(
+                widget, not static and widget not in (self.mode, self.rounds, self.additions)
+            )
+        self.rounds.setEnabled(False)
+        self.additions.setEnabled(False)
         self.workspace.save()
         self.refresh_recommendation()
         self.refresh_rate_preview()
@@ -2508,11 +2512,12 @@ class WizardWindow(
                 has_warning = bool(
                     self._capture_metrics(entry)[2] not in ("—", "")
                 )
+                # Running overrides warnings and paints every column, even when selected.
                 color = (
-                    "#ffff00"
-                    if has_warning
-                    else "#00ff00"
+                    "#00ff00"
                     if running
+                    else "#ffff00"
+                    if has_warning
                     else "#00ffff"
                     if entry.status == "captured"
                     else "#f0f0f0"
