@@ -2145,6 +2145,12 @@ class WizardWindow(
         if self._loading or not self.workspace or self.busy():
             return
         prefs = self.workspace.preferences
+        # Do not let hidden Active Learning survive from an old project or
+        # programmatic combo change; retain all code for later re-enabling.
+        if self.mode.currentData() != "normal":
+            self.mode.blockSignals(True)
+            self.mode.setCurrentIndex(self.mode.findData("normal"))
+            self.mode.blockSignals(False)
         for field, key in (
             (self.n_train, "n_train"),
             (self.n_validation, "n_validation"),
