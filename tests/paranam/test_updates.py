@@ -8,7 +8,8 @@ import pytest
 from paranam import updates
 
 
-def published_release(version="1.0.0", payload=b"verified installer"):
+def published_release(version="99.0.0", payload=b"verified installer"):
+    # Mock release must be newer than the installed app, including v1.0.0.
     tag = "v" + version + "-preview"
     name = f"ParaNAM-Trainer-{version}-{updates.asset_suffix()}"
     return dict(
@@ -127,7 +128,7 @@ def test_dismiss_persists_for_that_release_but_led_and_new_release_remain(window
     window.show_update_notice()  # LED reopens the notification after Dismiss.
     assert window._update_dialog is not None
     window._update_dialog.reject()
-    window._update_checked(updates.release_info(published_release("1.1.0")))
+    window._update_checked(updates.release_info(published_release("99.1.0")))
     assert window._update_dialog is not None
     window._update_dialog.reject()
 
