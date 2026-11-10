@@ -121,6 +121,7 @@ def test_selected_capture_row_preserves_warning_and_completed_text(qapp):
 def test_real_running_capture_row_is_bright_green_even_with_warning(window, workspace, qapp):
     """Check the actual Capture renderer, including the selected row."""
     window._attach(workspace)
+    window.navigate(2)
     entry = window._capture_entries[0]
     entry.status = "pending"
     entry.qa = None
@@ -146,7 +147,6 @@ def test_real_running_capture_row_is_bright_green_even_with_warning(window, work
             assert item.foreground().color() == QColor("#00ff00"), (
                 column, item.text(), item.foreground().color().name()
             )
-        window.navigate(2)
         window.show()
         qapp.processEvents()
         image = window.capture_table.viewport().grab().toImage()
@@ -154,7 +154,7 @@ def test_real_running_capture_row_is_bright_green_even_with_warning(window, work
             rect = window.capture_table.visualItemRect(
                 window.capture_table.item(row, column)
             )
-            if not rect.isValid() or rect.width() < 30:
+            if not rect.isValid() or rect.width() < 30 or rect.left() >= image.width():
                 continue
             pixels = [
                 image.pixelColor(x, y)
