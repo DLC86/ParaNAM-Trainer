@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           grep -Fx '__version__ = "1.0.0"' paranam/__init__.py
           grep -Fx 'version = "1.0.0"' pyproject.toml
-          old_run=42915711872
+          old_run=42916511391
           gh run cancel "$old_run" -R "$GH_REPO" || true
           status=""
           for attempt in $(seq 1 100); do
@@ -37,7 +37,7 @@ jobs:
           test "$release_id" = 441009567
           tag_sha=$(gh api "repos/$GH_REPO/git/ref/tags/v1.0.0" --jq '.object.sha')
           if [ "$tag_sha" != "$GITHUB_SHA" ]; then
-            test "$tag_sha" = "d9fcecc9a6a2634d409000ac35835b1ee8b76c87"
+            test "$tag_sha" = "b50b2e8f6c182bfe22bd3496f314eefc7aaebbf0"
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/v1.0.0" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
           fi
