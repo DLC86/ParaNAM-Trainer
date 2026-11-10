@@ -149,12 +149,19 @@ def test_seven_pages_and_back_navigation_keep_drafts(window, workspace):
     window._attach(workspace)
     assert window.pages.count() == 7
     window.navigate(1)
+    # Hidden legacy Active Learning cannot be selected or persisted.
+    assert window.plan_form.isRowVisible(window.mode) is False
+    assert window.plan_form.isRowVisible(window.rounds) is False
+    assert window.plan_form.isRowVisible(window.additions) is False
+    assert window.active_learning_help.isHidden()
     window.mode.setCurrentIndex(1)
+    assert window.mode.currentData() == "normal"
+    assert workspace.preferences["mode"] == "normal"
     window.epochs.setValue(75)
     window.back()
     assert window.pages.currentIndex() == 0
     window.next()
-    assert window.mode.currentData() == "active_learning"
+    assert window.mode.currentData() == "normal"
     assert workspace.preferences["epochs"] == 75
     window.next()
     assert window.pages.currentIndex() == 2
