@@ -127,6 +127,11 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     workspace.preferences["epochs"] = epochs
     workspace.save()
     job = tiny_job(workspace, monkeypatch)
+    # Simulate a 0.7.2 recipe: the neural control has no UI index metadata.
+    spec = read_json(job / "spec.json")
+    for param in spec["model"]["net"]["config"]["params"]:
+        param.pop("index", None)
+    atomic_write_json(job / "spec.json", spec)
     training.command(job, "pause")
     training.run_job(job)
     progress = training.job_progress(job)
@@ -148,6 +153,12 @@ def test_pause_resume_real_training_preserves_optimizer_and_exports_both_sizes(
     assert final["architecture"] == "ParametricSlimmableContainer"
     assert final["config"]["size"] == "full"
     assert [s["name"] for s in final["config"]["submodels"]] == ["lite", "full"]
+    assert [param["index"] for param in final["config"]["params"]] == [0]
+    assert all(
+        [param["index"] for param in child["config"]["params"]] == [0]
+        for child in final["config"]["submodels"]
+    ), "Resumed legacy final model is missing neural display indices"
+    assert final["architecture"] != "ParametricOutputGain"
     assert final["metadata"]["input_level_dbu"] == 18
     assert final["metadata"]["output_level_dbu"] == 12
     summary = final["metadata"]["training"]
