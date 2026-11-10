@@ -140,10 +140,11 @@ def test_compare_flow_packs_with_constant_gap(qapp):
     parent.show()
     qapp.processEvents()
     layout.setGeometry(QRect(0, 0, 580, 500))
-    assert [w.x() for w in widgets[:3]] == [0, 156, 312]
+    assert [w.x() for w in widgets[:3]] == [68, 224, 380]
+    assert widgets[3].x() == 224
     assert widgets[3].y() == 184
     layout.setGeometry(QRect(0, 0, 900, 500))
-    assert [w.x() for w in widgets] == [0, 156, 312, 468]
+    assert [w.x() for w in widgets] == [150, 306, 462, 618]
     parent.close()
 
 
