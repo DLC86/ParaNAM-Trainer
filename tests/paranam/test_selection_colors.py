@@ -154,7 +154,15 @@ def test_real_running_capture_row_is_bright_green_even_with_warning(window, work
             rect = window.capture_table.visualItemRect(
                 window.capture_table.item(row, column)
             )
-            if not rect.isValid() or rect.width() < 30 or rect.left() >= image.width():
+            # A standalone em dash can be omitted or drawn with faint subpixel
+            # antialiasing by Windows fonts. ForegroundRole is checked above
+            # for every cell; check actual colored glyphs only for real text.
+            if (
+                not rect.isValid()
+                or rect.width() < 30
+                or rect.left() >= image.width()
+                or window.capture_table.item(row, column).text() in ("", "—")
+            ):
                 continue
             pixels = [
                 image.pixelColor(x, y)
