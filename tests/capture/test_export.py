@@ -114,6 +114,28 @@ def test_plan_display_indices_include_clean_volume_and_resumed_exports():
     assert exported["extensions"]["linear_volume"]["index"] == 1
 
 
+def test_output_volume_hook_never_wraps_or_adds_a_neural_input():
+    import pytest
+    from nam.capture.output_gain import OutputGainExportHook
+
+    native = {
+        "architecture": "ParametricSlimmableContainer",
+        "config": {"params": [{"name": "Gain", "index": 1}]},
+        "weights": [0.25],
+    }
+    curve = {"name": "Volume", "index": 0, "schema_version": 1}
+    hook = OutputGainExportHook(curve)
+    result = hook.apply(native)
+    assert result["architecture"] == "ParametricSlimmableContainer"
+    assert result["config"]["params"] == [{"name": "Gain", "index": 1}]
+    assert result["extensions"] == {"linear_volume": curve}
+    assert result["weights"] == native["weights"]
+    assert result is not native
+    with pytest.raises(ValueError, match="Duplicate"):
+        hook.apply(result)
+
+
+
 def test_resumed_legacy_linear_volume_is_only_an_extension():
     from copy import deepcopy
     from nam.capture.export import apply_model_display_indices
