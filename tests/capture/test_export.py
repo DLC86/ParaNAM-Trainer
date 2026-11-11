@@ -114,6 +114,66 @@ def test_plan_display_indices_include_clean_volume_and_resumed_exports():
     assert exported["extensions"]["linear_volume"]["index"] == 1
 
 
+def test_resumed_legacy_linear_volume_is_only_an_extension():
+    from copy import deepcopy
+    from nam.capture.export import apply_model_display_indices
+
+    plan = [
+        {"name": "Tone", "clean_volume": False},
+        {"name": "Volume", "clean_volume": True},
+        {"name": "Gain", "clean_volume": False},
+    ]
+    base = {
+        "params": [{"name": "Gain"}, {"name": "Tone"}],
+        "submodels": [
+            {"config": {"params": [{"name": "Gain"}, {"name": "Tone"}]}}
+            for _ in ("lite", "full")
+        ],
+    }
+    original_curve = {"name": "Volume", "index": 0, "schema_version": 1}
+    legacy = {
+        "architecture": "ParametricOutputGain",
+        "config": {
+            "base_architecture": "ParametricSlimmableContainer",
+            "base_config": deepcopy(base),
+            "output_gain": deepcopy(original_curve),
+        },
+        "weights": [11.0, -5.0],
+    }
+    apply_model_display_indices(legacy, plan)
+    assert legacy["architecture"] == "ParametricSlimmableContainer"
+    assert "base_config" not in legacy["config"]
+    assert "output_gain" not in legacy["config"]
+    assert legacy["extensions"]["linear_volume"]["index"] == 1
+    assert legacy["weights"] == [11.0, -5.0]
+    assert [p["index"] for p in legacy["config"]["params"]] == [2, 0]
+    assert all(
+        branch["config"]["params"] == legacy["config"]["params"]
+        for branch in legacy["config"]["submodels"]
+    )
+    # Re-applying to an already finalized file is safe and cannot duplicate Volume.
+    apply_model_display_indices(legacy, plan, output_gain=original_curve)
+    assert list(legacy["extensions"]) == ["linear_volume"]
+
+    # Very old files that omitted their output stage can restore it solely
+    # from the saved training recipe, never as an extra neural parameter.
+    missing = {
+        "architecture": "ParametricSlimmableContainer",
+        "config": deepcopy(base),
+        "weights": [11.0, -5.0],
+    }
+    apply_model_display_indices(missing, plan, output_gain=original_curve)
+    assert missing["extensions"]["linear_volume"]["index"] == 1
+    assert len(missing["config"]["params"]) == 2
+
+    invalid = deepcopy(missing)
+    invalid["config"]["params"][0]["name"] = "Volume"
+    import pytest
+    with pytest.raises(ValueError, match="Linear Volume"):
+        apply_model_display_indices(invalid, plan)
+
+
+
 def test_level_calibration_is_optional_and_exported_for_every_architecture(tmp_path):
     from nam.capture.export import build_hyper_a2_model_config
     from nam.capture.project import load_project, save_project
