@@ -1,0 +1,28 @@
+name: Restore release tag for 1.0.0 draft before installer uploads
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/restore-v100-draft-tag.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Restore explicit draft release tag and verify pinned build source
+        shell: bash
+        run: |
+          set -euo pipefail
+          id=441009567
+          source=aaaa07fc9d5f4755e66993d9f3642a74ac7749a0
+          test "$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)" = true
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/v1.0.0" --jq '.object.sha')" = "$source"
+          gh api -X PATCH "repos/$GH_REPO/releases/$id" \
+            -f tag_name=v1.0.0 -f target_commitish="$source" >/dev/null
+          test "$(gh api "repos/$GH_REPO/releases/$id" --jq .tag_name)" = v1.0.0
+          test "$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)" = true
+          echo "v1.0.0 draft tag restored; source remains pinned to $source"
