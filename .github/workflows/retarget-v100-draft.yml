@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           grep -Fx '__version__ = "1.0.0"' paranam/__init__.py
           grep -Fx 'version = "1.0.0"' pyproject.toml
-          old_run=42918380589
+          old_run=42928180210
           gh run cancel "$old_run" -R "$GH_REPO" || true
           status=""
           for attempt in $(seq 1 100); do
@@ -39,7 +39,7 @@ jobs:
           test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .prerelease)" = true
           tag_sha=$(gh api "repos/$GH_REPO/git/ref/tags/v1.0.0" --jq '.object.sha')
           if [ "$tag_sha" != "$GITHUB_SHA" ]; then
-            test "$tag_sha" = "3f1ba690fb2bbabca09801d1caef7aa1ef07b79b"
+            test "$tag_sha" = "b267b4d26eb832a6c98e0fc2c1b50728f08ecd5c"
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/v1.0.0" \
               -f sha="$GITHUB_SHA" -F force=true >/dev/null
           fi
@@ -49,13 +49,13 @@ jobs:
           test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq .tag_name)" = v1.0.0
           # Preserve the existing notes; describe this source refresh in-place.
           notes=$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.body')
-          marker="### Draft refresh: resumed-training indices and Linear Volume"
+          marker="### Final installer refresh: validated legacy PNAM export"
           if [[ "$notes" != *"$marker"* ]]; then
             notes="$notes
 
           $marker
 
-          - Fixed final PNAM exports from training begun on v0.7.2 and finished on
+          - Confirmed final PNAM exports from training begun on v0.7.2 and finished on
             v1.0.0: neural controls now receive their Plan display \`index\` in the
             top-level config and both Lite/Full submodels, including completed members.
           - Clean/Linear Volume is exported exclusively as
@@ -64,7 +64,7 @@ jobs:
             Legacy wrapper-based snapshot files are converted to extension-only format
             without changing their weights; saved curves are restored when an older
             intermediate export omitted the extension.
-          - Added regression tests for resumed legacy training and single-extension
+          - Updated legacy completed-member regression fixtures to include neural\n            parameter declarations, verifying unmodified audio weights and metadata.\n          - Added regression tests for resumed legacy training and single-extension
             volume exports. All five installers are rebuilt from commit
             \`$GITHUB_SHA\`. This release **remains a draft**."
             gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
