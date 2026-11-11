@@ -53,20 +53,20 @@ jobs:
           if [[ "$notes" != *"$marker"* ]]; then
             notes="$notes
 
-$marker
+          $marker
 
-- Fixed final PNAM exports from training begun on v0.7.2 and finished on
-  v1.0.0: neural controls now receive their Plan display \`index\` in the
-  top-level config and both Lite/Full submodels, including completed members.
-- Clean/Linear Volume is exported exclusively as
-  \`extensions.linear_volume\`, not as the legacy
-  \`ParametricOutputGain\` wrapper or as a hypernetwork input.
-  Legacy wrapper-based snapshot files are converted to extension-only format
-  without changing their weights; saved curves are restored when an older
-  intermediate export omitted the extension.
-- Added regression tests for resumed legacy training and single-extension
-  volume exports. All five installers are rebuilt from commit
-  \`$GITHUB_SHA\`. This release **remains a draft**."
+          - Fixed final PNAM exports from training begun on v0.7.2 and finished on
+            v1.0.0: neural controls now receive their Plan display \`index\` in the
+            top-level config and both Lite/Full submodels, including completed members.
+          - Clean/Linear Volume is exported exclusively as
+            \`extensions.linear_volume\`, not as the legacy
+            \`ParametricOutputGain\` wrapper or as a hypernetwork input.
+            Legacy wrapper-based snapshot files are converted to extension-only format
+            without changing their weights; saved curves are restored when an older
+            intermediate export omitted the extension.
+          - Added regression tests for resumed legacy training and single-extension
+            volume exports. All five installers are rebuilt from commit
+            \`$GITHUB_SHA\`. This release **remains a draft**."
             gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
               -f body="$notes" -f tag_name=v1.0.0 >/dev/null
           fi
