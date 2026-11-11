@@ -1,0 +1,43 @@
+name: Repair formatting in 1.0.0 draft release notes
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/repair-v100-release-notes.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  repair-notes:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify draft and fix escaped newlines in release notes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          repo = os.environ['GH_REPO']
+          url = f'repos/{repo}/releases/441009567'
+          release = json.loads(subprocess.check_output(['gh', 'api', url], text=True))
+          assert release['draft'] and release['tag_name'] == 'v1.0.0'
+          assert release['target_commitish'] == 'aaaa07fc9d5f4755e66993d9f3642a74ac7749a0'
+          body = release['body']
+          bad = (
+              '- Updated legacy completed-member regression fixtures to include neural'
+              r'\n            parameter declarations, verifying unmodified audio weights and metadata.'
+              r'\n          - Added regression tests for resumed legacy training and single-extension'
+          )
+          fixed = (
+              '- Updated legacy completed-member regression fixtures to include neural\n'
+              '  parameter declarations, verifying unmodified audio weights and metadata.\n'
+              '- Added regression tests for resumed legacy training and single-extension'
+          )
+          assert body.count(bad) == 1, 'Expected exactly one malformed release note'
+          subprocess.run(
+              ['gh', 'api', '-X', 'PATCH', url, '-f', 'body=' + body.replace(bad, fixed)],
+              check=True,
+          )
+          print('Corrected draft release note formatting; release remains unpublished')
+          PY
