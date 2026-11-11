@@ -262,7 +262,13 @@ def test_completed_parametric_member_exports_pnam_without_losing_metadata(
     member.mkdir()
     model = {
         "architecture": "HyperA2",
-        "config": {"submodels": [{"name": "lite"}, {"name": "full"}]},
+        "config": {
+            "params": [{"name": "Gain"}],
+            "submodels": [
+                {"name": size, "config": {"params": [{"name": "Gain"}]}}
+                for size in ("lite", "full")
+            ],
+        },
         "weights": [1.25, -0.5],
         "metadata": {
             "input_level_dbu": 18.125,
@@ -286,8 +292,14 @@ def test_completed_parametric_member_exports_pnam_without_losing_metadata(
     assert progress["status"] == "completed", progress
     exported = Path(progress["export"])
     assert exported.suffix == ".pnam"
-    assert read_json(exported) == model
-    assert original.exists()
+    # The completed legacy member is *copied* but finalized for display order
+    # without mutating its original weights, metadata or saved model.
+    expected = json.loads(json.dumps(model))
+    expected["config"]["params"][0]["index"] = 0
+    for child in expected["config"]["submodels"]:
+        child["config"]["params"][0]["index"] = 0
+    assert read_json(exported) == expected
+    assert read_json(original) == model
 
 
 @pytest.mark.parametrize("legacy", [False, True])
