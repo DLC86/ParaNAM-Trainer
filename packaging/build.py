@@ -61,7 +61,20 @@ def main():
     bundle = ROOT / "dist" / "ParaNAM Trainer"
     arch = platform.machine().lower()
     if sys.platform == "win32":
-        executable = bundle / "ParaNAM Trainer.exe"
+        # The native GUI launcher starts immediately and holds the singleton
+        # mutex while the frozen Core application runs. Internal CLI workers,
+        # tests and installation modes are passed through unchanged.
+        launcher = bundle / "ParaNAM Trainer.exe"
+        run(
+            "cl", "/nologo", "/O2", "/EHsc", "/std:c++17",
+            "/DUNICODE", "/D_UNICODE", "/MT",
+            str(ROOT / "native" / "windows_launcher.cpp"),
+            "/link", "/SUBSYSTEM:WINDOWS",
+            f"/OUT:{launcher}", "user32.lib",
+        )
+        if not launcher.is_file() or not (bundle / "ParaNAM Trainer Core.exe").is_file():
+            raise RuntimeError("Windows native launcher or frozen Core is missing")
+        executable = launcher
     elif sys.platform == "darwin":
         executable = (
             ROOT

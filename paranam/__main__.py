@@ -243,6 +243,27 @@ def main():
             encoding="utf-8",
         )
         return 0
+    # Also enforce a GUI singleton if a user runs "ParaNAM Trainer Core.exe"
+    # directly instead of using the native Windows Start-menu launcher.
+    # Worker, updater, installer and self-test modes above remain unrestricted.
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = [
+            ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p
+        ]
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        gui_guard = kernel32.CreateMutexW(
+            None, False, "Local\\DLC86_ParaNAM_Trainer_CORE_67A2"
+        )
+        if not gui_guard:
+            raise OSError(ctypes.get_last_error(), "Cannot create application lock")
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle(gui_guard)
+            return 0
+
     from PySide6.QtCore import Qt, QStandardPaths
     from PySide6.QtGui import QPixmap, QColor, QIcon
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox

@@ -56,7 +56,11 @@ analysis = Analysis([str(root / "packaging" / "launcher.py")], pathex=[str(root)
                               "pytest", "tensorboard", "transformers", "triton"],
                     runtime_hooks=[str(root / "packaging" / "runtime.py")], noarchive=False)
 pyz = PYZ(analysis.pure)
-exe = EXE(pyz, analysis.scripts, [], exclude_binaries=True, name="ParaNAM Trainer",
+# The Windows Start-menu entry is a tiny Win32 executable so the shell never
+# needs to wait for PyInstaller/Python/Torch startup. Worker invocations still
+# use sys.executable, which points to the bundled Core process.
+exe_name = "ParaNAM Trainer Core" if sys.platform == "win32" else "ParaNAM Trainer"
+exe = EXE(pyz, analysis.scripts, [], exclude_binaries=True, name=exe_name,
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False,
           icon=str(root / "packaging" / "icon.ico") if sys.platform == "win32" and (root / "packaging" / "icon.ico").exists() else None)
 bundle = COLLECT(exe, analysis.binaries, analysis.datas, strip=False, upx=False, name="ParaNAM Trainer")

@@ -30,9 +30,23 @@ def installation_manifest(asset, info, workers=()):
     else:
         target = executable.parent
     manifest = asset.parent / "install.json"
+    # sys.executable belongs to PyInstaller's child Core process on Windows.
+    # The installed shortcut and restart target belong to its native launcher.
+    restart_executable = executable
+    launcher_pid = None
+    if system == "Windows" and executable.name == "ParaNAM Trainer Core.exe":
+        launcher = executable.with_name("ParaNAM Trainer.exe")
+        if launcher.is_file():
+            restart_executable = launcher
+            try:
+                parent = psutil.Process(os.getppid())
+                if parent.name().casefold() == "paranam trainer.exe":
+                    launcher_pid = parent.pid
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
     data = dict(
         asset=str(asset.resolve()),
-        executable=str(executable),
+        executable=str(restart_executable),
         target=str(target),
         system=system,
         pid=os.getpid(),
@@ -41,6 +55,7 @@ def installation_manifest(asset, info, workers=()):
         size=info["asset"]["size"],
         version=info["version"],
         workers=list(workers),
+        launcher_pid=launcher_pid,
     )
     with manifest.open("w", encoding="utf-8") as output:
         json.dump(data, output)
@@ -65,6 +80,13 @@ def windows_script(data, result):
         f'/LOG="{result.with_name("installer.log")}"',
     ]
     arguments = ", ".join(ps_literal(arg) for arg in installer_args)
+    # The native launcher holds the installed executable open until GUI exit;
+    # wait for it before an installer overwrites the application directory.
+    launcher_wait = (
+        f"    $launcher = Get-Process -Id {int(data['launcher_pid'])} -ErrorAction SilentlyContinue\\n"
+        "    if ($launcher) { $launcher | Wait-Process -Timeout 60 }"
+        if data.get("launcher_pid") else ""
+    )
     worker_waits = "\n".join(
         f"    $workerProcess = Get-Process -Id {int(worker['pid'])} -ErrorAction SilentlyContinue\n"
         "    if ($workerProcess) { $workerProcess | Wait-Process -Timeout 1800 }"
@@ -75,6 +97,7 @@ $result = @{{ok=$false; error=''}}
 try {{
     $parentProcess = Get-Process -Id {int(data['pid'])} -ErrorAction SilentlyContinue
     if ($parentProcess) {{ $parentProcess | Wait-Process -Timeout 1800 }}
+{launcher_wait}
 {worker_waits}
     if ((Get-FileHash -LiteralPath {ps_literal(data['asset'])} -Algorithm SHA256).Hash.ToLowerInvariant() -ne {ps_literal(expected)}) {{ throw 'Installer integrity check failed' }}
     $installer = Start-Process -FilePath {ps_literal(data['asset'])} -ArgumentList @({arguments}) -Wait -PassThru -WindowStyle Hidden
