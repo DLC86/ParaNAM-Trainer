@@ -23,7 +23,6 @@ API void* pn_load(const char* path, double sampleRate, int blockSize, int lite) 
   try {
     auto model = std::make_unique<Playback>();
     if (!model->engine.LoadModel(path, error, lite ? ModelSize::Lite : ModelSize::Full)) return nullptr;
-    model->engine.SetControlTransition(ControlTransition::Eco);
     model->engine.Reset(sampleRate, blockSize);
     nlohmann::json controls = nlohmann::json::array();
     const auto& values = model->engine.GetParameterValues();
@@ -31,7 +30,8 @@ API void* pn_load(const char* path, double sampleRate, int blockSize, int lite) 
     for (size_t i = 0; i < params.size(); ++i) {
       const auto& p = params[i];
       controls.push_back({{"name", p.name}, {"min", p.minValue}, {"max", p.maxValue},
-                          {"default", values[i]}, {"positions", p.enumNames}});
+                          {"default", values[i]}, {"positions", p.enumNames},
+                          {"position_values", p.enumValues}});
     }
     model->info = nlohmann::json({{"controls", controls},
         {"size_selection", model->engine.SupportsSizeSelection()},

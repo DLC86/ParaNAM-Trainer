@@ -968,12 +968,23 @@ class PlayActions:
             if control["positions"]:
                 slider = SlideSwitch(control["positions"])
                 slider.setAccessibleName(control["name"])
-                slider.setValue(int(self.play_values[index]))
+                # The UI enumerates options in index_sw order, but the native
+                # model and session state must keep the original neural values.
+                position_values = tuple(
+                    control.get("position_values") or range(len(control["positions"]))
+                )
+                neural_value = int(self.play_values[index])
+                visual_index = (
+                    position_values.index(neural_value)
+                    if neural_value in position_values else 0
+                )
+                slider.setValue(visual_index)
                 column.addWidget(slider, alignment=Qt.AlignmentFlag.AlignCenter)
                 widget = SwitchPositions(slider)
                 slider.valueChanged.connect(widget.update)
                 slider.valueChanged.connect(
-                    lambda value, i=index: self._play_parameter(i, float(value))
+                    lambda value, i=index, values=position_values:
+                        self._play_parameter(i, float(values[value]))
                 )
             else:
                 dial = ModelPlayDial()

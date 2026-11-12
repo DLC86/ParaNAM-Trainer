@@ -9,6 +9,37 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(RUNTIME "${CMAKE_CURRENT_LIST_DIR}/../external/playback-runtime")
 set(CORE "${RUNTIME}/external/nam_core_parametric")
 set(AUDIO "${RUNTIME}/external/AudioDSPTools")
+# Mirror the current plugin's final single-network convolution interpolation.
+# The core is pinned in external/playback-runtime and never modified by users
+# at runtime. Apply idempotent patches only while configuring the native build.
+set(PNAM_BASE_PATCH "${RUNTIME}/patches/core-hyperwavenet-single-weight-smoothing.patch")
+if(NOT EXISTS "${CORE}/NAM/kernel_weight_smoothing.h")
+  execute_process(
+    COMMAND git -C "${CORE}" apply --reverse --check "${PNAM_BASE_PATCH}"
+    RESULT_VARIABLE BASE_ALREADY OUTPUT_QUIET ERROR_QUIET)
+  if(NOT BASE_ALREADY EQUAL 0)
+    execute_process(
+      COMMAND git -C "${CORE}" apply --check "${PNAM_BASE_PATCH}"
+      RESULT_VARIABLE BASE_CAN_APPLY ERROR_VARIABLE BASE_ERROR)
+    if(NOT BASE_CAN_APPLY EQUAL 0)
+      message(FATAL_ERROR "Pinned playback NAM smoothing patch: ${BASE_ERROR}")
+    endif()
+    execute_process(
+      COMMAND git -C "${CORE}" apply "${PNAM_BASE_PATCH}"
+      RESULT_VARIABLE BASE_RESULT)
+    if(NOT BASE_RESULT EQUAL 0)
+      message(FATAL_ERROR "Playback NAM smoothing baseline patch failed")
+    endif()
+  endif()
+endif()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" "${RUNTIME}/patches/apply-direct-kernel-smoothing.py" "${CORE}"
+  RESULT_VARIABLE DIRECT_RESULT OUTPUT_VARIABLE DIRECT_OUTPUT ERROR_VARIABLE DIRECT_ERROR)
+if(NOT DIRECT_RESULT EQUAL 0)
+  message(FATAL_ERROR "Playback direct-kernel weight smoothing patch: ${DIRECT_ERROR}")
+endif()
+message(STATUS "${DIRECT_OUTPUT}")
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS "${CORE}/NAM/*.cpp" "${CORE}/NAM/*/*.cpp")
 # Keep the plugin DSP unchanged except for Windows Unicode path interpretation.
 file(READ "${RUNTIME}/Source/DSP/NamModelEngine.cpp" ENGINE_SOURCE)
