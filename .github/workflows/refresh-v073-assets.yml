@@ -139,6 +139,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           import subprocess
           import urllib.request
 
@@ -174,9 +175,20 @@ jobs:
           assert release['target_commitish'] == old_sha, 'Draft source changed unexpectedly'
           assets = {a['name']: a for a in release['assets']}
           original = {name: assets[name] for name in names}
+          staged_names = {name + '.staged-' + short for name in names}
           staged = {name: assets[name + '.staged-' + short] for name in names}
-          assert set(assets) == names | {
-              name + '.staged-' + short for name in names}, 'Unexpected asset set'
+          # A failed earlier run may have uploaded some (but not all) stages.
+          # Keep them until every new package passes the final validation.
+          stale_stages = {
+              name: asset for name, asset in assets.items()
+              if name not in staged_names and any(
+                  name.startswith(package + '.staged-')
+                  and re.fullmatch(
+                      r'[0-9a-f]{12}', name[len(package + '.staged-'):])
+                  for package in names)
+          }
+          assert set(assets) == names | staged_names | set(stale_stages), (
+              'Unexpected release assets; refusing to replace anything')
           assert all(a['state'] == 'uploaded' and a['size'] > 100000
                      for a in staged.values())
 
@@ -208,6 +220,11 @@ jobs:
                   raise
               remove(previous)
               print('Replaced verified asset:', name, flush=True)
+
+          # Remove only recognized staging files left by earlier failed runs.
+          for stale_name, stale_asset in sorted(stale_stages.items()):
+              remove(stale_asset)
+              print('Removed obsolete stage:', stale_name, flush=True)
 
           verified = api('GET', '/releases/' + str(release_id))
           assert verified['draft'] and verified['prerelease']
