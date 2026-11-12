@@ -1,0 +1,240 @@
+name: Refresh draft 0.7.3 — verified native installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-v073-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-v073-verified-assets
+  cancel-in-progress: false
+
+jobs:
+  targets:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        run: |
+          python3 - <<'PY'
+          import json, os
+          with open('packaging/targets.json') as stream:
+              targets = json.load(stream)
+          assert {t['id'] for t in targets} == {
+              'windows', 'linux', 'macos-arm64', 'macos-intel'}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(targets) + '\n')
+          PY
+
+  build:
+    needs: targets
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prefer pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Verify exact draft and source version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          release = json.loads(subprocess.check_output(
+              ['gh','api','repos/'+os.environ['GH_REPO']+'/releases/441009567']))
+          assert release['draft'] and release['prerelease'], 'Draft must remain unpublished'
+          assert release['tag_name'] == 'v0.7.3'
+          assert '__version__ = "0.7.3"' in Path('paranam/__init__.py').read_text()
+          PY
+      - name: Free Linux runner disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Linux audio and Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libportaudio2 libasound2 libpulse0 libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libfontconfig1 libdbus-1-3
+      - name: Enable MSVC for Win32 launcher
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Windows installer compiler
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+      - name: Install bundled training engine
+        run: python -m pip install --no-cache-dir "torch==${{ matrix.torch }}" --index-url "${{ matrix.index }}"
+      - name: Install application and build dependencies
+        run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
+      - name: Build optimized native Compare engine
+        run: python packaging/native_engine.py
+      - name: Test Projects, metadata, Compare, training and singleton guard
+        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Freeze application and package native installer
+        run: python packaging/build.py --flavor ${{ matrix.flavor }}
+      - name: Verify frozen CPU app and optional NVIDIA engine
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          PARANAM_RUNTIME_ROOT: ${{ github.workspace }}/build/optional-gpu
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer.exe" build
+          else
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
+          fi
+      - name: Stage tested packages on existing 0.7.3 draft (originals untouched)
+        shell: bash
+        run: |
+          set -euo pipefail
+          short="\${GITHUB_SHA:0:12}"
+          shopt -s nullglob
+          packages=(installers/*)
+          test \${#packages[@]} -ge 1
+          for package in "\${packages[@]}"; do
+            test -f "$package"
+            test "$(wc -c < "$package")" -gt 100000
+            staged="$package.staged-$short"
+            mv "$package" "$staged"
+            gh release upload v0.7.3 "$staged" --clobber
+          done
+
+  finalize:
+    needs: [targets, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate all five staged native packages and safely replace originals
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          repo = os.environ['GH_REPO']
+          sha = os.environ['SOURCE_SHA']
+          base = f'https://api.github.com/repos/{repo}'
+          token = os.environ['GH_TOKEN']
+          release_id = 441009567
+          old_sha = 'b2e7ca654b5a9f3dea7adce8182969983495d08f'
+          tag = 'v0.7.3'
+          prefix = 'ParaNAM-Trainer-0.7.3-'
+          names = {
+              prefix + suffix for suffix in (
+                  'Windows-x64-Setup.exe', 'Linux-amd64.deb',
+                  'Linux-x86_64.tar.gz', 'macOS-arm64.dmg', 'macOS-x86_64.dmg')
+          }
+          short = sha[:12]
+          headers = {'Authorization': 'Bearer ' + token,
+                     'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'}
+          def api(method, path, data=None):
+              payload = None if data is None else json.dumps(data).encode('utf-8')
+              h = dict(headers)
+              if payload is not None: h['Content-Type'] = 'application/json'
+              request = urllib.request.Request(
+                  base + path, method=method, data=payload, headers=h)
+              with urllib.request.urlopen(request, timeout=120) as response:
+                  return None if response.status == 204 else json.load(response)
+
+          release = api('GET', '/releases/' + str(release_id))
+          assert release['draft'] and release['prerelease'], 'Never touch a published release'
+          assert release['tag_name'] == tag
+          assert release['target_commitish'] == old_sha, 'Draft source changed unexpectedly'
+          assets = {a['name']: a for a in release['assets']}
+          original = {name: assets[name] for name in names}
+          staged = {name: assets[name + '.staged-' + short] for name in names}
+          assert set(assets) == names | {
+              name + '.staged-' + short for name in names}, 'Unexpected asset set'
+          assert all(a['state'] == 'uploaded' and a['size'] > 100000
+                     for a in staged.values())
+
+          current = api('GET', '/git/ref/heads/main')['object']['sha']
+          assert current == sha, 'Source changed during the build; refusing stale assets'
+          ref = api('GET', '/git/ref/tags/' + tag)
+          assert ref['object']['sha'] == old_sha, 'Draft tag changed unexpectedly'
+
+          # Move the DRAFT tag only after all test/install/packaging jobs pass.
+          # Keep GitHub-generated source archives consistent with new binaries.
+          api('PATCH', '/git/refs/tags/' + tag, {'sha': sha, 'force': True})
+          api('PATCH', '/releases/' + str(release_id),
+              {'target_commitish': sha})
+
+          def rename(asset, name):
+              return api('PATCH', '/releases/assets/' + str(asset['id']),
+                         {'name': name})
+          def remove(asset):
+              api('DELETE', '/releases/assets/' + str(asset['id']))
+
+          # Each replacement can be rolled back if its staged rename fails.
+          for name in sorted(names):
+              previous = original[name]
+              rename(previous, name + '.backup-' + short)
+              try:
+                  rename(staged[name], name)
+              except Exception:
+                  rename(previous, name)
+                  raise
+              remove(previous)
+              print('Replaced verified asset:', name, flush=True)
+
+          verified = api('GET', '/releases/' + str(release_id))
+          assert verified['draft'] and verified['prerelease']
+          final_assets = {a['name']: a for a in verified['assets']}
+          assert set(final_assets) == names
+          for name in sorted(names):
+              asset = final_assets[name]
+              assert asset['id'] == staged[name]['id']
+              assert asset['size'] == staged[name]['size']
+              assert asset['state'] == 'uploaded'
+              if staged[name].get('digest'):
+                  assert asset['digest'] == staged[name]['digest']
+          marker = '<!-- v073-gemm-projects-singleton-refresh -->'
+          body = verified.get('body') or ''
+          assert marker not in body
+          body += (
+              '\n\n' + marker + '\n'
+              '### Refreshed draft installers — 12 November 2026\n\n'
+              '- Compare: optimized single-network GEMM delta convolution smoothing '
+              'matching the NAM Parametric Plugin 0.5.2 implementation.\n'
+              '- Projects: confirm before Delete, optional (unchecked) folder deletion.\n'
+              '- Metadata: independent input/output dBu fields and a blank input-impedance hint.\n'
+              '- Windows: fast native Start-menu launcher. Windows, macOS and Linux: '
+              'only one interactive GUI instance; workers and update helpers remain independent.\n\n'
+              'All five native packages were rebuilt, tested, and checked from '
+              '[commit ' + sha[:12] + '](https://github.com/' + repo +
+              '/commit/' + sha + '). The draft remains unpublished.\n')
+          api('PATCH', '/releases/' + str(release_id), {'body': body})
+          print('SUCCESS: refreshed all 0.7.3 draft assets without publishing')
+          PY
