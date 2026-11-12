@@ -95,6 +95,8 @@ jobs:
         run: python packaging/native_engine.py
       - name: Test Projects, metadata, Compare, training and singleton guard
         run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      # Windows packaging also smoke-tests the native launcher and its
+      # inherited stdout pipe for Inno Setup's PNGPU progress protocol.
       - name: Freeze application and package native installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Verify frozen CPU app and optional NVIDIA engine
