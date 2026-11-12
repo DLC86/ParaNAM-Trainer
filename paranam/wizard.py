@@ -411,7 +411,7 @@ class WizardWindow(
         dialog.setWindowTitle("Delete project")
         dialog.setText(f"Remove '{name}' from the Projects list?")
         dialog.setInformativeText(
-            f"{project_path}\\n\\nProject files will be kept unless you select the option below."
+            f"{project_path}\n\nProject files will be kept unless you select the option below."
         )
         delete_files = QCheckBox(
             "Also delete the project folder and all its contents", dialog

@@ -83,7 +83,7 @@ def windows_script(data, result):
     # The native launcher holds the installed executable open until GUI exit;
     # wait for it before an installer overwrites the application directory.
     launcher_wait = (
-        f"    $launcher = Get-Process -Id {int(data['launcher_pid'])} -ErrorAction SilentlyContinue\\n"
+        f"    $launcher = Get-Process -Id {int(data['launcher_pid'])} -ErrorAction SilentlyContinue\n"
         "    if ($launcher) { $launcher | Wait-Process -Timeout 60 }"
         if data.get("launcher_pid") else ""
     )
