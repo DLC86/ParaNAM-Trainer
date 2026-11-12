@@ -109,7 +109,10 @@ def test_switch_labels_defaults_and_calibration_survive_project_and_exports(tmp_
         config = builder(restored)
         params = config["net"]["config"]["params"]
         assert params[1]["type"] == "switch"
-        assert params[1]["enum_names"] == list(specs[1].enum_names)
+        assert params[1]["options"] == [
+            {"name": name, "value": i, "index_sw": i}
+            for i, name in enumerate(specs[1].enum_names)
+        ]
         assert params[1]["default"] == 1
 
 

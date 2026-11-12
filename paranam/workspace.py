@@ -90,6 +90,7 @@ def control_from_dict(data):
             tuple(data["enum_names"]),
             data.get("default", 0),
             data.get("planning_mode", "complex"),
+            tuple(data["option_indices"]) if data.get("option_indices") is not None else None,
         )
     return KnobSpec.from_dict(data)
 
