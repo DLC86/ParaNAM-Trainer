@@ -60,9 +60,29 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR arguments, int) {
 
   STARTUPINFOW start{};
   start.cb = sizeof(start);
+  // Inno Setup's ExecAndLogOutput and our frozen installer validation pass
+  // an inherited stdout pipe. Forward it through this native launcher to
+  // the windowed PyInstaller Core; otherwise --configure-installation cannot
+  // emit the expected PnGPU progress protocol to its caller.
+  BOOL inheritStdHandles = FALSE;
+  if (!interactive) {
+    const HANDLE stdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    const HANDLE stdErr = GetStdHandle(STD_ERROR_HANDLE);
+    if ((stdOut && stdOut != INVALID_HANDLE_VALUE) ||
+        (stdErr && stdErr != INVALID_HANDLE_VALUE)) {
+      start.dwFlags |= STARTF_USESTDHANDLES;
+      start.hStdOutput = (stdOut && stdOut != INVALID_HANDLE_VALUE)
+          ? stdOut : stdErr;
+      start.hStdError = (stdErr && stdErr != INVALID_HANDLE_VALUE)
+          ? stdErr : stdOut;
+      start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+      inheritStdHandles = TRUE;
+    }
+  }
   PROCESS_INFORMATION child{};
   if (!CreateProcessW(core.c_str(), commandBuffer.data(), nullptr, nullptr,
-                      FALSE, 0, nullptr, directory.c_str(), &start, &child)) {
+                      inheritStdHandles, 0, nullptr, directory.c_str(),
+                      &start, &child)) {
     MessageBoxW(nullptr, L"Could not start ParaNAM Trainer.",
                 kWindowTitle, MB_OK | MB_ICONERROR);
     if (mutex) CloseHandle(mutex);
