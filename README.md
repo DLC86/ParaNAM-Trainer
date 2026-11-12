@@ -13,44 +13,6 @@ ParaNAM supports parametric models with knobs and switches, and batches of stati
 Both sizes are trained together. There is no Full/Lite choice at capture time;
 select the playback size later in a compatible player.
 
-## 1.0.0 draft
-
-The 1.0.0 release is being prepared as an unpublished GitHub Release draft;
-its five native installers will be attached only after their platform tests
-and frozen-application checks have passed.
-
-- Parametric capture planning temporarily offers **Normal** only. The
-  Training method selector, Active Learning fields and explanation are hidden,
-  but the existing Active Learning implementation remains in the source for
-  future restoration. Opening old projects in the UI uses Normal for new captures;
-  existing independently queued training instances retain their frozen settings.
-- **Compare** centers the model's controls within each wrapped row, including
-  rows with fewer controls than the available panel width.
-- **Capture** paints the entire selected running row pure bright green
-  (`#00FF00`), including warnings, labels and control settings.
-- PNAM exports include the Plan display `index` for every neural control,
-  sharing the sequence with Linear Volume while retaining the original
-  hypernetwork input order.
-
-The original 0.7.2 release remains available.
-
-## 0.7.2 preview
-
-[Find ParaNAM Trainer releases and drafts](https://github.com/DLC86/ParaNAM-Trainer/releases).
-
-- Captures and Queue retain each row's original status text color while selected.
-- The Plan page offers Standard, Maximin, Orthogonal and Near-orthogonal LHS designs.
-- Recommended LHS capture counts increase from 15 to **16 per control**.
-- Existing plans keep their selected design (Standard for older projects) until regenerated.
-
-Orthogonal uses a strength-2 orthogonal-array LHS and requires a prime-square
-number of samples per split and Complex Switch combination (e.g. 9, 25 or 49)
-with no more than p+1 sampled dimensions for n=p². Anchoring, quantization,
-control bias and switch mapping may weaken the theoretical design properties.
-
-See [0.7.2 changes](docs/release-0.7.2.md) and
-[previous 0.7.0 changes](docs/release-0.7.0.md).
-
 ## Credits
 
 ParaNAM Trainer builds on **[Phillip Self](https://github.com/phillipmself)**'s
