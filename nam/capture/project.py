@@ -226,10 +226,12 @@ class SwitchModel(_BaseModel):
     enum_names: list[str]
     default: int = 0
     planning_mode: str = "complex"
+    option_indices: Optional[list[int]] = None
 
     def to_knob_spec(self) -> SwitchSpec:
         return SwitchSpec(
-            self.name, tuple(self.enum_names), self.default, self.planning_mode
+            self.name, tuple(self.enum_names), self.default, self.planning_mode,
+            None if self.option_indices is None else tuple(self.option_indices)
         )
 
 
