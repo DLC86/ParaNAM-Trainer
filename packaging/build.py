@@ -65,12 +65,22 @@ def main():
         # mutex while the frozen Core application runs. Internal CLI workers,
         # tests and installation modes are passed through unchanged.
         launcher = bundle / "ParaNAM Trainer.exe"
+        # Embed the branded icon in the native launcher, not just in the Core,
+        # so Start-menu and desktop shortcuts keep the same visual identity.
+        resource = ROOT / "build" / "paranam-launcher.rc"
+        resource.parent.mkdir(exist_ok=True)
+        resource.write_text(
+            '1 ICON "' + str((ROOT / "packaging" / "icon.ico").resolve()) + '"\n',
+            encoding="utf-8",
+        )
+        resource_binary = resource.with_suffix(".res")
+        run("rc", "/nologo", f"/fo{resource_binary}", resource)
         run(
             "cl", "/nologo", "/O2", "/EHsc", "/std:c++17",
             "/DUNICODE", "/D_UNICODE", "/MT",
             str(ROOT / "native" / "windows_launcher.cpp"),
             "/link", "/SUBSYSTEM:WINDOWS",
-            f"/OUT:{launcher}", "user32.lib",
+            f"/OUT:{launcher}", resource_binary, "user32.lib",
         )
         if not launcher.is_file() or not (bundle / "ParaNAM Trainer Core.exe").is_file():
             raise RuntimeError("Windows native launcher or frozen Core is missing")
