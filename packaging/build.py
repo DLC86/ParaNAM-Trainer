@@ -70,7 +70,9 @@ def main():
         resource = ROOT / "build" / "paranam-launcher.rc"
         resource.parent.mkdir(exist_ok=True)
         resource.write_text(
-            '1 ICON "' + str((ROOT / "packaging" / "icon.ico").resolve()) + '"\n',
+            # Windows resource scripts treat backslashes as escape prefixes.
+            # Forward slashes keep the absolute drive path unambiguous for rc.exe.
+            '1 ICON "' + (ROOT / "packaging" / "icon.ico").resolve().as_posix() + '"\n',
             encoding="utf-8",
         )
         resource_binary = resource.with_suffix(".res")
