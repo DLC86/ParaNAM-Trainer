@@ -274,3 +274,42 @@ def test_play_callback_routes_only_send_and_stereo_monitors(qapp, monkeypatch):
     for output in outputs:
         assert not output[:, [1, 4, 5]].any()
         np.testing.assert_array_equal(output[:, 2], output[:, 3])
+
+
+def test_compare_uses_plugin_weight_update_cadence_while_controls_move(tmp_path):
+    require_native()
+    torch.manual_seed(151)
+    model = HyperA2.init_from_config(dict(
+        sample_rate=48000,
+        params=[dict(name="Gain", min=0, max=10, default=5)],
+        hypernet=dict(hidden_sizes=[4], mode="full"),
+    )).eval()
+    with torch.no_grad():
+        for size in model.sizes:
+            model.branch(size)._hypernet._final.weight.normal_(0, 0.02)
+    export_parametric(model, tmp_path)
+    x = np.random.default_rng(34).normal(0, .15, 16000).astype(np.float32)
+    movement = 1500
+    first_update_after = 4800  # The plugin's fixed cadence is 100 ms at 48 kHz.
+
+    def render(next_change, lite, move=True):
+        native = NativeModel(tmp_path / "model.pnam", block_size=257, lite=lite)
+        try:
+            result = [native.process(x[:movement])]
+            if move:
+                native.parameters([10.0])
+            result.append(native.process(x[movement:next_change]))
+            if move:
+                native.parameters([0.0])
+            result.append(native.process(x[next_change:]))
+            return np.concatenate(result)
+        finally:
+            native.close()
+
+    for lite in (False, True):
+        early = render(movement + 1100, lite)
+        scheduled = render(movement + first_update_after, lite)
+        stationary = render(movement + first_update_after, lite, move=False)
+        np.testing.assert_allclose(early, scheduled, atol=3e-6, rtol=3e-5)
+        assert abs(early[movement] - stationary[movement]) < 5e-5
+        assert np.max(np.abs(early - stationary)) > 1e-4

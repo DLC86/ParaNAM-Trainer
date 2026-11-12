@@ -96,7 +96,7 @@ def snapshot_workspace(workspace, root):
     )
     project.validation_input = freeze(project.validation_input, "input_validation.wav")
     for index, entry in enumerate(project.entries):
-        if entry.y_path:
+        if entry.y_path and entry.status == "captured":
             entry.y_path = freeze(
                 entry.y_path, f"captures/entry-{index:05d}-{entry.split}.wav"
             )

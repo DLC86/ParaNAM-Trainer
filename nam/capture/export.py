@@ -125,8 +125,14 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
     project's per-split windowing defaults.
     """
     splits: dict[str, list[dict[str, _Any]]] = {"train": [], "validation": []}
+    imported = {
+        e.capture_id for e in project.captured_entries()
+        if project.capture_type == "static" and e.split == "train" and e.validation_from_tail
+    }
     for entry in project.captured_entries():
-        if entry.split not in splits:
+        if entry.split not in splits or (
+            entry.split == "validation" and entry.capture_id in imported
+        ):
             continue
         window = project.window_for_split(entry.split)
         splits[entry.split].append(
@@ -155,6 +161,12 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
                 "ny": window.ny,
             }
         )
+        if entry.split == "train" and entry.capture_id in imported:
+            training = splits["train"][-1]
+            training.update(start_seconds=10.0, stop_seconds=-9.0)
+            splits["validation"].append(
+                {**training, "start_seconds": -9.0, "stop_seconds": None, "ny": None}
+            )
     return {
         "type": "dataset" if project.capture_type == "static" else "parametric",
         "common": {"delay": 0},

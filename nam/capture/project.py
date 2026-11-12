@@ -368,6 +368,7 @@ class CaptureEntryModel(_BaseModel):
     index: int
     capture_id: _Optional[str] = None
     capture_name: _Optional[str] = None
+    validation_from_tail: bool = False  # Static WAV import reserves the last 9 seconds.
     user_metadata: dict[str, _Any] = _Field(default_factory=dict)
     split: Literal["train", "validation", "gain"]
     params: dict[str, float | str]

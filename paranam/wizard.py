@@ -762,7 +762,7 @@ class WizardWindow(
         row.addWidget(self.record_button)
         self.load_capture_button = button("Load WAV", self.load_static_wav)
         self.load_capture_button.setToolTip(
-            "Import aligned mono WAV returns for the selected training and validation inputs."
+            "Import the aligned mono return for the input selected in Plan."
         )
         self.load_capture_button.hide()
         row.addWidget(self.load_capture_button)
@@ -2454,7 +2454,7 @@ class WizardWindow(
             self.record_button.setText("Record")
         if self.worker is None:
             self.capture_status.setText(
-                "Select a named capture below, set your rig, then record its training and validation signals."
+                "Select a named capture below. Record it here or load the aligned return for the input selected in Plan."
                 if static
                 else "Select a capture below. Set the real controls to match the diagram."
             )
@@ -2464,7 +2464,11 @@ class WizardWindow(
             else "My rig matches the control positions shown above"
         )
         if static:
-            groups = self.workspace.static_groups()
+            required = {e.y_path for e in self.workspace.training_capture_entries()}
+            groups = [
+                [e for e in group if e.y_path in required]
+                for group in self.workspace.static_groups()
+            ]
             entries = [
                 next((e for e in group if e.status != "captured"), group[0])
                 for group in groups
@@ -2565,9 +2569,10 @@ class WizardWindow(
                     item.setText("Running")
                 self.capture_table.setItem(row, col, item)
         self.capture_table.blockSignals(False)
-        completed = sum(e.status == "captured" for e in project.entries)
+        counted = self.workspace.training_capture_entries() if static else project.entries
+        completed = sum(e.status == "captured" for e in counted)
         self.capture_summary.setText(
-            f"{len(entries)} static model(s) · {completed} of {len(project.entries)} signals captured. Each model records training and validation without changing the rig between them."
+            f"{len(entries)} static model(s) · {completed} of {len(counted)} required signals captured. Imported WAVs use their held-out tail for validation."
             if static
             else f"{completed} of {len(entries)} captured · {len(entries) - completed} remaining. Ordered to change fewer controls and turn knobs less."
         )
@@ -2616,36 +2621,19 @@ class WizardWindow(
             return
         entry = self._capture_entries[row]
         path, _ = self.choose_open_file(
-            "Choose an aligned training return (or training + validation WAV)",
+            "Choose the aligned return for the input selected in Plan",
             "WAV audio (*.wav)",
         )
         if not path:
             return
         try:
             session = self._get_session()
-            train, rate = session._input_for_split("train")
-            validation, _ = session._input_for_split("validation")
-            from nam.data import wav_to_np
-
-            samples = wav_to_np(path, rate=rate)
-            if len(samples) == len(train) + len(validation):
-                returns = (samples[:len(train)], samples[len(train):])
-            else:
-                if len(samples) != len(train):
-                    raise ValueError(f"Training return must have {len(train)} samples or include the "
-                                     f"{len(validation)} validation samples immediately after them.")
-                validation_path, _ = self.choose_open_file(
-                    "Choose the aligned validation return", "WAV audio (*.wav)"
-                )
-                if not validation_path:
-                    return
-                returns = (samples, wav_to_np(validation_path, rate=rate))
-            session.import_static_returns(entry.capture_id, returns)
+            session.import_static_return(entry.capture_id, path)
             self._recorded_capture_path = entry.y_path
             self.workspace.project = session.project
             self.refresh_captures()
             self.capture_progress.setValue(100)
-            self.capture_status.setText("Imported training and validation WAV returns.")
+            self.capture_status.setText("Imported WAV. The last nine seconds are reserved for validation.")
         except Exception as error:
             self.notify_error(error)
 
@@ -2708,7 +2696,10 @@ class WizardWindow(
                 if static
                 else [entry]
             )
-            captures = [e for e in group if e.status != "captured"] or group
+            captures = (
+                group if static and any(e.validation_from_tail for e in group)
+                else [e for e in group if e.status != "captured"] or group
+            )
             if any(e.status == "captured" for e in captures):
                 backup = (
                     self.workspace.directory

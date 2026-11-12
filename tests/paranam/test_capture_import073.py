@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -59,8 +60,14 @@ def test_plan_avoids_negative_min_but_keeps_zero():
     assert {p["Bias"] for p in corner_settings([specs[0].to_param_spec()])} == {-1, 2}
 
 
-def test_static_capture_loads_external_pair_without_interface(window, workspace, monkeypatch):
-    workspace.preferences["capture_type"] = "static"
+@pytest.mark.parametrize("input_mode", ["standard", "tts"])
+def test_static_capture_loads_one_sweep_without_interface(
+    window, workspace, monkeypatch, tmp_path, input_mode
+):
+    from paranam.training_queue import TrainingQueue
+    from paranam.workspace import read_json
+
+    workspace.preferences.update(capture_type="static", input_mode=input_mode)
     workspace.generate_plan()
     window._attach(workspace)
     window.navigate(2)
@@ -69,16 +76,32 @@ def test_static_capture_loads_external_pair_without_interface(window, workspace,
     assert not window.device.currentData()
     session = window._get_session()
     training, rate = session._input_for_split("train")
-    validation, _ = session._input_for_split("validation")
     wav = workspace.directory / "external.wav"
-    np_to_wav(np.full(len(training) + len(validation), .25), wav, rate=rate)
-    monkeypatch.setattr(window, "choose_open_file", lambda *_: (str(wav), ""))
+    np_to_wav(np.full(len(training), .25), wav, rate=rate)
+    dialogs = []
+    def choose(*args):
+        dialogs.append(args)
+        return str(wav), ""
+    monkeypatch.setattr(window, "choose_open_file", choose)
     monkeypatch.setattr(window, "notify_error", lambda error: pytest.fail(str(error)))
     window.load_static_wav()
     assert window.capture_progress.value() == 100
-    assert all(e.status == "captured" for e in workspace.project.entries)
-    assert all(e.delay == -1 and e.qa.peak < 0 for e in workspace.project.entries)
+    assert len(dialogs) == 1
+    train_entry, validation_entry = workspace.project.entries
+    assert train_entry.status == "captured" and train_entry.validation_from_tail
+    assert train_entry.delay == -1 and train_entry.qa.peak < 0
+    assert validation_entry.status == "pending"
+    assert not (workspace.directory / validation_entry.y_path).exists()
     assert workspace.training_ready()
+    job = TrainingQueue(tmp_path / "queue").add(workspace)
+    spec = read_json(Path(job["job"]) / "spec.json")
+    train = spec["data"]["train"][0]
+    val = spec["data"]["validation"][0]
+    assert (train["x_path"], train["y_path"], train["delay"]) == (
+        val["x_path"], val["y_path"], val["delay"]
+    )
+    assert (train["start_seconds"], train["stop_seconds"]) == (10.0, -9.0)
+    assert (val["start_seconds"], val["stop_seconds"], val["ny"]) == (-9.0, None, None)
 
 
 def test_non_asio_dropout_aborts_and_rejects_partial_recording(monkeypatch):

@@ -599,6 +599,18 @@ class Workspace:
             == hashlib.sha256(asset_path("validation.wav").read_bytes()).digest()
         )
 
+    def training_capture_entries(self):
+        entries = self.project.entries
+        if self.project.capture_type != "static":
+            return entries
+        imported = {
+            e.capture_id for e in entries
+            if e.split == "train" and e.status == "captured" and e.validation_from_tail
+        }
+        return [
+            e for e in entries if e.split != "validation" or e.capture_id not in imported
+        ]
+
     def training_ready(self):
         from nam.capture.output_gain import volume_control
 
@@ -624,7 +636,7 @@ class Workspace:
                     )
                 )
             )
-            for e in self.project.entries
+            for e in self.training_capture_entries()
         )
 
     def training_batch_size(self):
@@ -729,7 +741,7 @@ class Workspace:
             "files": [],
         }
         for relative in [self.project.train_input, self.project.validation_input] + [
-            e.y_path for e in self.project.entries
+            e.y_path for e in self.training_capture_entries()
         ]:
             path = self.directory / relative
             stat = path.stat()
