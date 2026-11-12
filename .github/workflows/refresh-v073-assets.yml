@@ -112,11 +112,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          short="\${GITHUB_SHA:0:12}"
+          short="${GITHUB_SHA:0:12}"
           shopt -s nullglob
           packages=(installers/*)
-          test \${#packages[@]} -ge 1
-          for package in "\${packages[@]}"; do
+          test ${#packages[@]} -ge 1
+          for package in "${packages[@]}"; do
             test -f "$package"
             test "$(wc -c < "$package")" -gt 100000
             staged="$package.staged-$short"
