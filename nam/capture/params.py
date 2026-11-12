@@ -183,6 +183,7 @@ class SwitchSpec:
     enum_names: tuple[str, ...]
     default: int = 0
     planning_mode: str = "complex"
+    option_indices: _Optional[tuple[int, ...]] = None
 
     def __post_init__(self):
         object.__setattr__(self, "name", str(self.name).strip())
@@ -194,6 +195,8 @@ class SwitchSpec:
         if len({label.casefold() for label in labels}) != len(labels):
             raise ValueError("Switch position names must be unique (ignoring case)")
         object.__setattr__(self, "enum_names", labels)
+        if self.option_indices is not None:
+            object.__setattr__(self, "option_indices", tuple(self.option_indices))
         self.to_param_spec()  # Validate the name, count and default index.
 
     @property
@@ -209,6 +212,7 @@ class SwitchSpec:
             type="switch",
             enum_names=self.enum_names,
             simple_switch=self.planning_mode == "simple",
+            option_indices=self.option_indices,
         )
 
     def to_dict(self) -> dict[str, _Any]:
@@ -217,6 +221,7 @@ class SwitchSpec:
             "name": self.name,
             "enum_names": list(self.enum_names),
             "default": self.default,
+            **({"option_indices": list(self.option_indices)} if self.option_indices is not None else {}),
             **({"planning_mode": "simple"} if self.planning_mode == "simple" else {}),
         }
 

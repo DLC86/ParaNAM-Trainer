@@ -64,6 +64,9 @@ class ParamSpec:
     clean_volume: bool = False
     # Optional UI position. It never changes the neural-network input order.
     index: _Optional[int] = None
+    # Visual order of each switch choice; value remains the original 0..N-1
+    # neural index. Internal enum_names stay ordered by neural value.
+    option_indices: _Optional[tuple[int, ...]] = None
 
     def __post_init__(self):
         if not self.name:
@@ -87,6 +90,8 @@ class ParamSpec:
             )
 
         if self.type == _CONTINUOUS:
+            if self.option_indices is not None:
+                raise ValueError("Continuous ParamSpec cannot define option_indices")
             if self.enum_names is not None:
                 raise ValueError(
                     f"Continuous ParamSpec {self.name!r} cannot define enum_names"
@@ -151,6 +156,14 @@ class ParamSpec:
         object.__setattr__(self, "max", max_index)
         object.__setattr__(self, "default", default_index)
         object.__setattr__(self, "enum_names", enum_names)
+        indices = tuple(range(len(enum_names))) if self.option_indices is None else tuple(self.option_indices)
+        if len(indices) != len(enum_names) or any(
+            isinstance(i, bool) or not isinstance(i, int) for i in indices
+        ) or set(indices) != set(range(len(enum_names))):
+            raise ValueError(
+                f"Switch ParamSpec {self.name!r} option index_sw values must be a unique 0..N-1 permutation"
+            )
+        object.__setattr__(self, "option_indices", indices)
 
     @property
     def normalization(self) -> str:
@@ -176,17 +189,24 @@ class ParamSpec:
         return len(self.enum_names)
 
     def to_dict(self) -> dict[str, _Any]:
-        return {
+        result = {
             "name": self.name,
             "min": self.min,
             "max": self.max,
             "default": self.default,
             "type": self.type,
-            "enum_names": None if self.enum_names is None else list(self.enum_names),
             "step": self.step,
             "avoid_zero": self.avoid_zero,
             **({"index": self.index} if self.index is not None else {}),
         }
+        if self.type == _SWITCH:
+            result["options"] = [
+                {"name": name, "value": neural_value, "index_sw": self.option_indices[neural_value]}
+                for neural_value, name in enumerate(self.enum_names)
+            ]
+        else:
+            result["enum_names"] = None
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, _Any]) -> "ParamSpec":
@@ -199,11 +219,36 @@ class ParamSpec:
                 f"ParamSpec config is missing required field(s): {missing_keys_str}"
             )
         raw_enum_names = config.get("enum_names")
-        enum_names = (
-            None
-            if raw_enum_names is None
-            else _coerce_enum_names(str(config["name"]), raw_enum_names)
-        )
+        option_indices = None
+        if config.get("options") is not None:
+            if config.get("type") != _SWITCH:
+                raise ValueError("Only switches can define options")
+            options = config["options"]
+            if not isinstance(options, (list, tuple)) or len(options) < 2 or not all(
+                isinstance(option, dict) for option in options
+            ):
+                raise ValueError("Switch options must be an array of at least two objects")
+            if any(
+                isinstance(o.get("value"), bool) or not isinstance(o.get("value"), int)
+                or isinstance(o.get("index_sw"), bool) or not isinstance(o.get("index_sw"), int)
+                or not isinstance(o.get("name"), str)
+                for o in options
+            ):
+                raise ValueError("Switch options require name, integer value and integer index_sw")
+            n = len(options)
+            if {o["value"] for o in options} != set(range(n)):
+                raise ValueError("Switch option values must be a 0..N-1 neural permutation")
+            by_value = sorted(options, key=lambda x: x["value"])
+            enum_names = tuple(o["name"] for o in by_value)
+            option_indices = tuple(o["index_sw"] for o in by_value)
+            if raw_enum_names is not None and tuple(raw_enum_names) != enum_names:
+                raise ValueError("Switch options disagree with legacy enum_names")
+        else:
+            enum_names = (
+                None
+                if raw_enum_names is None
+                else _coerce_enum_names(str(config["name"]), raw_enum_names)
+            )
         spec = cls(
             name=config["name"],
             min=config["min"],
@@ -214,5 +259,6 @@ class ParamSpec:
             step=config.get("step"),
             avoid_zero=config.get("avoid_zero", False),
             index=config.get("index"),
+            option_indices=option_indices,
         )
         return spec

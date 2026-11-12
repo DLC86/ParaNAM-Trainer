@@ -39,7 +39,47 @@ def test_switch_spec_round_trip():
     assert restored.num_inputs == 3
     assert restored.normalized_min == 0.0
     assert restored.normalized_max == 1.0
-    assert exported["enum_names"] == ["clean", "crunch", "lead"]
+    assert exported["options"] == [
+        {"name": "clean", "value": 0, "index_sw": 0},
+        {"name": "crunch", "value": 1, "index_sw": 1},
+        {"name": "lead", "value": 2, "index_sw": 2},
+    ]
+    assert "enum_names" not in exported
+
+
+def test_switch_options_can_reorder_without_reordering_neural_values():
+    spec = _ParamSpec(
+        name="Mode", min=0, max=2, default=1, type="switch",
+        enum_names=("Clean", "Crunch", "Lead"), option_indices=(2, 0, 1),
+        index=3,
+    )
+    exported = spec.to_dict()
+    assert exported["index"] == 3
+    assert [o["index_sw"] for o in exported["options"]] == [2, 0, 1]
+    assert _ParamSpec.from_dict(exported) == spec
+    reordered = dict(exported)
+    reordered["options"] = list(reversed(exported["options"]))
+    assert _ParamSpec.from_dict(reordered) == spec
+    old = dict(exported)
+    old.pop("options")
+    old["enum_names"] = ["Clean", "Crunch", "Lead"]
+    legacy = _ParamSpec.from_dict(old)
+    assert legacy.enum_names == spec.enum_names
+    assert legacy.option_indices == (0, 1, 2)
+
+def test_invalid_switch_option_permutations():
+    base = {"name": "Mode", "min": 0, "max": 2, "default": 1, "type": "switch"}
+    for values, positions in [
+        ([0, 0, 2], [0, 1, 2]),
+        ([0, 1, 2], [0, 0, 2]),
+        ([0, 1, 2], [0, 1, 5]),
+    ]:
+        options = [
+            {"name": str(i), "value": value, "index_sw": idx}
+            for i, (value, idx) in enumerate(zip(values, positions))
+        ]
+        with _pytest.raises(ValueError):
+            _ParamSpec.from_dict({**base, "options": options})
 
 
 def test_from_dict_defaults_to_continuous_signed_normalization():
