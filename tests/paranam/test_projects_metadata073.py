@@ -9,6 +9,17 @@ from PySide6.QtWidgets import QMessageBox
 from paranam import wizard
 
 
+class FakeCheckBox:
+    def __init__(self, *args):
+        self._checked = False
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, checked):
+        self._checked = checked
+
+
 def test_project_delete_requires_confirmation_and_defaults_to_keep_files(
     window, workspace, monkeypatch
 ):
@@ -63,6 +74,7 @@ def test_project_delete_requires_confirmation_and_defaults_to_keep_files(
             return self.clicked
 
     monkeypatch.setattr(wizard, "QMessageBox", Confirmation)
+    monkeypatch.setattr(wizard, "QCheckBox", FakeCheckBox)
     window.delete_selected_project()
     assert workspace.directory.is_dir()  # Cancel does nothing.
     assert str(workspace.directory) in window.settings.value("recent", [])
@@ -116,6 +128,7 @@ def test_project_delete_explicit_opt_in_removes_directory(window, workspace, mon
             return self.selected
 
     monkeypatch.setattr(wizard, "QMessageBox", Confirmation)
+    monkeypatch.setattr(wizard, "QCheckBox", FakeCheckBox)
     window.delete_selected_project()
     assert not workspace.directory.exists()
     assert not window.settings.value("recent", [])
