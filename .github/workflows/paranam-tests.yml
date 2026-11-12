@@ -1,7 +1,7 @@
 name: ParaNAM tests
 on:
   push:
-    branches: [main, 'beta/**']
+    branches: [main, 'beta/**', 'feature/switch-option-index-sw']
   pull_request:
 permissions:
   contents: read
