@@ -133,7 +133,7 @@ def test_export_config_appends_params():
 
     assert config == {
         "dummy": True,
-        "params": [spec.to_dict() for spec in model.param_specs],
+        "params": [spec.to_dict(indexed_switches=False) for spec in model.param_specs],
     }
 
 

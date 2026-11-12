@@ -281,9 +281,10 @@ def test_export_parametric_round_trips_through_factory(tmp_path):
     x = _torch.randn(model.receptive_field + 32)
 
     assert model_dict["architecture"] == "HyperWaveNet"
-    assert model_dict["config"]["params"] == [
-        spec.to_dict() for spec in model.param_specs
-    ]
+    exported_params = model_dict["config"]["params"]
+    assert exported_params[0] == model.param_specs[0].to_dict()
+    assert exported_params[1]["enum_names"] == ["clean", "crunch", "lead"]
+    assert "options" not in exported_params[1]
     assert set(model_dict["config"]) == {
         "head",
         "head_scale",

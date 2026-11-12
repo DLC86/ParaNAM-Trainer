@@ -2424,7 +2424,7 @@ class WizardWindow(
             else (qa.loopback_delay if qa else None)
         )
         latency = "—"
-        if delay is not None:
+        if delay is not None and not entry.validation_from_tail:
             # The stored shift was applied to the audio, so undo it to recover
             # the fractional label: shift = rounded_delay - fractional_delay.
             # A legacy loopback-only fallback is already a measured delay.
