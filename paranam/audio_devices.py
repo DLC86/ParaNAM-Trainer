@@ -106,6 +106,23 @@ def capabilities(device):
     return Capabilities(inputs, outputs, sizes, note)
 
 
+def show_asio_control_panel(device, window_handle):
+    import sounddevice as sd
+
+    if device.host_api != "ASIO":
+        raise ValueError("Select an ASIO driver first.")
+    try:
+        panel = ct.CDLL(sd._libname).PaAsio_ShowControlPanel
+    except (AttributeError, OSError) as error:
+        raise RuntimeError("This PortAudio build does not expose the ASIO control panel.") from error
+    panel.argtypes = [ct.c_int, ct.c_void_p]
+    panel.restype = ct.c_int
+    result = panel(device.index, window_handle)
+    if result:
+        message = sd._ffi.string(sd._lib.Pa_GetErrorText(result)).decode("utf8", "replace")
+        raise RuntimeError(f"Could not open the ASIO control panel: {message}")
+
+
 def coreaudio_names(device, inputs, outputs):
     """Read per-element labels where PortAudio's incomplete helper returns NULL."""
 

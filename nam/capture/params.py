@@ -39,9 +39,9 @@ class KnobSpec:
         ``min + k * step`` so every planned value is one a human can actually dial.
     :param default: Resting value baked into the generated model config; the knob's
         midpoint (snapped to the grid) when omitted.
-    :param avoid_zero: When true, no planned capture sets this knob to zero; a draw that
-        would snap to zero uses the next reachable grid value instead. Use for gain/drive
-        knobs that mute the rig at zero and can destabilize training.
+    :param avoid_zero: When true, no planned capture sets this knob to its minimum; a draw that
+        would snap to the minimum uses the next reachable grid value instead. Use for
+        gain/drive knobs that mute the rig at minimum and can destabilize training.
     :param is_gain: Marks this knob as the amp's gain/drive control. At most two knobs may
         be marked. It changes how the initial corner captures are generated (the gain knob
         gets its own min/max sweep so the EQ params' corners are learned at both gain
@@ -112,14 +112,11 @@ class KnobSpec:
             raise ValueError(
                 "Clean output volume requires its maximum reference and cannot be Gain/Drive or Avoid max"
             )
-        if self.avoid_max and not any(
-            self.min <= self.max - k * self.step < self.max
-            and (not self.avoid_zero or self.max - k * self.step != 0)
-            for k in (1, 2)
+        if self.avoid_max and self.avoid_zero and not (
+            (_math.floor(self.min / self.step + 1e-10) + 1) * self.step
+            < self.max - 1e-10
         ):
-            raise ValueError(
-                "No usable knob positions remain after Avoid max/Avoid zero"
-            )
+            raise ValueError("No usable knob positions remain after Avoid min/Avoid max")
 
     def to_param_spec(self) -> _ParamSpec:
         return _ParamSpec(

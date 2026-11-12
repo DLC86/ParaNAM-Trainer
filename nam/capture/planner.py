@@ -93,9 +93,8 @@ def _capture_grid_values(spec: _ParamSpec, default_step: float) -> list[float]:
         clamped = min(max(k * step, spec.min), spec.max)
         values.add(round(clamped, 6))
     if getattr(spec, "avoid_zero", False):
-        # Match quantize_to_capture_grid: zero is never a reachable capture setting for
-        # an avoid-zero knob, so the enumeration fallback must not offer it either.
-        values.discard(0.0)
+        # The saved avoid_zero key means Avoid min in the capture plan.
+        values.discard(round(spec.min, 6))
     if getattr(spec, "avoid_max", False):
         values.discard(round(spec.max, 6))
     return sorted(values)
@@ -864,11 +863,11 @@ def plan_captures(
         ), _planned_from_params("val_lhs", "validation", specs, merged(v))
 
     if any(
-        spec.type != "switch" and spec.avoid_zero and spec.default == 0
+        spec.type != "switch" and spec.avoid_zero and spec.default == spec.min
         for spec in specs
     ):
         raise ValueError(
-            "Choose a non-zero default for controls with Avoid zero enabled: every new plan includes the default setting"
+            "Choose a default above minimum for controls with Avoid min enabled: every new plan includes the default setting"
         )
 
     if any(
@@ -1045,7 +1044,7 @@ def corner_settings(
     bound the amp's behavior (see :func:`_corner_vertices` for the pattern, and
     :func:`_corner_high_flag_sets` for how a marked gain/drive knob is crossed with it).
     Values are quantized to the capture grid (honoring each knob's ``step`` and
-    ``avoid_zero``, so an avoid-zero gain knob's min corner nudges off zero), then
+    ``avoid_zero``, so an Avoid min knob's minimum corner moves to the next usable position), then
     deduplicated so the small knob counts that collapse (a single knob yields only
     min/max) don't repeat a setting.
     """

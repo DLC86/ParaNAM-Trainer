@@ -333,6 +333,13 @@ def apply_model_display_indices(
             raise ValueError("Full/Lite parameter order differs from the parent model")
         for param in params:
             param["index"] = positions[param["name"]]
+            # Resumed jobs may hold checkpoint JSON from the indexed preview.
+            # Emit labels in neural order so legacy readers use the same weights.
+            if param.get("type") == "switch" and "options" in param:
+                param["enum_names"] = [
+                    option["name"]
+                    for option in sorted(param.pop("options"), key=lambda option: option["value"])
+                ]
 
     assign(neural)
     for branch in config.get("submodels", []):

@@ -9,36 +9,15 @@ independent states, not interpolated knob values.
 
 ## Exported switch option metadata
 
-The capture project keeps each switch's `enum_names` and physical position
-order for existing plans and projects. Newly exported parametric model files
-use the structured `options` format instead of `enum_names`:
+ParaNAM Trainer 0.7.3 exports switches using the legacy
+`enum_names` array, in neural-value order, in the parent and both Full/Lite
+submodels. For example, `["Clean", "Crunch", "Lead"]` assigns values 0, 1 and
+2 respectively. A numeric `default` of 1 selects Crunch. The control-level
+`index` still orders knobs, switches and Linear Volume.
 
-```json
-{
-  "name": "Mode",
-  "type": "switch",
-  "min": 0,
-  "max": 2,
-  "default": 1,
-  "index": 0,
-  "options": [
-    {"name": "Clean",  "value": 0, "index_sw": 2},
-    {"name": "Crunch", "value": 1, "index_sw": 0},
-    {"name": "Lead",   "value": 2, "index_sw": 1}
-  ]
-}
-```
-
-`value` remains the original zero-based neural one-hot switch value, while
-`index_sw` is **only** the option's displayed position. Both sets of
-values must independently be complete permutations from 0 to N-1, and
-`default` remains a *neural value*, not a visual position. The control
-`index` continues to order knobs, switches and Linear Volume.
-
-The trainer's switch specification also accepts optional `option_indices`
-in the capture project to preserve a customized presentation order without
-reordering neural values. Old project/model configs with `enum_names` can
-still be read; new models export `options` automatically.
+The reader also accepts experimental `options` with separate neural
+`value` and visual `index_sw` fields. The trainer preserves them in internal
+project data but does not write this format into exported 0.7.3 models.
 
 ## Capture counts
 

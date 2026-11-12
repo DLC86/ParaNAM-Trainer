@@ -47,15 +47,17 @@ def main():
                 "macOS-x86_64.dmg",
             )
         }
-        assert {
-            a["name"] for a in release["assets"]
-        } == expected, "Missing native packages"
+        keep_draft = os.environ.get("KEEP_DRAFT", "false") == "true"
+        assets = {a["name"]: a for a in release["assets"]}
+        assert expected <= assets.keys(), "Missing native packages"
         assert all(
-            a["state"] == "uploaded" and a["size"] > 0 for a in release["assets"]
+            assets[name]["state"] == "uploaded" and assets[name]["size"] > 0
+            for name in expected
         )
-        if os.environ.get("KEEP_DRAFT", "false") == "true":
+        if keep_draft:
             print("All native packages verified; release remains in draft.")
         else:
+            assert expected == assets.keys(), "Unexpected release assets"
             subprocess.run(["gh", "release", "edit", tag, "--draft=false"], check=True)
     else:
         raise ValueError("Choose upload or finalize")

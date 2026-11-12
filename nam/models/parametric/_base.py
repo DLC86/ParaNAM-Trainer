@@ -401,7 +401,7 @@ class ParametricNet(_BaseNet, _ImportsWeights):
 
     def _export_config(self) -> dict[str, _Any]:
         config = self._export_inner_config()
-        config["params"] = [spec.to_dict() for spec in self._param_specs]
+        config["params"] = [spec.to_dict(indexed_switches=False) for spec in self._param_specs]
         return config
 
     @_abc.abstractmethod

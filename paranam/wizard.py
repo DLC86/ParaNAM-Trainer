@@ -415,7 +415,12 @@ class WizardWindow(
         self.device = QComboBox()
         device_row = QHBoxLayout()
         device_row.addWidget(self.device, 1)
-        device_row.addWidget(button("Refresh", self.refresh_devices))
+        driver_buttons = QVBoxLayout()
+        self.asio_settings_button = button("Settings", self.open_asio_settings)
+        self.asio_settings_button.setVisible(False)
+        driver_buttons.addWidget(self.asio_settings_button)
+        driver_buttons.addWidget(button("Refresh", self.refresh_devices))
+        device_row.addLayout(driver_buttons)
         form.addRow("Interface", device_row)
         self.output_channel, self.input_channel, self.loop_output, self.loop_input = [
             QComboBox() for _ in range(4)
@@ -755,6 +760,12 @@ class WizardWindow(
         self.cancel_button = button("Cancel capture", self.cancel_capture)
         row.addWidget(self.rig_ready, 1)
         row.addWidget(self.record_button)
+        self.load_capture_button = button("Load WAV", self.load_static_wav)
+        self.load_capture_button.setToolTip(
+            "Import aligned mono WAV returns for the selected training and validation inputs."
+        )
+        self.load_capture_button.hide()
+        row.addWidget(self.load_capture_button)
         row.addWidget(self.cancel_button)
         self.volume_check_button = button(
             "Review volume check", self.review_volume_check
@@ -1573,7 +1584,13 @@ class WizardWindow(
             self.capture_kind.setCurrentIndex(
                 max(0, self.capture_kind.findData(prefs["capture_type"]))
             )
-            self.metadata_editor.set_metadata(workspace.project.user_metadata)
+            metadata = dict(workspace.project.user_metadata)
+            if not metadata.get("modeled_by"):
+                author = self.settings.value("last_model_author", "", type=str)
+                if author:
+                    metadata["modeled_by"] = author
+                    workspace.project.user_metadata = metadata
+            self.metadata_editor.set_metadata(metadata)
             for field, key in (
                 (self.n_train, "n_train"),
                 (self.n_validation, "n_validation"),
@@ -1614,6 +1631,19 @@ class WizardWindow(
         self._diagram()
         self.refresh_training()
         self.update_enabled()
+
+    def open_asio_settings(self):
+        from .audio_devices import show_asio_control_panel
+
+        device = self.device.currentData()
+        if self.busy() or self.play_worker is not None or not device or device.host_api != "ASIO":
+            return
+        try:
+            self.close_audio()
+            show_asio_control_panel(device, int(self.winId()))
+            self.refresh_devices()
+        except Exception as error:
+            self.notify_error(error)
 
     def refresh_devices(self):
         if self.busy():
@@ -1680,6 +1710,7 @@ class WizardWindow(
         info = self.device.currentData()
         self._populate_audio_controls(info)
         self.save_audio()
+        self.asio_settings_button.setVisible(info is not None and info.host_api == "ASIO")
 
     def _populate_audio_controls(self, info):
         if info:
@@ -1792,13 +1823,6 @@ class WizardWindow(
             return
         self.close_audio()
         self._diagram()
-        audio = self.audio_settings()
-        key = (audio.host_api, audio.input_device, audio.instrument_input_channel)
-        if getattr(self, "_instrument_route_key", key) != key:
-            self.instrument_calibration.blockSignals(True)
-            self.instrument_calibration.setChecked(False)
-            self.instrument_calibration.blockSignals(False)
-        self._instrument_route_key = key
         self.remember_setup()
         self._refresh_play_calibration()
 
@@ -2021,7 +2045,7 @@ class WizardWindow(
                     f"{c.min:g} … {c.max:g}  ·  step {c.step:g}"
                     + ("  ·  Gain/Drive" if c.is_gain else "")
                     + ("  ·  Clean volume" if c.clean_volume else "")
-                    + ("  ·  Avoid zero" if c.avoid_zero else "")
+                    + ("  ·  Avoid min" if c.avoid_zero else "")
                     + ("  ·  Avoid max" if c.avoid_max else "")
                     + (
                         {
@@ -2318,6 +2342,10 @@ class WizardWindow(
 
     def save_metadata(self, metadata):
         if self.workspace and not self._loading and not self.busy():
+            previous = self.workspace.project.user_metadata.get("modeled_by")
+            author = metadata.get("modeled_by")
+            if author and author != previous:
+                self.settings.setValue("last_model_author", author)
             self.workspace.project.user_metadata = dict(metadata)
             if self.workspace.preferences["capture_type"] == "static":
                 # Edited Train fields are authoritative for the batch. Retain
@@ -2421,6 +2449,9 @@ class WizardWindow(
         static = project.capture_type == "static"
         self.scene.setVisible(not static)
         self.static_card.setVisible(static)
+        self.load_capture_button.setVisible(static)
+        if static:
+            self.record_button.setText("Record")
         if self.worker is None:
             self.capture_status.setText(
                 "Select a named capture below, set your rig, then record its training and validation signals."
@@ -2569,17 +2600,54 @@ class WizardWindow(
                 )
             self.rig_ready.setChecked(False)
             if self.workspace.project.capture_type == "static":
-                self.record_button.setText(
-                    "Re-record this capture"
-                    if entry.status == "captured"
-                    else "Record training + validation"
-                )
+                self.record_button.setText("Record")
                 return
             self.record_button.setText(
                 "Re-record this setting"
                 if entry.status == "captured"
                 else "Record this setting"
             )
+
+    def load_static_wav(self):
+        if self.busy() or not self.workspace or self.workspace.project.capture_type != "static":
+            return
+        row = self.capture_table.currentRow()
+        if not 0 <= row < len(self._capture_entries):
+            return
+        entry = self._capture_entries[row]
+        path, _ = self.choose_open_file(
+            "Choose an aligned training return (or training + validation WAV)",
+            "WAV audio (*.wav)",
+        )
+        if not path:
+            return
+        try:
+            session = self._get_session()
+            train, rate = session._input_for_split("train")
+            validation, _ = session._input_for_split("validation")
+            from nam.data import wav_to_np
+
+            samples = wav_to_np(path, rate=rate)
+            if len(samples) == len(train) + len(validation):
+                returns = (samples[:len(train)], samples[len(train):])
+            else:
+                if len(samples) != len(train):
+                    raise ValueError(f"Training return must have {len(train)} samples or include the "
+                                     f"{len(validation)} validation samples immediately after them.")
+                validation_path, _ = self.choose_open_file(
+                    "Choose the aligned validation return", "WAV audio (*.wav)"
+                )
+                if not validation_path:
+                    return
+                returns = (samples, wav_to_np(validation_path, rate=rate))
+            session.import_static_returns(entry.capture_id, returns)
+            self._recorded_capture_path = entry.y_path
+            self.workspace.project = session.project
+            self.refresh_captures()
+            self.capture_progress.setValue(100)
+            self.capture_status.setText("Imported training and validation WAV returns.")
+        except Exception as error:
+            self.notify_error(error)
 
     def record(self):
         if not self.workspace or self.busy() or not self.rig_ready.isChecked():
@@ -2683,10 +2751,13 @@ class WizardWindow(
 
             self.run_audio(capture_signals, self._capture_done)
             status_col = 1 if static else 2
-            status_item = self.capture_table.item(index, status_col)
-            if status_item:
-                status_item.setText("Running")
-                status_item.setForeground(QColor("#55d69e"))
+            for col in range(self.capture_table.columnCount()):
+                item = self.capture_table.item(index, col)
+                if item is not None:
+                    item.setForeground(QColor("#00ff00"))
+                    if col == status_col:
+                        item.setText("Running")
+                        item.setToolTip("Running")
         except Exception as error:
             self.notify_error(error)
 

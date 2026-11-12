@@ -188,7 +188,7 @@ class ParamSpec:
             )
         return len(self.enum_names)
 
-    def to_dict(self) -> dict[str, _Any]:
+    def to_dict(self, *, indexed_switches: bool = True) -> dict[str, _Any]:
         result = {
             "name": self.name,
             "min": self.min,
@@ -199,13 +199,13 @@ class ParamSpec:
             "avoid_zero": self.avoid_zero,
             **({"index": self.index} if self.index is not None else {}),
         }
-        if self.type == _SWITCH:
+        if self.type == _SWITCH and indexed_switches:
             result["options"] = [
                 {"name": name, "value": neural_value, "index_sw": self.option_indices[neural_value]}
                 for neural_value, name in enumerate(self.enum_names)
             ]
         else:
-            result["enum_names"] = None
+            result["enum_names"] = None if self.enum_names is None else list(self.enum_names)
         return result
 
     @classmethod

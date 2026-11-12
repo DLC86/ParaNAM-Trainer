@@ -97,9 +97,11 @@ class Exportable(_abc.ABC):
             plugin.
         """
         model_dict = self._get_export_dict()
-        model_dict["metadata"].update(
-            {} if user_metadata is None else _cast_enums(user_metadata.model_dump())
-        )
+        if user_metadata is not None:
+            metadata = user_metadata.model_dump()
+            if metadata.get("input_z") is None:
+                metadata.pop("input_z", None)
+            model_dict["metadata"].update(_cast_enums(metadata))
         if other_metadata is not None:
             overwritten_keys = []
             for key in other_metadata:

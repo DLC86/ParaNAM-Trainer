@@ -88,6 +88,7 @@ class UIPreferences:
                 else None
             ),
         )
+        setup["instrument_dbu_value"] = self.instrument_dbu.value()
         setup["calibration_frequency"] = getattr(self, "_calibration_frequency", 1000.0)
         setup["playback_blocksize"] = getattr(self, "_playback_blocksize", 128)
         self.settings.setValue("last_audio_setup", json.dumps(setup))
@@ -258,14 +259,11 @@ class UIPreferences:
             ):
                 check.setChecked(setup.get(key) is not None)
                 field.setValue(setup[key] if setup.get(key) is not None else 12)
+            if "instrument_dbu_value" in setup:
+                self.instrument_dbu.setValue(setup["instrument_dbu_value"])
         finally:
             self._loading = False
         self._calibration_frequency = setup.get("calibration_frequency", 1000.0)
         self._playback_blocksize = setup.get("playback_blocksize", 128)
-        self._instrument_route_key = (
-            audio.host_api,
-            audio.input_device,
-            audio.instrument_input_channel,
-        )
         self.settings.setValue("last_audio_setup", json.dumps(setup))
         self._diagram()

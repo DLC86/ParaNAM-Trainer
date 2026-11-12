@@ -275,8 +275,6 @@ class ControlScene(QWidget):
                     if value in control.enum_names
                     else 0
                 )
-                font = QFont("Inter", 11, QFont.Weight.Bold)
-                painter.setFont(font)
                 switch_width = min(width - 30, max(84, (count - 1) * 36 + 32))
                 left = x + (width - switch_width) / 2
                 paint_slide_switch(
@@ -286,15 +284,16 @@ class ControlScene(QWidget):
                     count,
                     16,
                 )
-                step = (switch_width - 32) / max(1, count - 1)
-                for position, text in enumerate(control.enum_names):
-                    center = left + 16 + position * step
-                    painter.setPen(QColor(ACCENT if position == selected else MUTED))
-                    painter.drawText(
-                        QRectF(center - step / 2, y + 136, step, 24),
-                        Qt.AlignmentFlag.AlignCenter,
-                        text,
-                    )
+                painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
+                painter.setPen(QColor(ACCENT))
+                text = painter.fontMetrics().elidedText(
+                    control.enum_names[selected], Qt.TextElideMode.ElideRight, int(width - 20)
+                )
+                painter.drawText(
+                    QRectF(x + 10, y + 134, width - 20, 29),
+                    Qt.AlignmentFlag.AlignCenter,
+                    text,
+                )
             else:
                 fraction = min(
                     1,
@@ -334,8 +333,9 @@ class ControlScene(QWidget):
                     center + QPointF(24 * math.sin(angle), -24 * math.cos(angle)),
                 )
                 painter.setPen(QColor(ACCENT))
+                painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
                 painter.drawText(
-                    QRectF(x + 10, y + 136, width - 20, 24),
+                    QRectF(x + 10, y + 134, width - 20, 29),
                     Qt.AlignmentFlag.AlignCenter,
                     f"{float(value):g}",
                 )
@@ -547,6 +547,11 @@ class MetadataEditor(QWidget):
             widget.editingFinished.connect(self.emit_metadata)
             self.fields[key] = widget
             form.addRow(label, widget)
+        impedance = QLineEdit()
+        impedance.setPlaceholderText("e.g. 3,3 kΩ or 1,5 MΩ")
+        impedance.editingFinished.connect(self.commit_impedance)
+        self.fields["input_z"] = impedance
+        form.addRow("Input impedance", impedance)
         for key, label, enum in (
             ("gear_type", "Gear type", GearType),
             ("tone_type", "Tone type", ToneType),
@@ -564,6 +569,20 @@ class MetadataEditor(QWidget):
         self.fields["notes"] = notes
         form.addRow("Notes", notes)
 
+    def commit_impedance(self):
+        from .impedance import format_impedance, parse_impedance
+
+        widget = self.fields["input_z"]
+        try:
+            value = parse_impedance(widget.text())
+        except ValueError as error:
+            widget.setToolTip(str(error))
+            widget.selectAll()
+            return
+        widget.setToolTip("")
+        widget.setText(format_impedance(value))
+        self.emit_metadata()
+
     def set_name_visible(self, visible):
         if "name" in self.fields:
             self.form.setRowVisible(self.fields["name"], visible)
@@ -578,6 +597,10 @@ class MetadataEditor(QWidget):
                     if value is not None and widget.findData(value) < 0:
                         widget.addItem(str(value), value)
                     widget.setCurrentIndex(max(0, widget.findData(value)))
+                elif key == "input_z":
+                    from .impedance import format_impedance
+                    widget.setText(format_impedance(value))
+                    widget.setToolTip("")
                 elif isinstance(widget, QPlainTextEdit):
                     widget.setPlainText(str(value or ""))
                 else:
@@ -592,6 +615,12 @@ class MetadataEditor(QWidget):
         for key, widget in self.fields.items():
             if isinstance(widget, QComboBox):
                 value = widget.currentData()
+            elif key == "input_z":
+                from .impedance import parse_impedance
+                try:
+                    value = parse_impedance(widget.text())
+                except ValueError:
+                    continue
             elif isinstance(widget, QPlainTextEdit):
                 value = widget.toPlainText().strip()
             else:

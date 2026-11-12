@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .audio import AudioDeviceError, CaptureCancelled, asio_com_apartment
+from .audio import AudioDeviceError, AudioDropoutError, CaptureCancelled, asio_com_apartment
 
 
 class _UnstableReference(AudioDeviceError):
@@ -144,6 +144,11 @@ class AsioRecorder:
                         result.append(self._capture(**settings))
                     except BaseException as exc:
                         self.reference = None
+                        if isinstance(exc, AudioDropoutError):
+                            try:
+                                self._close_stream()
+                            except Exception:
+                                pass  # Preserve the original recording failure.
                         result.append(exc)
                     finally:
                         done.set()
@@ -266,8 +271,8 @@ class AsioRecorder:
                     f"ASIO requested {requested} samples but the driver uses {frames}. Choose a supported native buffer size."
                 )
             if self.last_status:
-                raise AudioDeviceError(
-                    f"ASIO lost audio: {self.last_status}. This capture was not saved."
+                raise AudioDropoutError(
+                    f"ASIO lost audio: {self.last_status}. Increase the buffer and record again."
                 )
             start = job.position
             n = min(frames, len(job.main) - start)
@@ -329,19 +334,27 @@ class AsioRecorder:
                 )
                 metered = end
 
+        previous = 0
+        last_frame = time.monotonic()
         while not job.done.wait(0.05):
             report_meter()
             if cancel is not None and cancel():
                 job.cancelled = True
-                while self.stream.active and not job.done.wait(0.05):
-                    pass
                 self.job = None
                 raise CaptureCancelled()
-            if not self.stream.active:
+            position = job.position
+            if position != previous:
+                previous = position
+                last_frame = time.monotonic()
+            if not self.stream.active or time.monotonic() - last_frame > 2:
+                job.cancelled = True
                 self.job = None
-                raise AudioDeviceError("ASIO stopped before recording completed.")
+                raise AudioDropoutError(
+                    "ASIO stopped delivering audio. Increase the interface buffer "
+                    "or reconnect the device, then record again."
+                )
             if progress is not None:
-                progress(job.position / len(main))
+                progress(position / len(main))
         if job.error is not None:
             raise job.error
         report_meter()

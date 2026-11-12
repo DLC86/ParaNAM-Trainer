@@ -58,6 +58,7 @@ class UserMetadata(_BaseModel):
         the model.
     """
 
+    input_z: _Optional[float] = _Field(default=None, gt=0, allow_inf_nan=False)
     name: _Optional[str] = None
     modeled_by: _Optional[str] = None
     gear_type: _Optional[GearType] = None

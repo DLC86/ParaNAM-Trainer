@@ -617,79 +617,69 @@ class SounddeviceRecorder:
         if use_loopback:
             playback_frame[:, loopback_output_channel - 1] = loopback_playback
 
-        recording = sd.playrec(
-            playback_frame,
+        recording = _np.empty((len(playback), input_channels), dtype=_np.float32)
+        position = 0
+        dropout = None
+
+        def callback(incoming, outgoing, frames, timing, status):
+            nonlocal position, dropout
+            outgoing.fill(0)
+            if status.input_overflow or status.output_underflow:
+                dropout = status
+                raise sd.CallbackAbort
+            count = min(frames, len(playback) - position)
+            end = position + count
+            outgoing[:count] = playback_frame[position:end]
+            recording[position:end] = incoming[:count]
+            position = end
+            if position == len(playback):
+                raise sd.CallbackStop
+
+        with sd.Stream(
             samplerate=sample_rate,
             device=(input_device, output_device),
-            channels=input_channels,
+            channels=(input_channels, output_channels),
             dtype="float32",
             blocksize=blocksize,
             latency=latency,
-            blocking=False,
-        )
-        duration = len(playback) / sample_rate
-        started = _time.monotonic()
-        try:
-            stream = sd.get_stream()
-            metered = 0
-            while stream.active:
-                if cancel is not None and cancel():
-                    raise CaptureCancelled()
-                if progress is not None:
-                    elapsed = _time.monotonic() - started
-                    progress(min(elapsed / duration, 1.0))
-                if meter is not None:
-                    # Read only an already recorded region, leaving the host latency
-                    # and one polling interval behind the current audio callback.
-                    latency_in = (
-                        stream.latency[0]
-                        if isinstance(stream.latency, tuple)
-                        else stream.latency
-                    )
-                    end = min(
-                        len(playback),
-                        max(
-                            0,
-                            int(
-                                (_time.monotonic() - started - latency_in - 0.05)
-                                * sample_rate
-                            ),
-                        ),
-                    )
-                    if end > metered:
+            callback=callback,
+        ) as stream:
+            metered = previous = 0
+            last_frame = _time.monotonic()
+            try:
+                while stream.active:
+                    if cancel is not None and cancel():
+                        raise CaptureCancelled()
+                    end = position
+                    if end != previous:
+                        previous = end
+                        last_frame = _time.monotonic()
+                    elif end < len(playback) and _time.monotonic() - last_frame > 2:
+                        raise AudioDropoutError(
+                            "The audio stream stopped delivering samples. Increase the buffer "
+                            "or reconnect the interface, then record again."
+                        )
+                    if progress is not None:
+                        progress(end / len(playback))
+                    if meter is not None and end > metered:
                         meter(
                             float(_np.max(_np.abs(playback[metered:end]))),
-                            float(
-                                _np.max(
-                                    _np.abs(recording[metered:end, input_channel - 1])
-                                )
-                            ),
-                            (
-                                float(_np.max(_np.abs(loopback_playback[metered:end])))
-                                if use_loopback
-                                else 0.0
-                            ),
-                            (
-                                float(
-                                    _np.max(
-                                        _np.abs(
-                                            recording[
-                                                metered:end, loopback_input_channel - 1
-                                            ]
-                                        )
-                                    )
-                                )
-                                if use_loopback
-                                else 0.0
-                            ),
+                            float(_np.max(_np.abs(recording[metered:end, input_channel - 1]))),
+                            float(_np.max(_np.abs(loopback_playback[metered:end]))) if use_loopback else 0.0,
+                            float(_np.max(_np.abs(recording[metered:end, loopback_input_channel - 1])))
+                            if use_loopback else 0.0,
                         )
                         metered = end
-                sd.sleep(self._POLL_MS)
-            sd.wait()
-        except BaseException:
-            sd.stop()
-            raise
-        _raise_on_dropout(sd.get_status(), latency=latency, blocksize=blocksize)
+                    sd.sleep(self._POLL_MS)
+                _raise_on_dropout(dropout, latency=latency, blocksize=blocksize)
+                if position != len(playback):
+                    raise AudioDropoutError(
+                        "The audio stream stopped before recording completed. "
+                        "Increase the interface buffer and record again."
+                    )
+            except BaseException:
+                stream.abort()
+                raise
         if progress is not None:
             progress(1.0)
         main = recording[:, input_channel - 1].copy()

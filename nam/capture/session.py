@@ -1306,6 +1306,54 @@ class CaptureSession:
         _update_data_json(self.project, self.project_dir)
         return qa
 
+    def import_static_returns(self, capture_id, returns):
+        """Import externally aligned returns without assuming a hardware timing check."""
+        if self.project.capture_type != "static":
+            raise CaptureSessionError("WAV import is only available for static captures.")
+        entries = {
+            entry.split: entry for entry in self.project.entries
+            if entry.capture_id == capture_id
+        }
+        if set(entries) != {"train", "validation"} or len(returns) != 2:
+            raise CaptureSessionError("A static capture needs training and validation returns.")
+        prepared = []
+        root = self.project_dir.resolve()
+        for split, y in zip(("train", "validation"), returns):
+            entry = entries[split]
+            x, rate = self._input_for_split(split)
+            y = _np.asarray(y)
+            if y.shape != x.shape or not _np.isfinite(y).all():
+                raise CaptureSessionError(
+                    f"The {split} return must contain exactly {len(x)} finite mono samples."
+                )
+            if not (root / entry.y_path).resolve().is_relative_to(root):
+                raise CaptureSessionError("Capture path is outside the project")
+            peak = float(_np.max(_np.abs(y)))
+            if peak >= CLIPPING_THRESHOLD:
+                raise CaptureSessionError(f"The {split} return clips. Export it again without clipping.")
+            qa = _QAModel(
+                peak=_peak_to_dbfs(peak),
+                messages=["Imported WAV: alignment and stream continuity were not measured."],
+            )
+            prepared.append((entry, y, rate, qa))
+
+        backup = root / "history" / ("wav-import-" + str(_time.time_ns()))
+        import shutil
+
+        for entry, y, rate, qa in prepared:
+            for source in (root / entry.y_path, *raw_paths(root, entry.y_path)):
+                if source.exists():
+                    target = backup / source.relative_to(root)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    if source != root / entry.y_path:
+                        source.unlink()
+            self._write_capture_wav(entry, y, rate)
+            # Match the one-sample lead of a recording with zero measured latency.
+            _mark_captured(entry, delay=-1, qa=qa, stream_config=None)
+        _save_project(self.project, root)
+        _update_data_json(self.project, root)
+
     def _silent_volume_minimum(self, entry, amp_latency):
         """Identify a muted minimum by the absence of the played timing blips.
 

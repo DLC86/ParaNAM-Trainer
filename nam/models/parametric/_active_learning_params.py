@@ -277,52 +277,21 @@ def quantize_to_capture_grid(
             )
         raw_col = quantized[..., i]
         snapped = _torch.clamp(_torch.round(raw_col / step) * step, spec.min, spec.max)
-        if getattr(spec, "avoid_zero", False):
-            snapped = _nudge_off_zero(snapped, raw_col, spec.min, spec.max, step)
-        if getattr(spec, "avoid_max", False):
-            # Same zero-origin grid as the normal quantizer; never offer max.
-            replacement = max(spec.min, (_math.ceil(spec.max / step) - 1) * step)
-            if getattr(spec, "avoid_zero", False) and replacement == 0:
-                replacement = max(spec.min, replacement - step)
-            if replacement >= spec.max or (
-                getattr(spec, "avoid_zero", False) and replacement == 0
-            ):
+        avoid_min = getattr(spec, "avoid_zero", False)  # historical config key
+        avoid_max = getattr(spec, "avoid_max", False)
+        if avoid_min:
+            first = min(spec.max, (_math.floor(spec.min / step + 1e-10) + 1) * step)
+            if first <= spec.min or (avoid_max and first >= spec.max):
                 raise ValueError(f"No usable capture positions for {spec.name!r}")
             snapped = _torch.where(
-                snapped >= spec.max, _torch.full_like(snapped, replacement), snapped
+                snapped <= spec.min + 1e-10, _torch.full_like(snapped, first), snapped
+            )
+        if avoid_max:
+            last = max(spec.min, (_math.ceil(spec.max / step - 1e-10) - 1) * step)
+            if last >= spec.max or (avoid_min and last <= spec.min):
+                raise ValueError(f"No usable capture positions for {spec.name!r}")
+            snapped = _torch.where(
+                snapped >= spec.max - 1e-10, _torch.full_like(snapped, last), snapped
             )
         quantized[..., i] = snapped
     return quantized
-
-
-def _nudge_off_zero(
-    snapped: _torch.Tensor,
-    raw: _torch.Tensor,
-    minimum: float,
-    maximum: float,
-    step: float,
-) -> _torch.Tensor:
-    """
-    Replace any grid value that landed exactly on zero with the nearest non-zero grid
-    point (``+step`` or ``-step``), choosing the neighbor on the same side as the
-    pre-snap ``raw`` value when both are within ``[minimum, maximum]``.
-    """
-    zero_mask = snapped == 0.0
-    if not bool(zero_mask.any()):
-        return snapped
-    up_ok = step <= maximum
-    down_ok = -step >= minimum
-    if not up_ok and not down_ok:
-        # Zero is the only reachable grid point; nothing to snap to.
-        return snapped
-    if up_ok and down_ok:
-        replacement = _torch.where(
-            raw >= 0.0,
-            _torch.full_like(snapped, step),
-            _torch.full_like(snapped, -step),
-        )
-    elif up_ok:
-        replacement = _torch.full_like(snapped, step)
-    else:
-        replacement = _torch.full_like(snapped, -step)
-    return _torch.where(zero_mask, replacement, snapped)

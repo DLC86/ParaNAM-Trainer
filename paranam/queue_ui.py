@@ -26,6 +26,9 @@ class QueueActions:
                 raise ValueError("Complete every planned capture first.")
             self.metadata_editor.emit_metadata()
             self.queue_controller.enqueue(self.workspace)
+            author = self.workspace.project.user_metadata.get("modeled_by")
+            if author:
+                self.settings.setValue("last_model_author", author)
             self.queue_controller.preparing.ready.connect(self._new_queue_entry)
             self.navigate(4)
             self.training_status.setText("Preparing an independent training instance…")
@@ -300,6 +303,12 @@ class QueueActions:
             and self.rig_ready.isChecked()
             and self.capture_table.currentRow() >= 0
         )
+        self.load_capture_button.setEnabled(
+            present and not active and not preparing_here and self.capture_table.currentRow() >= 0
+        )
+        info = self.device.currentData()
+        self.asio_settings_button.setVisible(info is not None and info.host_api == "ASIO")
+        self.asio_settings_button.setEnabled(not active and not listening)
         self.rig_ready.setEnabled(present and not active and not preparing_here)
         self.capture_table.setEnabled(True)
         self.capture_table.selection_locked = self.worker is not None
