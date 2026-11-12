@@ -40,6 +40,15 @@ if(NOT DIRECT_RESULT EQUAL 0)
   message(FATAL_ERROR "Playback direct-kernel weight smoothing patch: ${DIRECT_ERROR}")
 endif()
 message(STATUS "${DIRECT_OUTPUT}")
+# Preserve the 100/100 ms single-network smoothing; accelerate only the
+# conditioned delta convolution using the 0.5.2 plugin's preallocated GEMM.
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/apply-gemm-delta-kernel.py" "${CORE}"
+  RESULT_VARIABLE GEMM_RESULT OUTPUT_VARIABLE GEMM_OUTPUT ERROR_VARIABLE GEMM_ERROR)
+if(NOT GEMM_RESULT EQUAL 0)
+  message(FATAL_ERROR "Playback GEMM delta-kernel smoothing patch: ${GEMM_ERROR}")
+endif()
+message(STATUS "${GEMM_OUTPUT}")
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS "${CORE}/NAM/*.cpp" "${CORE}/NAM/*/*.cpp")
 # Keep the plugin DSP unchanged except for Windows Unicode path interpretation.
 file(READ "${RUNTIME}/Source/DSP/NamModelEngine.cpp" ENGINE_SOURCE)

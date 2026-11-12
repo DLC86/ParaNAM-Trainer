@@ -746,9 +746,12 @@ def export_best_model(trainer, spec, member, target, selection=None):
             **spec["model"].get("metadata", {}),
         }
         for key in ("input_level_dbu", "output_level_dbu"):
-            value = spec.get("capture_calibration", source).get(key)
-            if value is not None:
-                metadata[key] = value
+            # MetadataEditor values override capture calibration in the exported
+            # model only. Historical dataset gains and global Settings are unchanged.
+            if key not in metadata:
+                value = spec.get("capture_calibration", source).get(key)
+                if value is not None:
+                    metadata[key] = value
         if static:
             capture = spec["static_captures"][member]
             metadata.update(capture.get("metadata", {}), name=capture["name"])

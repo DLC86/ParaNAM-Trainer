@@ -547,11 +547,7 @@ class MetadataEditor(QWidget):
             widget.editingFinished.connect(self.emit_metadata)
             self.fields[key] = widget
             form.addRow(label, widget)
-        impedance = QLineEdit()
-        impedance.setPlaceholderText("e.g. 3,3 kΩ or 1,5 MΩ")
-        impedance.editingFinished.connect(self.commit_impedance)
-        self.fields["input_z"] = impedance
-        form.addRow("Input impedance", impedance)
+        # Keep Tone type immediately before the optional numerical metadata.
         for key, label, enum in (
             ("gear_type", "Gear type", GearType),
             ("tone_type", "Tone type", ToneType),
@@ -563,6 +559,19 @@ class MetadataEditor(QWidget):
             widget.currentIndexChanged.connect(self.emit_metadata)
             self.fields[key] = widget
             form.addRow(label, widget)
+        for key, label in (
+            ("input_level_dbu", "Input dBu level"),
+            ("output_level_dbu", "Output dBu level"),
+        ):
+            widget = QLineEdit()
+            widget.setToolTip("Analog dBu level corresponding to 0 dBFS")
+            widget.editingFinished.connect(self.emit_metadata)
+            self.fields[key] = widget
+            form.addRow(label, widget)
+        impedance = QLineEdit()
+        impedance.editingFinished.connect(self.commit_impedance)
+        self.fields["input_z"] = impedance
+        form.addRow("Input impedance", impedance)
         notes = QPlainTextEdit()
         notes.setMaximumHeight(90)
         notes.textChanged.connect(self.emit_metadata)
@@ -601,6 +610,9 @@ class MetadataEditor(QWidget):
                     from .impedance import format_impedance
                     widget.setText(format_impedance(value))
                     widget.setToolTip("")
+                elif key in ("input_level_dbu", "output_level_dbu"):
+                    widget.setText("" if value is None else str(value))
+                    widget.setToolTip("")
                 elif isinstance(widget, QPlainTextEdit):
                     widget.setPlainText(str(value or ""))
                 else:
@@ -620,6 +632,16 @@ class MetadataEditor(QWidget):
                 try:
                     value = parse_impedance(widget.text())
                 except ValueError:
+                    continue
+            elif key in ("input_level_dbu", "output_level_dbu"):
+                raw = widget.text().strip()
+                try:
+                    value = float(raw.replace(",", ".")) if raw else None
+                    if value is not None and not math.isfinite(value):
+                        raise ValueError("Level must be finite")
+                    widget.setToolTip("")
+                except ValueError:
+                    widget.setToolTip("Enter a valid finite value in dBu")
                     continue
             elif isinstance(widget, QPlainTextEdit):
                 value = widget.toPlainText().strip()

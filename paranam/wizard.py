@@ -381,20 +381,96 @@ class WizardWindow(
         )
         self.open_project_folder_button.setEnabled(False)
         row.addWidget(self.open_project_folder_button)
+        self.delete_project_button = button("Delete", self.delete_selected_project)
+        self.delete_project_button.setEnabled(False)
+        row.addWidget(self.delete_project_button)
         box.addLayout(row)
         self.recent = QListWidget()
         self.recent.setItemDelegate(RecentProjectDelegate(self.recent))
         self.recent.setMinimumHeight(320)
-        self.recent.itemSelectionChanged.connect(
-            lambda: self.open_project_folder_button.setEnabled(
-                bool(self.recent.currentItem())
-            )
-        )
+        self.recent.itemSelectionChanged.connect(self._update_project_actions)
         self.recent.itemDoubleClicked.connect(
             lambda item: self.open_project(Path(item.data(Qt.ItemDataRole.UserRole)))
         )
         box.addWidget(self.recent)
         layout.addWidget(projects)
+
+    def _update_project_actions(self):
+        selected = self.recent.currentItem() is not None
+        self.open_project_folder_button.setEnabled(selected)
+        self.delete_project_button.setEnabled(selected)
+
+    def delete_selected_project(self):
+        item = self.recent.currentItem()
+        if item is None:
+            return
+        project_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        name = item.text().splitlines()[0]
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Delete project")
+        dialog.setText(f"Remove '{name}' from the Projects list?")
+        dialog.setInformativeText(
+            f"{project_path}\\n\\nProject files will be kept unless you select the option below."
+        )
+        delete_files = QCheckBox(
+            "Also delete the project folder and all its contents", dialog
+        )
+        delete_files.setChecked(False)  # Must be unchecked on every opening.
+        dialog.setCheckBox(delete_files)
+        confirm = dialog.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if dialog.clickedButton() is not confirm:
+            return
+
+        if delete_files.isChecked():
+            # Never follow a project-directory symlink or delete unrelated files
+            # accidentally included in the recent-projects list.
+            if (
+                project_path.is_symlink()
+                or not (project_path / "capture_project.json").is_file()
+            ):
+                self.notify_error("Cannot safely delete this project folder.")
+                return
+            target = project_path.resolve()
+            if self.workspace and self.workspace.directory.resolve() == target:
+                self.notify_error(
+                    "Open another project before deleting the currently open folder."
+                )
+                return
+            unfinished = {
+                "queued", "starting", "running", "scoring", "pausing",
+                "stopping", "paused", "interrupted", "needs_captures",
+            }
+            if any(
+                Path(entry.get("project", "")).resolve() == target
+                and entry.get("state") in unfinished
+                for entry in self.queue_controller.store.entries()
+            ):
+                self.notify_error(
+                    "This project has unfinished training jobs. Stop or remove "
+                    "them from Queue before deleting its folder."
+                )
+                return
+            try:
+                shutil.rmtree(project_path)
+            except OSError as error:
+                self.notify_error(f"Could not delete the project folder: {error}")
+                return
+
+        recent = self.settings.value("recent", [])
+        if isinstance(recent, str):
+            recent = [recent]
+        self.settings.setValue(
+            "recent",
+            [
+                path for path in recent
+                if Path(path).resolve() != project_path.resolve()
+            ],
+        )
+        self._refresh_recent()
 
     def open_selected_project_folder(self):
         item = self.recent.currentItem()
@@ -1590,6 +1666,16 @@ class WizardWindow(
                 if author:
                     metadata["modeled_by"] = author
                     workspace.project.user_metadata = metadata
+            # Seed metadata with the current global Settings only if the model
+            # has no explicit value. Editing these fields never writes Settings
+            # or the capture-calibration snapshot.
+            for key, check, spin in (
+                ("input_level_dbu", self.input_calibration, self.input_dbu),
+                ("output_level_dbu", self.output_calibration, self.output_dbu),
+            ):
+                if key not in metadata and check.isChecked():
+                    metadata[key] = spin.value()
+            workspace.project.user_metadata = dict(metadata)
             self.metadata_editor.set_metadata(metadata)
             for field, key in (
                 (self.n_train, "n_train"),
