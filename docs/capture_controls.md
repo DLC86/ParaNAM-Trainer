@@ -21,38 +21,48 @@ project data but does not write this format into exported 0.7.3 models.
 
 ## Capture counts
 
-Let K be the number of knobs and S the product of all switch position counts.
-For example, a three-position switch and a two-position switch give S = 6.
+Let K be the number of continuous knobs plus Simple Switch dimensions, and S be
+the number of distinct Complex Switch combinations. The baseline heuristics are
+**16 × K × S** training captures and
+**min(max(8, 4 × K), 24) × S** validation captures.
 
-* Recommended training LHS captures: **16 × K × S**.
-* Recommended validation captures: **min(3 × K, 10) × S**.
-* Training must cover every switch combination: at least **S** captures. If
-  validation is enabled, it must also have at least **S** captures.
-* Corner captures repeat the existing continuous-knob corner design for **every**
-  switch combination, including intermediate positions. Duplicates of existing
-  training captures are skipped. The app displays the corner count before planning.
+The app now calculates the *actual* capture grid from each knob's min/max,
+step, Avoid min, Avoid max and any discrete switch positions. It reduces the
+recommendations automatically if the grid is too small for the baseline. The
+default setting is part of training even when it is off-grid. Validation avoids
+the default, all corner settings and every training setting; the recommendation
+reserves enough room for those constraints.
 
-The recommendations are starting heuristics, not a guarantee of model accuracy.
-The minimum counts ensure switch-state coverage only. Complex rigs may need more
-captures or active learning. Counts in the Plan tab are totals, not per-state
-counts. Uneven totals are distributed as evenly as possible across states.
-Each state gets a separate knob sampling plan; validation settings remain disjoint
-from training settings and reserved corners. A coarse knob grid can run out of
-distinct settings; the planner reports the affected switch combination.
+For example, a knob spanning 0–10 in steps of 0.5 with Avoid min enabled has
+20 usable positions per switch state. With a two-position Complex Switch the
+suggestion is **32 training + 8 validation captures total** (16 + 4 per
+state), rather than 32 + 16. A coarser grid may have no feasible held-out
+settings; in that case the suggested validation count is zero. Use a finer
+step or wider range to make held-out control validation possible.
 
-For two knobs and one three-position switch, the initial recommendation is 90
-training LHS captures and 18 validation captures, plus up to 12 corner captures
-(less any duplicates already in training). Without switches, counts and planning
-retain the previous behavior.
+The **Training LHS captures** and **Validation captures** numeric fields are
+bounded dynamically: they cannot exceed the realizable unique combinations.
+Raising either split reduces the permitted maximum of the other. The limit is
+checked per Complex Switch state, including uneven totals and corners, rather
+than merely multiplying the number of switch positions. Changing control
+settings updates these limits. An already generated plan is never silently
+regenerated, and its capture progress is preserved.
 
-With **switches only**, capture every joint state once (S training captures) and
-set validation to zero: there are no remaining unseen settings for a held-out
-settings split. Corner captures then add nothing because all states are covered.
+Corner captures repeat the existing continuous-knob corner design for **every**
+Complex Switch combination. Duplicates of existing training captures are
+skipped. The app displays the corner count before planning. These counts remain
+heuristics and cannot guarantee model accuracy; complex rigs may benefit from
+more captures or active learning.
 
-The initial plan groups captures by switch state in declared position order to
-reduce switching, then sweeps the knobs within each group. Existing generated
-plans keep their stored counts and progress. After changing control names, types
-or switch positions, regenerate the plan before adding corners.
+With **switches only**, capture every categorical combination once. There are
+no different control settings to hold out, but the main trainer still validates
+the same states using the separate bundled validation audio. The older capture
+app exposes zero held-out control validation settings for this case.
+
+The initial plan groups captures by Complex Switch state in declared position
+order to reduce switching, then sweeps the knobs within each group. Existing
+generated plans keep their stored counts and progress. After changing control
+names, types or switch positions, regenerate the plan before adding corners.
 
 ## Project and model files
 
