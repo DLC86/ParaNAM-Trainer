@@ -24,10 +24,16 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QMessageBox,
     QPlainTextEdit,
+    QFrame,
+    QPushButton,
 )
 
 from nam.capture.params import KnobSpec, SwitchSpec
 from .control_paint import paint_slide_switch
+
+# Both Plan and Capture map the full knob range to precisely 300 degrees.
+KNOB_START_DEGREES = 210.0
+KNOB_SWEEP_DEGREES = 300.0
 
 _font_loaded = False
 
@@ -225,9 +231,19 @@ class ControlScene(QWidget):
         self.blink_timer.stop()
         self.update()
 
+    def _columns(self):
+        return max(1, self.width() // 185)
+
+    def _tile_count(self):
+        return len(self.controls)
+
+    def _bounds(self, index):
+        columns = self._columns()
+        width = self.width() / columns
+        return QRectF((index % columns) * width + 7, (index // columns) * 185 + 6, width - 14, 170)
+
     def _height(self):
-        columns = max(1, self.width() // 185)
-        self.setMinimumHeight(max(180, math.ceil(len(self.controls) / columns) * 185))
+        self.setMinimumHeight(max(180, math.ceil(self._tile_count() / self._columns()) * 185))
 
     def resizeEvent(self, event):
         self._height()
@@ -236,11 +252,11 @@ class ControlScene(QWidget):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        columns = max(1, self.width() // 185)
+        columns = self._columns()
         width = self.width() / columns
         for index, control in enumerate(self.controls):
             x, y = (index % columns) * width, (index // columns) * 185
-            bounds = QRectF(x + 7, y + 6, width - 14, 170)
+            bounds = self._bounds(index)
             shade = 35
             if control.name in self.blink_names:
                 pulse = (
@@ -251,7 +267,7 @@ class ControlScene(QWidget):
                 ) / 2
                 shade += round(45 * pulse)
             painter.setBrush(QColor(shade, shade, shade))
-            painter.setPen(QPen(QColor("#3b3b3b"), 1))
+            painter.setPen(QPen(QColor(ACCENT if index == getattr(self, "current", -1) else "#3b3b3b"), 1))
             painter.drawRoundedRect(bounds, 12, 12)
             painter.setPen(QColor(TEXT))
             painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
@@ -275,12 +291,15 @@ class ControlScene(QWidget):
                     if value in control.enum_names
                     else 0
                 )
+                position = (
+                    selected if control.option_indices is None else control.option_indices[selected]
+                )
                 switch_width = min(width - 30, max(84, (count - 1) * 36 + 32))
                 left = x + (width - switch_width) / 2
                 paint_slide_switch(
                     painter,
                     QRectF(left, y + 37, switch_width, 108),
-                    selected,
+                    position,
                     count,
                     16,
                 )
@@ -302,7 +321,7 @@ class ControlScene(QWidget):
                 center = QPointF(x + width / 2, y + 91)
                 path = QPainterPath()
                 for i in range(101):
-                    angle = math.radians(210 + 300 * i / 100)
+                    angle = math.radians(KNOB_START_DEGREES + KNOB_SWEEP_DEGREES * i / 100)
                     point = center + QPointF(
                         39 * math.sin(angle), -39 * math.cos(angle)
                     )
@@ -316,10 +335,23 @@ class ControlScene(QWidget):
                     )
                 )
                 painter.drawPath(path)
+                origin = -control.min / (control.max - control.min) if control.min <= 0 <= control.max else 0
+                if fraction != origin:
+                    painter.setPen(QPen(QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                    ring = QRectF(center.x() - 39, center.y() - 39, 78, 78)
+                    painter.drawArc(ring, round((90 - KNOB_START_DEGREES - origin * KNOB_SWEEP_DEGREES) * 16), round((origin - fraction) * KNOB_SWEEP_DEGREES * 16))
+                painter.setFont(QFont("Inter", 8))
+                painter.setPen(QColor(MUTED))
+                for side, limit in ((-1, control.min), (1, control.max)):
+                    painter.drawText(
+                        QRectF(center.x() + side * 37 - 22, center.y() + 30, 44, 15),
+                        Qt.AlignmentFlag.AlignCenter,
+                        f"{limit:g}",
+                    )
                 painter.setBrush(QColor("#2e2e2e"))
                 painter.setPen(QPen(QColor("#656565"), 1))
                 painter.drawEllipse(center, 30, 30)
-                angle = math.radians(210 + fraction * 300)
+                angle = math.radians(KNOB_START_DEGREES + fraction * KNOB_SWEEP_DEGREES)
                 painter.setPen(
                     QPen(
                         QColor(ACCENT),
@@ -339,6 +371,87 @@ class ControlScene(QWidget):
                     Qt.AlignmentFlag.AlignCenter,
                     f"{float(value):g}",
                 )
+
+
+class PlanControlScene(ControlScene):
+    """Capture-style control cards with editing and reordering in Plan."""
+
+    selected = Signal(int)
+    reordered = Signal(int, int)
+    add_requested = Signal()
+    remove_requested = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__()
+        self.setParent(parent)
+        self.controls = []
+        self.current = -1
+        self._drag_index = None
+
+    def set_controls(self, controls, current=-1):
+        self.controls = list(controls)
+        self.current = current
+        self._height()
+        self.update()
+
+    def _tile_count(self):
+        return len(self.controls) + 1
+
+    def _tile_index(self, point):
+        for index in range(self._tile_count()):
+            bounds = self._add_bounds() if index == len(self.controls) else self._bounds(index)
+            if bounds.contains(point):
+                return index
+        return -1
+
+    def _add_bounds(self):
+        # Exact geometry of the neighboring control cards, including on wrapped rows.
+        return self._bounds(len(self.controls))
+
+    def _remove_bounds(self, index):
+        bounds = self._bounds(index)
+        return QRectF(bounds.right() - 24, bounds.top() + 4, 20, 20)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            index = self._tile_index(event.position())
+            if index == len(self.controls):
+                self.add_requested.emit()
+            elif index >= 0:
+                if self._remove_bounds(index).contains(event.position()):
+                    self.remove_requested.emit(index)
+                    return
+                self._drag_index = index
+                self.current = index
+                self.selected.emit(index)
+                self.update()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_index is not None:
+            target = self._tile_index(event.position())
+            source = self._drag_index
+            self._drag_index = None
+            if 0 <= target < len(self.controls) and target != source:
+                self.reordered.emit(source, target)
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(ACCENT))
+        painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
+        for index in range(len(self.controls)):
+            painter.drawText(self._remove_bounds(index), Qt.AlignmentFlag.AlignCenter, "×")
+        bounds = self._add_bounds()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(MUTED), 2, Qt.PenStyle.DashLine))
+        painter.drawRoundedRect(bounds, 12, 12)
+        painter.setPen(QPen(QColor(MUTED), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        center = bounds.center()
+        painter.drawLine(center - QPointF(15, 0), center + QPointF(15, 0))
+        painter.drawLine(center - QPointF(0, 15), center + QPointF(0, 15))
 
 
 class ControlDialog(QDialog):

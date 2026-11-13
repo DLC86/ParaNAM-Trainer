@@ -11,7 +11,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
 from nam.capture.audio import DeviceInfo
-from nam.capture.params import KnobSpec
+from nam.capture.params import KnobSpec, SwitchSpec
 from nam.capture.project import AudioSettingsModel, CaptureProject
 from paranam.audio_devices import Capabilities
 from paranam.batch_timing import BatchTiming
@@ -22,27 +22,101 @@ from paranam.playback import PlayWorker, validate_route
 from paranam.training_log import epoch_line
 
 
-def test_controls_grow_and_pages_and_fields_stay_bounded(window, workspace, qapp):
+def test_controls_wrap_and_pages_expand_with_the_window(window, workspace, qapp):
     window._attach(workspace)
     window.navigate(1)
     window.show()
     qapp.processEvents()
-    original = window.control_table.height()
     workspace.draft_controls = [
         KnobSpec(f"Knob {i}", 0, 10).to_dict() for i in range(8)
     ]
     window.refresh_controls()
+    window.resize(1150, 850)
+    qapp.processEvents()
+    assert window.control_strip._bounds(8).top() > window.control_strip._bounds(0).top()
+    assert window.control_strip.height() >= window.control_strip._bounds(8).bottom()
+    narrow_width = window.control_card.width()
     window.resize(2800, 1700)
     qapp.processEvents()
-    table = window.control_table
-    assert table.height() > original
-    assert (
-        table.height()
-        >= sum(table.rowHeight(i) for i in range(8)) + table.horizontalHeader().height()
-    )
-    assert all(page.width() <= 1400 for page in window.page_contents)
+    assert window.control_card.width() > max(narrow_width, 1400)
     assert window.advanced_fields["learning_rate"].maximumWidth() <= 260
     assert window.signal_mode.maximumWidth() <= 560
+
+
+def test_add_control_card_matches_knob_tile_and_arc_sweep(window, workspace):
+    from paranam.widgets import KNOB_START_DEGREES, KNOB_SWEEP_DEGREES
+
+    window._attach(workspace)
+    window.navigate(1)
+    scene = window.control_strip
+    scene.resize(900, 220)
+    tile = scene._bounds(0)
+    add = scene._add_bounds()
+    assert (add.width(), add.height()) == (tile.width(), tile.height())
+    assert KNOB_START_DEGREES == 210.0
+    assert KNOB_SWEEP_DEGREES == 300.0
+
+
+def test_classic_switch_position_buttons_preserve_default(window, workspace):
+    workspace.draft_controls = [SwitchSpec("Mode", ("A", "B", "C"), 1).to_dict()]
+    window._attach(workspace)
+    window.switch_positions.setCurrentRow(0)
+    window.switch_down_button.click()
+    assert [item.text() for item in window._switch_items()] == ["B", "A", "C"]
+    assert window.switch_default.currentText() == "B"
+    window.switch_add_button.click()
+    assert window.switch_positions.count() == 4
+    window.switch_delete_button.click()
+    assert window.switch_positions.count() == 3
+
+
+def test_inline_switch_reorder_changes_neural_order_and_keeps_default(window, workspace):
+    switch = SwitchSpec("Mode", ("A", "B", "C"), 1, option_indices=(2, 0, 1))
+    workspace.draft_controls = [switch.to_dict()]
+    workspace.preferences.update(n_train=3, n_validation=3)
+    workspace.generate_plan()
+    window._attach(workspace)
+    assert window.control_pages.currentIndex() == 1
+    assert [item.text() for item in window._switch_items()] == ["B", "C", "A"]
+    assert window.switch_default.currentText() == "B"
+    before = [dict(entry.params) for entry in workspace.project.entries]
+    item = window.switch_positions.takeItem(0)
+    window.switch_positions.insertItem(2, item)
+    window._switch_positions_changed()
+    assert window.switch_default.currentText() == "B"
+    updated = workspace.controls()[0]
+    assert updated.enum_names == ("C", "A", "B")
+    assert updated.default == 2
+    assert updated.option_indices is None
+    assert workspace.plan_changed()
+    assert [entry.params for entry in workspace.project.entries] == before
+
+
+def test_new_knob_can_be_converted_to_a_switch_without_stale_settings(window, workspace):
+    workspace.draft_controls = [SwitchSpec("Mode", ("A", "B", "C")).to_dict()]
+    window._attach(workspace)
+    window.add_control()
+    assert window.control_pages.currentIndex() == 0
+    window.control_kind.setCurrentIndex(1)
+    assert [item.text() for item in window._switch_items()] == ["Position 1", "Position 2"]
+    assert isinstance(workspace.controls()[1], SwitchSpec)
+
+
+def test_metadata_edits_are_preserved_after_capture_snapshot_replaces_project(
+    window, workspace
+):
+    window._attach(workspace)
+    session = window._get_session()
+    window.worker = SimpleNamespace(deleteLater=lambda: None)
+    window.navigate(3)
+    assert window.metadata_card.isEnabled()
+    window.save_metadata({"modeled_by": "Edited while recording"})
+    assert session.project.user_metadata.get("modeled_by") != "Edited while recording"
+    window._audio_finished()
+    assert workspace.project.user_metadata["modeled_by"] == "Edited while recording"
+    assert type(workspace)(workspace.directory).project.user_metadata[
+        "modeled_by"
+    ] == "Edited while recording"
 
 
 def test_parametric_loopback_required_static_remains_optional(window, workspace):

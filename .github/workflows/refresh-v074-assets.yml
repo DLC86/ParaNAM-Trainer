@@ -1,0 +1,261 @@
+name: Refresh draft 0.7.4 — verified native installers
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-v074-verified-assets
+  cancel-in-progress: true
+
+jobs:
+  targets:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        run: |
+          python3 - <<'PY'
+          import json, os
+          with open('packaging/targets.json') as stream:
+              targets = json.load(stream)
+          assert {t['id'] for t in targets} == {
+              'windows', 'linux', 'macos-arm64', 'macos-intel'}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(targets) + '\n')
+          PY
+
+  build:
+    needs: targets
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prefer pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Verify exact draft and source version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          release = json.loads(subprocess.check_output(
+              ['gh','api','repos/'+os.environ['GH_REPO']+'/releases/444069835']))
+          assert release['draft'] and release['prerelease'], 'Draft must remain unpublished'
+          assert release['tag_name'] in ('v0.7.4', 'untagged-b67c2b0ffbe1248fcc47')
+          assert release['name'] == 'ParaNAM Trainer 0.7.4'
+          assert release['target_commitish'] in ('codex/0.7.4-plan-capture-ui', 'main')
+          assert '__version__ = "0.7.4"' in Path('paranam/__init__.py').read_text()
+          PY
+      - name: Free Linux runner disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Linux audio and Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libportaudio2 libasound2 libpulse0 libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libfontconfig1 libdbus-1-3
+      - name: Enable MSVC for Win32 launcher
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Windows installer compiler
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+      - name: Install bundled training engine
+        run: python -m pip install --no-cache-dir "torch==${{ matrix.torch }}" --index-url "${{ matrix.index }}"
+      - name: Install application and build dependencies
+        run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
+      - name: Build optimized native Compare engine
+        run: python packaging/native_engine.py
+      - name: Test Projects, metadata, Compare, training and singleton guard
+        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      # Windows packaging also smoke-tests the native launcher and its
+      # inherited stdout pipe for Inno Setup's PNGPU progress protocol.
+      - name: Freeze application and package native installer
+        run: python packaging/build.py --flavor ${{ matrix.flavor }}
+      - name: Verify frozen CPU app and optional NVIDIA engine
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          PARANAM_RUNTIME_ROOT: ${{ github.workspace }}/build/optional-gpu
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer.exe" build
+          else
+            python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
+          fi
+      - name: Stage tested packages on existing 0.7.4 draft (originals untouched)
+        shell: bash
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA:0:12}"
+          shopt -s nullglob
+          packages=(installers/*)
+          test ${#packages[@]} -ge 1
+          for package in "${packages[@]}"; do
+            test -f "$package"
+            test "$(wc -c < "$package")" -gt 100000
+            staged="$package.staged-$short"
+            mv "$package" "$staged"
+            # Draft tags can be temporary untagged-* names; upload by release ID.
+            upload_args=(
+              --fail-with-body --silent --show-error --retry 3
+              --retry-delay 5 --retry-all-errors --max-time 900
+              -H "Authorization: Bearer $GH_TOKEN"
+              -H "Accept: application/vnd.github+json"
+              -H "Content-Type: application/octet-stream"
+              --data-binary "@$staged"
+            )
+            curl "${upload_args[@]}" "https://uploads.github.com/repos/$GH_REPO/releases/444069835/assets?name=$(basename "$staged")" > /dev/null
+          done
+
+  finalize:
+    needs: [targets, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all five staged native packages and safely replace originals
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import urllib.request
+
+          repo = os.environ['GH_REPO']
+          sha = os.environ['SOURCE_SHA']
+          base = f'https://api.github.com/repos/{repo}'
+          token = os.environ['GH_TOKEN']
+          release_id = 444069835
+          old_sha = 'codex/0.7.4-plan-capture-ui'
+          tag = 'v0.7.4'
+          prefix = 'ParaNAM-Trainer-0.7.4-'
+          names = {
+              prefix + suffix for suffix in (
+                  'Windows-x64-Setup.exe', 'Linux-amd64.deb',
+                  'Linux-x86_64.tar.gz', 'macOS-arm64.dmg', 'macOS-x86_64.dmg')
+          }
+          short = sha[:12]
+          headers = {'Authorization': 'Bearer ' + token,
+                     'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'}
+          def api(method, path, data=None):
+              payload = None if data is None else json.dumps(data).encode('utf-8')
+              h = dict(headers)
+              if payload is not None: h['Content-Type'] = 'application/json'
+              request = urllib.request.Request(
+                  base + path, method=method, data=payload, headers=h)
+              with urllib.request.urlopen(request, timeout=120) as response:
+                  return None if response.status == 204 else json.load(response)
+
+          release = api('GET', '/releases/' + str(release_id))
+          assert release['draft'] and release['prerelease'], 'Never touch a published release'
+          assert release['tag_name'] in (tag, 'untagged-b67c2b0ffbe1248fcc47')
+          assert release['name'] == 'ParaNAM Trainer 0.7.4'
+          assert release['target_commitish'] in (old_sha, 'main'), 'Draft source changed unexpectedly'
+          assets = {a['name']: a for a in release['assets']}
+          original = {name: assets[name] for name in names}
+          staged_names = {name + '.staged-' + short for name in names}
+          staged = {name: assets[name + '.staged-' + short] for name in names}
+          # A failed earlier run may have uploaded some (but not all) stages.
+          # Keep them until every new package passes the final validation.
+          stale_stages = {
+              name: asset for name, asset in assets.items()
+              if name not in staged_names and any(
+                  name.startswith(package + '.staged-')
+                  and re.fullmatch(
+                      r'[0-9a-f]{12}', name[len(package + '.staged-'):])
+                  for package in names)
+          }
+          assert set(assets) == names | staged_names | set(stale_stages), (
+              'Unexpected release assets; refusing to replace anything')
+          assert all(a['state'] == 'uploaded' and a['size'] > 100000
+                     for a in staged.values())
+
+          current = api('GET', '/git/ref/heads/main')['object']['sha']
+          assert current == sha, 'Source changed during the build; refusing stale assets'
+          def rename(asset, name):
+              return api('PATCH', '/releases/assets/' + str(asset['id']),
+                         {'name': name})
+          def remove(asset):
+              api('DELETE', '/releases/assets/' + str(asset['id']))
+
+          # Each replacement can be rolled back if its staged rename fails.
+          for name in sorted(names):
+              previous = original[name]
+              rename(previous, name + '.backup-' + short)
+              try:
+                  rename(staged[name], name)
+              except Exception:
+                  rename(previous, name)
+                  raise
+              remove(previous)
+              print('Replaced verified asset:', name, flush=True)
+
+          # Remove only recognized staging files left by earlier failed runs.
+          for stale_name, stale_asset in sorted(stale_stages.items()):
+              remove(stale_asset)
+              print('Removed obsolete stage:', stale_name, flush=True)
+
+          verified = api('GET', '/releases/' + str(release_id))
+          assert verified['draft'] and verified['prerelease']
+          final_assets = {a['name']: a for a in verified['assets']}
+          assert set(final_assets) == names
+          for name in sorted(names):
+              asset = final_assets[name]
+              assert asset['id'] == staged[name]['id']
+              assert asset['size'] == staged[name]['size']
+              assert asset['state'] == 'uploaded'
+              if staged[name].get('digest'):
+                  assert asset['digest'] == staged[name]['digest']
+          notes = open('docs/release-0.7.4.md', encoding='utf-8').read()
+          api('PATCH', '/releases/' + str(release_id),
+              {'body': notes, 'target_commitish': 'main'})
+          print('SUCCESS: refreshed all 0.7.4 draft assets without publishing')
+          # Retire the feature branch only when all five installers are verified.
+          retired = 'codex/0.7.4-plan-capture-ui'
+          try:
+              branch = api('GET', '/git/ref/heads/' + retired)
+          except urllib.error.HTTPError as error:
+              if error.code != 404: raise
+              branch = None
+          if branch:
+              if branch['object']['sha'] != 'c68b609dde0e530ad6f46606748c12292ee5db63':
+                  print('Branch moved: refusing to discard new work')
+              else:
+                  api('DELETE', '/git/refs/heads/' + retired)
+                  print('Deleted retired branch:', retired)
+          PY

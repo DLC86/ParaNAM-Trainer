@@ -300,10 +300,32 @@ class Workspace:
         self._sync_control_configs()
         self.save()
 
-    def _sync_control_configs(self, renamed=None):
+    def update_switch_display_order(self, control):
+        """Move switch positions without changing existing neural coordinates."""
+        for project_control in self.project.knobs:
+            if project_control.name != control.name:
+                continue
+            original = project_control.to_knob_spec()
+            if not isinstance(original, SwitchSpec):
+                return
+            without_order = lambda spec: {
+                key: value for key, value in spec.to_dict().items() if key != "option_indices"
+            }
+            if (
+                original.option_indices != control.option_indices
+                and without_order(original) == without_order(control)
+            ):
+                project_control.option_indices = (
+                    None if control.option_indices is None else list(control.option_indices)
+                )
+                self._sync_control_configs(switches={control.name: control})
+            return
+
+    def _sync_control_configs(self, renamed=None, switches=None):
         from nam.capture.export import build_data_config, _training_param_specs
 
         renamed = renamed or {}
+        switches = switches or {}
         if (self.directory / "data.json").exists():
             atomic_write_json(
                 self.directory / "data.json", build_data_config(self.project)
@@ -322,6 +344,11 @@ class Workspace:
             if isinstance(params, list):
                 for param in params:
                     param["name"] = renamed.get(param["name"], param["name"])
+                    switch = switches.get(param["name"])
+                    if switch is not None and "options" in param:
+                        positions = switch.option_indices or range(len(switch.enum_names))
+                        for option in param["options"]:
+                            option["index_sw"] = positions[option["value"]]
                 params.sort(
                     key=lambda p: (
                         names.index(p["name"]) if p["name"] in names else len(names)

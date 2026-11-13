@@ -62,7 +62,7 @@ from nam.capture.audio import list_devices
 from nam.capture.export import update_data_json
 from nam.capture.gui.workers import CancelToken, SessionWorker
 from nam.capture.params import (
-    KnobSpec, SwitchSpec, capture_recommendations,
+    KnobSpec, SwitchSpec, capture_recommendations, validate_knobs,
     capture_grid_limits, capture_count_maxima,
 )
 from nam.capture.planner import corner_capture_count
@@ -72,7 +72,7 @@ from .workspace import Workspace, control_from_dict, read_json
 from .widgets import (
     THEME,
     ControlScene,
-    ControlDialog,
+    PlanControlScene,
     MetadataEditor,
     load_font,
 )
@@ -141,6 +141,7 @@ class WizardWindow(
     QMainWindow,
 ):
     capture_stage = Signal(str)
+    capture_stream_failed = Signal(object, object)
     route_levels = Signal(float, float, float, float)
 
     def __init__(self):
@@ -155,6 +156,9 @@ class WizardWindow(
         self.resize(1260, 840)
         self.setMinimumSize(1000, 700)
         self.settings = QSettings("DLC86", "ParaNAM Trainer")
+        geometry = self.settings.value("window_geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
         import os
 
         default_queue = (
@@ -173,6 +177,7 @@ class WizardWindow(
         self.workspace = None
         self.session = None
         self.worker = None
+        self._pending_capture_metadata = None
         self.cancel_token = None
         self.process = None
         self.job = None
@@ -194,6 +199,7 @@ class WizardWindow(
         self.restore_startup_setup()
         self._restoring_setup = False
         self.capture_stage.connect(self.capture_status.setText)
+        self.capture_stream_failed.connect(self._capture_audio_hold_failed)
         self.route_levels.connect(self._route_metered)
         from .queue_clock import ElapsedClock
 
@@ -330,7 +336,6 @@ class WizardWindow(
             layout.setContentsMargins(0, 0, 10, 0)
             layout.setSpacing(20)
             builder(layout)
-            page.setMaximumWidth(1100 if index in (1, 3, 6) else 1400)
             for field_type in (QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox):
                 for field in page.findChildren(field_type):
                     field.setMaximumWidth(
@@ -644,38 +649,96 @@ class WizardWindow(
         layout.addWidget(kind_card)
         self.capture_kind.currentIndexChanged.connect(self.save_preferences)
         self.control_card, box = card("Rig controls")
-        self.control_table = QTableWidget(0, 4)
-        corner = self.control_table.findChild(QAbstractButton)
-        if corner:
-            corner.setText("#")
-        self.control_table.setHorizontalHeaderLabels(
-            ["Name", "Type", "Range / positions", "Default"]
+        self.control_strip = PlanControlScene()
+        self.control_strip.selected.connect(self.select_control)
+        self.control_strip.reordered.connect(self.reorder_controls)
+        self.control_strip.add_requested.connect(self.add_control)
+        self.control_strip.remove_requested.connect(self.remove_control)
+        box.addWidget(self.control_strip)
+        self.control_editor = QFrame()
+        self.control_editor.setObjectName("card")
+        editor = QVBoxLayout(self.control_editor)
+        editor.setContentsMargins(14, 12, 14, 12)
+        editor.addWidget(label("CONTROL SETTINGS", "eyebrow"))
+        editor_form = QFormLayout()
+        self.control_name = QLineEdit()
+        self.control_name.setPlaceholderText("Control name")
+        self.control_kind = QComboBox()
+        self.control_kind.addItem("Knob", "knob")
+        self.control_kind.addItem("Switch", "switch")
+        editor_form.addRow("Name", self.control_name)
+        editor_form.addRow("Type", self.control_kind)
+        editor.addLayout(editor_form)
+        self.control_pages = QStackedWidget()
+        knob_page = QWidget()
+        knob_form = QFormLayout(knob_page)
+        self.control_min, self.control_max, self.control_step, self.control_default = [QDoubleSpinBox() for _ in range(4)]
+        for field in (self.control_min, self.control_max, self.control_default):
+            field.setRange(-10000, 10000)
+            field.setDecimals(3)
+        self.control_step.setRange(0.001, 10000)
+        self.control_step.setDecimals(3)
+        self.control_bias = QComboBox()
+        self.control_bias.addItem("Uniform range", "linear")
+        self.control_bias.addItem("Lower-half density", "lower")
+        self.control_bias.addItem("Upper-half density", "upper")
+        self.control_gain = QCheckBox("Gain / Drive")
+        self.control_clean_volume = QCheckBox("Linear volume")
+        self.control_avoid_min = QCheckBox("Avoid min")
+        self.control_avoid_max = QCheckBox("Avoid max")
+        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), ("", self.control_avoid_min), ("", self.control_avoid_max)):
+            knob_form.addRow(caption, field)
+        switch_page = QWidget()
+        switch_layout = QVBoxLayout(switch_page)
+        switch_layout.setContentsMargins(0, 0, 0, 0)
+        switch_form = QFormLayout()
+        self.switch_mode = QComboBox()
+        self.switch_mode.addItem("Complex Switch", "complex")
+        self.switch_mode.addItem("Simple Switch", "simple")
+        self.switch_default = QComboBox()
+        switch_form.addRow("Planning", self.switch_mode)
+        switch_form.addRow("Default", self.switch_default)
+        switch_layout.addLayout(switch_form)
+        switch_layout.addWidget(label("Positions (physical order)", "muted"))
+        self.switch_positions = QListWidget()
+        self.switch_positions.setAccessibleName("Switch positions in physical order")
+        self.switch_positions.setMinimumHeight(150)
+        switch_layout.addWidget(self.switch_positions)
+        position_buttons = QHBoxLayout()
+        self.switch_add_button = button("Add position", self.add_switch_position)
+        self.switch_delete_button = button(
+            "Delete", lambda: self.remove_switch_position(self.switch_positions.currentRow())
         )
-        self.control_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
+        self.switch_up_button = button("Move up", lambda: self.move_switch_position(-1))
+        self.switch_down_button = button("Move down", lambda: self.move_switch_position(1))
+        for control_button in (
+            self.switch_add_button, self.switch_delete_button,
+            self.switch_up_button, self.switch_down_button,
+        ):
+            position_buttons.addWidget(control_button)
+        position_buttons.addStretch()
+        switch_layout.addLayout(position_buttons)
+        self.control_pages.addWidget(knob_page)
+        self.control_pages.addWidget(switch_page)
+        editor.addWidget(self.control_pages)
+        self.control_kind.currentIndexChanged.connect(self.control_pages.setCurrentIndex)
+        self.switch_positions.itemChanged.connect(self._switch_positions_changed)
+        self.switch_positions.currentRowChanged.connect(self._update_switch_position_buttons)
+        self._update_switch_position_buttons()
+        self.control_clean_volume.toggled.connect(self._control_volume_changed)
+        self.control_gain.toggled.connect(
+            lambda checked: self.control_clean_volume.setEnabled(not checked)
         )
-        for column, width in enumerate((200, 100, 320, 160)):
-            self.control_table.setColumnWidth(column, width)
-        self.control_table.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self.control_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.control_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.control_table.setMinimumHeight(205)
-        self.control_table.cellDoubleClicked.connect(lambda *_: self.edit_control())
-        box.addWidget(self.control_table)
-        row = QHBoxLayout()
-        row.addWidget(button("+ Add control", self.add_control, True))
-        row.addWidget(button("Edit selected", self.edit_control))
-        row.addWidget(button("Remove", self.remove_control))
-        self.control_up_button = button("Move up", lambda: self.move_control(-1))
-        self.control_down_button = button("Move down", lambda: self.move_control(1))
-        row.addWidget(self.control_up_button)
-        row.addWidget(self.control_down_button)
-        row.addStretch()
-        box.addLayout(row)
+        for field in (self.control_name, self.control_min, self.control_max, self.control_step, self.control_default):
+            field.editingFinished.connect(self.save_control)
+        for field in (self.control_kind, self.control_bias, self.switch_mode, self.switch_default):
+            field.currentIndexChanged.connect(self.save_control)
+        for field in (self.control_gain, self.control_clean_volume, self.control_avoid_min, self.control_avoid_max):
+            field.clicked.connect(self.save_control)
+        self.control_error = label("", "muted")
+        editor.addWidget(self.control_error)
+        self.control_error.hide()
+        box.addWidget(self.control_editor)
         layout.addWidget(self.control_card)
         self.signal_card, box = card("Input signal")
         signal_form = QFormLayout()
@@ -706,7 +769,7 @@ class WizardWindow(
             )
         )
         self.signal_mode.currentIndexChanged.connect(self.save_preferences)
-        layout.insertWidget(layout.indexOf(self.control_card), self.signal_card)
+        layout.addWidget(self.signal_card)
         self.metadata_card, metadata_box = card(
             "Model metadata / defaults for static captures"
         )
@@ -1194,7 +1257,7 @@ class WizardWindow(
                 "Model",
                 "Status",
                 "Epoch",
-                "Validation Full ESR",
+                "Val. ESR",
             ]
         )
         self.queue_table.setSelectionBehavior(
@@ -1206,13 +1269,11 @@ class WizardWindow(
         self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.queue_table.setItemDelegate(PreserveSelectionTextDelegate(self.queue_table))
         self.queue_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
+            QHeaderView.ResizeMode.ResizeToContents
         )
         self.queue_table.horizontalHeader().setStretchLastSection(False)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
-        for column, width in enumerate((140, 120, 110, 90, 100, 65, 85)):
-            self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         layout.addWidget(self.queue_table, 1)
         actions = QHBoxLayout()
@@ -1521,7 +1582,7 @@ class WizardWindow(
         self.save_preferences()
 
     def busy(self):
-        return (self.worker is not None and self.worker.isRunning()) or getattr(
+        return self.worker is not None or getattr(
             self, "play_worker", None
         ) is not None
 
@@ -1543,6 +1604,8 @@ class WizardWindow(
             self._settings_return_page = self.pages.currentIndex()
         if index != 6:
             self._stop_settings_audio()
+        if index != 2 and self.session and self.worker is None:
+            self.close_audio()
         self.pages.setCurrentIndex(index)
         if index == 6:
             self._sync_settings_audio(retry=True)
@@ -1555,6 +1618,8 @@ class WizardWindow(
             self.refresh_rate_preview()
         if index == 5:
             self.refresh_play_models()
+        if index == 2:
+            self._sync_capture_audio_hold()
         for i, step in enumerate(self.steps):
             step.setChecked(i == index)
         self.back_button.setEnabled(index > 0)
@@ -1782,7 +1847,7 @@ class WizardWindow(
     def _reconnect_device(self):
         from PySide6.QtWidgets import QApplication
 
-        if self.busy() or self.session or QApplication.activeModalWidget():
+        if self.busy() or QApplication.activeModalWidget():
             return
         # Refresh only after a hardware notification or an explicit click.
         # Reinitializing PortAudio on a timer repeatedly unloads ASIO drivers.
@@ -1912,10 +1977,14 @@ class WizardWindow(
     def save_audio(self, *_):
         if self._loading or self.busy():
             return
-        self.close_audio()
+        if self.pages.currentIndex() == 2:
+            self._stop_settings_audio()
+        else:
+            self.close_audio()
         self._diagram()
         self.remember_setup()
         self._refresh_play_calibration()
+        self._sync_capture_audio_hold()
 
     def save_calibration(self, *_):
         if self._loading or self.busy():
@@ -1945,9 +2014,6 @@ class WizardWindow(
             worker = getattr(self, "settings_audio_worker", None)
             if worker is not None:
                 worker.set_noise(worker.noise[0], level)
-            if self.session:
-                self.session.close_audio()
-                self.session = None
         except ValueError as error:
             self.notify_error(error)
 
@@ -2047,6 +2113,34 @@ class WizardWindow(
             self.session.close_audio()
             self.session = None
 
+    def _sync_capture_audio_hold(self):
+        """Reserve the selected interface for the entire Capture page."""
+        if (
+            self.pages.currentIndex() != 2
+            or self.worker is not None
+            or self.busy()
+            or self.workspace is None
+            or not self.isVisible()
+            or self._close_after_pause
+        ):
+            return
+        audio = self.audio_settings()
+        if self.device.currentData() is None or None in (
+            audio.input_channel, audio.output_channel
+        ):
+            return
+        session = self._get_session()
+        try:
+            session.reserve_audio(
+                lambda error: self.capture_stream_failed.emit(session, error)
+            )
+        except Exception as error:
+            self._capture_audio_hold_failed(session, error)
+
+    def _capture_audio_hold_failed(self, session, error):
+        if self.session is session and self.pages.currentIndex() == 2 and self.worker is None:
+            self.capture_status.setText(f"Audio interface unavailable: {error}")
+
     def _get_session(self):
         if self.session is None:
             if self.workspace:
@@ -2067,6 +2161,11 @@ class WizardWindow(
                 )
                 cache.mkdir(parents=True, exist_ok=True)
                 self.session = CaptureSession(project, cache)
+        elif self.workspace and self.session.project is not self.workspace.project:
+            # An idle reservation may predate edits made before Record was pressed.
+            self.session.project = self.workspace.project.model_copy(
+                update={"audio": self.audio_settings()}
+            )
         return self.session
 
     def run_audio(self, operation, success):
@@ -2094,8 +2193,16 @@ class WizardWindow(
         self.worker.deleteLater()
         self.worker = None
         self.cancel_token = None
+        if self._pending_capture_metadata is not None:
+            metadata = self._pending_capture_metadata
+            self._pending_capture_metadata = None
+            self.save_metadata(metadata)
         self.refresh_captures()
         self.update_enabled()
+        if self.pages.currentIndex() == 2:
+            self._sync_capture_audio_hold()
+        elif self.session:
+            self.close_audio()
         if self._close_after_pause:
             self.close()
 
@@ -2115,118 +2222,260 @@ class WizardWindow(
     def refresh_controls(self):
         if not self.workspace:
             return
-        self.control_table.setRowCount(len(self.workspace.draft_controls))
-        for row, data in enumerate(self.workspace.draft_controls):
-            c = control_from_dict(data)
-            if isinstance(c, SwitchSpec):
-                cells = (
-                    c.name,
-                    (
-                        "Simple Switch"
-                        if c.planning_mode == "simple"
-                        else "Complex Switch"
-                    ),
-                    " / ".join(c.enum_names),
-                    c.enum_names[c.default],
-                )
-            else:
-                cells = (
-                    c.name,
-                    "Knob",
-                    f"{c.min:g} … {c.max:g}  ·  step {c.step:g}"
-                    + ("  ·  Gain/Drive" if c.is_gain else "")
-                    + ("  ·  Clean volume" if c.clean_volume else "")
-                    + ("  ·  Avoid min" if c.avoid_zero else "")
-                    + ("  ·  Avoid max" if c.avoid_max else "")
-                    + (
-                        {
-                            "lower": "  ·  Lower-half density",
-                            "upper": "  ·  Upper-half density",
-                        }.get(c.sampling_bias, "")
-                    ),
-                    f"{c.default:g}",
-                )
-            for col, value in enumerate(cells):
-                item = QTableWidgetItem(value)
-                item.setToolTip(value)
-                self.control_table.setItem(row, col, item)
-        self.control_table.resizeRowsToContents()
-        self.control_table.setFixedHeight(
-            max(
-                205,
-                self.control_table.horizontalHeader().height()
-                + sum(
-                    self.control_table.rowHeight(row)
-                    for row in range(self.control_table.rowCount())
-                )
-                + self.control_table.horizontalScrollBar().sizeHint().height()
-                + 4,
-            )
-        )
+        controls = [control_from_dict(data) for data in self.workspace.draft_controls]
+        current = getattr(self, "selected_control_index", -1)
+        if not 0 <= current < len(controls):
+            current = 0 if controls else -1
+        self.selected_control_index = current
+        self.control_strip.set_controls(controls, current)
+        self.control_editor.setVisible(current >= 0)
+        self.control_error.hide()
+        if current >= 0:
+            self._load_control_editor(controls[current])
         self.refresh_recommendation()
 
-    def _control_dialog(self, index=None):
+    def add_control(self):
         if not self.workspace or self.busy():
             return
-        control = (
-            control_from_dict(self.workspace.draft_controls[index])
-            if index is not None
-            else None
+        names = {data["name"].casefold() for data in self.workspace.draft_controls}
+        number = len(self.workspace.draft_controls) + 1
+        while f"control {number}" in names:
+            number += 1
+        self.workspace.draft_controls.append(
+            KnobSpec(f"Control {number}", 0, 10, 0.5, 5).to_dict()
         )
-        dialog = ControlDialog(self, control)
-        if dialog.exec() != dialog.DialogCode.Accepted:
+        self.selected_control_index = len(self.workspace.draft_controls) - 1
+        self.workspace.save()
+        self.refresh_controls()
+        self.refresh_recommendation(True)
+
+    def select_control(self, index):
+        if self.workspace and 0 <= index < len(self.workspace.draft_controls):
+            if index == getattr(self, "selected_control_index", -1):
+                return
+            self.selected_control_index = index
+            self.refresh_controls()
+
+    def reorder_controls(self, source, target):
+        if not self.workspace or self.busy() or source == target:
             return
-        previous = list(self.workspace.draft_controls)
-        if index is None:
-            self.workspace.draft_controls.append(dialog.result_control.to_dict())
-        else:
-            before = previous[index]
-            after = dialog.result_control.to_dict()
-            if before["name"] != after["name"]:
-                try:
-                    self.workspace.rename_control(before["name"], after["name"])
-                except ValueError as error:
-                    self.notify_error(error)
-                    return
+        self.workspace.move_control(source, target)
+        self.selected_control_index = target
+        self.refresh_controls()
+
+    def _load_control_editor(self, control):
+        from PySide6.QtCore import QSignalBlocker
+
+        widgets = (
+            self.control_kind,
+            self.control_gain,
+            self.control_clean_volume,
+            self.switch_positions,
+            self.control_name,
+            self.control_min,
+            self.control_max,
+            self.control_step,
+            self.control_default,
+            self.control_bias,
+            self.control_avoid_min,
+            self.control_avoid_max,
+            self.switch_mode,
+            self.switch_default,
+        )
+        blockers = [QSignalBlocker(widget) for widget in widgets]
+        try:
+            self.control_name.setText(control.name)
+            is_switch = isinstance(control, SwitchSpec)
+            self.control_kind.setCurrentIndex(int(is_switch))
+            self.control_pages.setCurrentIndex(int(is_switch))
+            switch = control if is_switch else SwitchSpec(control.name, ("Position 1", "Position 2"))
+            self.switch_mode.setCurrentIndex(self.switch_mode.findData(switch.planning_mode))
+            self.switch_positions.clear()
+            positions = switch.option_indices or range(len(switch.enum_names))
+            for neural_index in sorted(range(len(positions)), key=positions.__getitem__):
+                self._insert_switch_position(switch.enum_names[neural_index], neural_index)
+            self.switch_positions.setCurrentRow(0)
+            self._refresh_switch_defaults(switch.default)
+            self._update_switch_position_buttons()
+
+            knob = control if not is_switch else KnobSpec(control.name, 0, 10, 0.5, 5)
+            for widget, value in (
+                (self.control_min, knob.min),
+                (self.control_max, knob.max),
+                (self.control_step, knob.step),
+                (self.control_default, knob.default),
+            ):
+                widget.setValue(value)
+            self.control_bias.setCurrentIndex(self.control_bias.findData(knob.sampling_bias))
+            self.control_gain.setChecked(knob.is_gain)
+            self.control_clean_volume.setChecked(knob.clean_volume)
+            self.control_avoid_min.setChecked(knob.avoid_zero)
+            self.control_avoid_max.setChecked(knob.avoid_max)
+            self.control_clean_volume.setEnabled(not knob.is_gain)
+            self._control_volume_changed(knob.clean_volume, reset=False)
+        finally:
+            for blocker in blockers:
+                blocker.unblock()
+
+    def _control_volume_changed(self, checked, reset=True):
+        if checked and reset:
+            self.control_step.setValue(min(1.0, self.control_max.value() - self.control_min.value()))
+        for field in (self.control_gain, self.control_avoid_min, self.control_avoid_max):
+            if checked and reset:
+                field.setChecked(False)
+            field.setEnabled(not checked)
+        self.control_bias.setEnabled(not checked)
+
+    def _switch_items(self):
+        return [self.switch_positions.item(row) for row in range(self.switch_positions.count())]
+
+    def _insert_switch_position(self, name, neural_index):
+        item = QListWidgetItem(name)
+        item.setFlags((item.flags() | Qt.ItemFlag.ItemIsEditable) & ~Qt.ItemFlag.ItemIsDropEnabled)
+        item.setData(Qt.ItemDataRole.UserRole, neural_index)
+        self.switch_positions.addItem(item)
+
+    def _refresh_switch_defaults(self, default=None):
+        from PySide6.QtCore import QSignalBlocker
+
+        blocker = QSignalBlocker(self.switch_default)
+        if default is None:
+            default = self.switch_default.currentData()
+        self.switch_default.clear()
+        for item in self._switch_items():
+            self.switch_default.addItem(item.text(), item.data(Qt.ItemDataRole.UserRole))
+        self.switch_default.setCurrentIndex(max(0, self.switch_default.findData(default)))
+        blocker.unblock()
+
+    def _switch_positions_changed(self, *_):
+        self._refresh_switch_defaults()
+        self.save_control()
+
+    def _update_switch_position_buttons(self, *_):
+        row = self.switch_positions.currentRow()
+        count = self.switch_positions.count()
+        self.switch_add_button.setEnabled(count < 1024)
+        self.switch_delete_button.setEnabled(count > 2 and row >= 0)
+        self.switch_up_button.setEnabled(row > 0)
+        self.switch_down_button.setEnabled(0 <= row < count - 1)
+
+    def move_switch_position(self, direction):
+        row = self.switch_positions.currentRow()
+        target = row + direction
+        if row < 0 or target < 0 or target >= self.switch_positions.count():
+            return
+        item = self.switch_positions.takeItem(row)
+        self.switch_positions.insertItem(target, item)
+        self.switch_positions.setCurrentRow(target)
+        self._switch_positions_changed()
+
+    def add_switch_position(self):
+        items = self._switch_items()
+        if len(items) >= 1024:
+            return
+        number = len(items) + 1
+        names = {item.text().strip().casefold() for item in items}
+        while f"position {number}" in names:
+            number += 1
+        neural_index = max(item.data(Qt.ItemDataRole.UserRole) for item in items) + 1
+        self._insert_switch_position(f"Position {number}", neural_index)
+        self.switch_positions.setCurrentRow(self.switch_positions.count() - 1)
+        self._update_switch_position_buttons()
+        self._switch_positions_changed()
+
+    def remove_switch_position(self, row):
+        if self.switch_positions.count() > 2 and 0 <= row < self.switch_positions.count():
+            self.switch_positions.takeItem(row)
+            self.switch_positions.setCurrentRow(min(row, self.switch_positions.count() - 1))
+            self._update_switch_position_buttons()
+            self._switch_positions_changed()
+
+    def _edited_switch(self):
+        visual_order = self._switch_items()
+        keys = [item.data(Qt.ItemDataRole.UserRole) for item in visual_order]
+        previous = control_from_dict(
+            self.workspace.draft_controls[self.selected_control_index]
+        )
+        if isinstance(previous, SwitchSpec):
+            previous_order = previous.option_indices or range(len(previous.enum_names))
+            if keys == sorted(range(len(previous_order)), key=previous_order.__getitem__):
+                names = {key: item.text() for key, item in zip(keys, visual_order)}
+                return SwitchSpec(
+                    self.control_name.text(),
+                    tuple(names[key] for key in range(len(keys))),
+                    self.switch_default.currentData(),
+                    self.switch_mode.currentData(),
+                    previous.option_indices,
+                )
+        return SwitchSpec(
+            self.control_name.text(),
+            tuple(item.text() for item in visual_order),
+            keys.index(self.switch_default.currentData()),
+            self.switch_mode.currentData(),
+        )
+
+    def save_control(self):
+        if not self.workspace or self.busy():
+            return
+        index = getattr(self, "selected_control_index", -1)
+        if not 0 <= index < len(self.workspace.draft_controls):
+            return
+        previous = self.workspace.draft_controls[index]
+        try:
+            if self.control_kind.currentData() == "switch":
+                control = self._edited_switch()
+            else:
+                control = KnobSpec(
+                    self.control_name.text(),
+                    self.control_min.value(),
+                    self.control_max.value(),
+                    self.control_step.value(),
+                    self.control_default.value(),
+                    self.control_avoid_min.isChecked(),
+                    self.control_gain.isChecked(),
+                    avoid_max=self.control_avoid_max.isChecked(),
+                    sampling_bias=self.control_bias.currentData(),
+                    clean_volume=self.control_clean_volume.isChecked(),
+                )
+            after = control.to_dict()
+            self.control_error.hide()
+            if after == previous:
+                return
+            candidate = list(self.workspace.draft_controls)
+            candidate[index] = after
+            validate_knobs([control_from_dict(data) for data in candidate])
+            if previous["name"] != after["name"]:
+                self.workspace.rename_control(previous["name"], after["name"])
                 self.close_audio()
             self.workspace.draft_controls[index] = after
-        try:
-            self.workspace.controls()
+            if isinstance(control, SwitchSpec):
+                self.workspace.update_switch_display_order(control)
         except ValueError as error:
-            self.workspace.draft_controls = previous
-            self.notify_error(error)
+            self.control_error.setText(str(error))
+            self.control_error.show()
             return
-        self.refresh_controls()
-        if index is None or {
-            k: v for k, v in previous[index].items() if k != "name"
-        } != {k: v for k, v in dialog.result_control.to_dict().items() if k != "name"}:
-            self.refresh_recommendation(True)
         self.workspace.save()
+        self.control_strip.set_controls(
+            [control_from_dict(data) for data in self.workspace.draft_controls], index
+        )
+        if isinstance(control, SwitchSpec):
+            for row, item in enumerate(self._switch_items()):
+                if control.option_indices is None:
+                    item.setData(Qt.ItemDataRole.UserRole, row)
+            if control.option_indices is None:
+                self._refresh_switch_defaults(control.default)
+        excluded = {"name", "option_indices"}
+        if {k: v for k, v in previous.items() if k not in excluded} != {
+            k: v for k, v in after.items() if k not in excluded
+        }:
+            self.refresh_recommendation(True)
 
-    def move_control(self, direction):
-        if not self.workspace or self.busy():
-            return
-        index = self.control_table.currentRow()
-        target = index + direction
-        if index < 0 or not 0 <= target < len(self.workspace.draft_controls):
-            return
-        self.workspace.move_control(index, target)
-        self.close_audio()
-        self.refresh_controls()
-        self.control_table.selectRow(target)
-
-    def add_control(self):
-        self._control_dialog()
-
-    def edit_control(self):
-        index = self.control_table.currentRow()
-        if index >= 0:
-            self._control_dialog(index)
-
-    def remove_control(self):
-        index = self.control_table.currentRow()
+    def remove_control(self, index=None):
+        if index is None:
+            index = getattr(self, "selected_control_index", -1)
         if self.workspace and index >= 0 and not self.busy():
             self.workspace.draft_controls.pop(index)
+            self.selected_control_index = min(index, len(self.workspace.draft_controls) - 1)
             self.refresh_controls()
             self.refresh_recommendation(True)
             self.workspace.save()
@@ -2503,7 +2752,12 @@ class WizardWindow(
         return self.model_format
 
     def save_metadata(self, metadata):
-        if self.workspace and not self._loading and not self.busy():
+        if self.workspace and not self._loading:
+            if self.worker is not None:
+                # The worker saves its own project snapshot. Commit the latest
+                # edit after it finishes to avoid overwriting capture results.
+                self._pending_capture_metadata = dict(metadata)
+                return
             previous = self.workspace.project.user_metadata.get("modeled_by")
             author = metadata.get("modeled_by")
             if author and author != previous:
@@ -2826,7 +3080,6 @@ class WizardWindow(
                 raise ValueError(
                     "Select an available audio interface in Project & routing."
                 )
-            self.save_audio()
             audio = self.audio_settings()
             if audio.monitor_return_enabled and audio.host_api != "ASIO":
                 raise ValueError(
