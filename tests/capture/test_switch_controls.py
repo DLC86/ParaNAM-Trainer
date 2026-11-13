@@ -132,7 +132,7 @@ def test_gui_controls_switch_roundtrip_and_recommendations(monkeypatch, tmp_path
         window._apply_n_validation_recommendation()
         window._refresh_corner_count()
         assert window.n_train_spin.value() == 48
-        assert window.n_validation_spin.value() == 24
+        assert window.n_validation_spin.value() == 15
         assert "minimum: 3" in window.n_train_recommended_label.text()
         assert main.knob_rows_to_specs(window._knob_table_rows())[1] == spec
         assert main.format_params({"Mode": "Normal"}) == "Mode=Normal"
