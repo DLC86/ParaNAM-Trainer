@@ -1278,18 +1278,23 @@ class MainWindow(_QMainWindow):
             self._add_knob_row(
                 knob.name, knob.min, knob.max, knob.step, knob.avoid_zero, knob.is_gain
             )
-        self.n_train_spin.setMaximum(100_000)
-        self.n_validation_spin.setMaximum(100_000)
-        self.n_train_spin.setValue(
-            self.project.n_train_lhs
-            or len(self.project.entries_for_split("train"))
-            or 1
-        )
-        self._apply_n_train_recommendation()
-        self.n_validation_spin.setValue(
-            len(self.project.entries_for_split("validation"))
-        )
-        self._apply_n_validation_recommendation()
+        for field in (self.n_train_spin, self.n_validation_spin):
+            field.blockSignals(True)
+        try:
+            self.n_train_spin.setRange(1, 100_000)
+            self.n_validation_spin.setRange(0, 100_000)
+            self.n_train_spin.setValue(
+                self.project.n_train_lhs
+                or len(self.project.entries_for_split("train"))
+                or 1
+            )
+            self.n_validation_spin.setValue(
+                len(self.project.entries_for_split("validation"))
+            )
+        finally:
+            for field in (self.n_train_spin, self.n_validation_spin):
+                field.blockSignals(False)
+        self._sync_plan_limits()
         self.seed_spin.setValue(self.project.seed)
         self.include_corners_check.setChecked(self.project.include_initial_corners)
         self._refresh_corner_count()
@@ -1611,29 +1616,30 @@ class MainWindow(_QMainWindow):
         )
 
     def _apply_n_train_recommendation(self) -> None:
-        """Snap the training-capture spinner to the recommendation for the current knob
-        count. Only called from actions that change the knob count, and only takes
-        effect before a plan has been generated -- once a plan exists, a stored value
-        must never be silently overwritten, since regenerating with a changed count
-        discards capture progress.
-        """
-        # The Controls tab is built (and seeds a first row) before the Plan tab that owns
-        # this spinner, so this can run before it exists.
-        if getattr(self, "n_train_spin", None) is None:
-            return
-        if self._no_plan_generated_yet():
-            self.n_train_spin.setValue(self._control_recommendations()[0])
-
-    def _apply_n_validation_recommendation(self) -> None:
-        """Snap the validation-capture spinner to the recommendation for the current
-        knob count, under the same before-a-plan-exists rule as
-        ``_apply_n_train_recommendation``.
-        """
+        """Refresh both default counts atomically if there is no saved plan."""
         if getattr(self, "n_validation_spin", None) is None:
             return
-        if self._no_plan_generated_yet():
-            recommended = self._control_recommendations()[1]
-            self.n_validation_spin.setValue(recommended)
+        if not self._no_plan_generated_yet():
+            self._sync_plan_limits()
+            return
+        train, validation, _ = self._control_recommendations()
+        for field in (self.n_train_spin, self.n_validation_spin):
+            field.blockSignals(True)
+        try:
+            # Previous control settings can have smaller maxima. Clear them
+            # before applying the two new recommended values together.
+            self.n_train_spin.setRange(1, 100_000)
+            self.n_validation_spin.setRange(0, 100_000)
+            self.n_train_spin.setValue(train)
+            self.n_validation_spin.setValue(validation)
+        finally:
+            for field in (self.n_train_spin, self.n_validation_spin):
+                field.blockSignals(False)
+        self._sync_plan_limits()
+
+    def _apply_n_validation_recommendation(self) -> None:
+        """The training recommendation applies both fields together."""
+        self._apply_n_train_recommendation()
 
     def _knob_table_rows(self) -> list[tuple]:
         rows = []
