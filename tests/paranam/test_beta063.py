@@ -10,7 +10,7 @@ from paranam.workspace import Workspace, read_json
 
 
 @pytest.mark.parametrize(
-    "knobs,expected", [(1, 8), (2, 8), (3, 12), (5, 20), (6, 24), (9, 24)]
+    "knobs,expected", [(1, 5), (2, 8), (3, 12), (5, 20), (6, 24), (9, 24)]
 )
 def test_validation_recommendations_per_joint_switch_state(knobs, expected):
     controls = [KnobSpec(f"K{i}", 0, 10) for i in range(knobs)]
