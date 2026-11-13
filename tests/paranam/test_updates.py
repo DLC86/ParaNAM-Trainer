@@ -138,20 +138,27 @@ def test_release_notes_render_github_markdown_and_expand_on_resize(window, qapp)
     from PySide6.QtWidgets import QTextBrowser, QSizePolicy
 
     info = updates.release_info(published_release())
-    info["notes"] = (
-        "# Release heading\\n\\n"
-        "## Improvements\\n\\n"
-        "**Bold text**, *italic text*, and ~~removed~~.\\n\\n"
-        "- First item\\n- Second item\\n\\n"
-        "[Release link](https://github.com/DLC86/ParaNAM-Trainer)\\n\\n"
-        "| Change | Status |\\n| --- | --- |\\n| Installer | Visible |"
-    ).replace("\\\\n", "\\n")
+    info["notes"] = """# Release heading
+
+## Improvements
+
+**Bold text**, *italic text*, and ~~removed~~.
+
+- First item
+- Second item
+
+[Release link](https://github.com/DLC86/ParaNAM-Trainer)
+
+| Change | Status |
+| --- | --- |
+| Installer | Visible |
+"""
     window._update_checked(info)
     notes = window._update_notes
     assert isinstance(notes, QTextBrowser)
     assert notes.isReadOnly() and notes.openExternalLinks()
-    assert notes.verticalSizePolicy() == QSizePolicy.Policy.Expanding
-    assert window._update_message.verticalSizePolicy() == QSizePolicy.Policy.Fixed
+    assert notes.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    assert window._update_message.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
     assert notes.document().firstBlock().blockFormat().headingLevel() == 1
     bold = notes.document().find("Bold text")
     assert not bold.isNull() and bold.charFormat().fontWeight() >= QFont.Weight.Bold
@@ -169,7 +176,9 @@ def test_release_notes_render_github_markdown_and_expand_on_resize(window, qapp)
     assert notes.height() > notes_height
     assert window._update_message.height() == top_height
 
-    changed = dict(info, notes="## Fixed\\n\\nA **new** update.")
+    changed = dict(info, notes="""## Fixed
+
+A **new** update.""")
     window._update_checked(changed)
     assert notes.document().firstBlock().blockFormat().headingLevel() == 2
     assert "A new update." in notes.toPlainText()
