@@ -226,6 +226,75 @@ class SwitchSpec:
 ControlSpec = KnobSpec | SwitchSpec
 
 
+def capture_grid_limits(controls: _Sequence[ControlSpec]) -> tuple[int, int, int]:
+    """(settings per Complex Switch state, held-out slots per state, state count).
+
+    Matches the planner's on-grid sampling, default anchor and reserved
+    corners. Clean output volume is measured separately and adds no dimension.
+    """
+    active = [c for c in controls if not getattr(c, "clean_volume", False)]
+    combinations = _math.prod(
+        len(c.enum_names)
+        for c in active
+        if isinstance(c, SwitchSpec) and c.planning_mode == "complex"
+    )
+    per_state = [
+        c for c in active
+        if not (isinstance(c, SwitchSpec) and c.planning_mode == "complex")
+    ]
+    if not any(isinstance(c, KnobSpec) for c in per_state):
+        return (
+            _math.prod(
+                len(c.enum_names) for c in per_state
+                if isinstance(c, SwitchSpec)
+            ),
+            0,
+            combinations,
+        )
+
+    # Lazy import avoids a params <-> planner import cycle at GUI startup.
+    from .planner import _grid_capacity, corner_settings, settings_on_capture_grid
+
+    specs = tuple(c.to_param_spec() for c in per_state)
+    capacity = _grid_capacity(specs, DEFAULT_KNOB_STEP)
+    anchor = {
+        s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
+        for s in specs
+    }
+    if not settings_on_capture_grid(anchor, specs, DEFAULT_KNOB_STEP):
+        capacity += 1
+    reserved = {
+        tuple(point[s.name] for s in specs)
+        for point in corner_settings(
+            specs, gain_index=gain_knob_index(per_state),
+            default_step=DEFAULT_KNOB_STEP,
+        )
+    }
+    reserved.add(tuple(anchor[s.name] for s in specs))
+    return capacity, max(0, capacity - len(reserved)), combinations
+
+
+def capture_count_maxima(
+    controls: _Sequence[ControlSpec], n_train: int, n_validation: int
+) -> tuple[int, int]:
+    """Largest feasible totals for each spinner, given the other split.
+
+    Complex Switch states are allotted any remainder to the *same* early
+    states, so use rounded-up per-state quotas, not just the overall total.
+    This is for distinct held-out settings, not the switch-only second-audio
+    validation supported by the main trainer UI.
+    """
+    capacity, held_out_capacity, combinations = capture_grid_limits(controls)
+    train_max = combinations * max(
+        0, capacity - _math.ceil(n_validation / combinations)
+    )
+    validation_max = combinations * min(
+        held_out_capacity,
+        max(0, capacity - _math.ceil(n_train / combinations)),
+    )
+    return train_max, validation_max
+
+
 def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int, int]:
     """Recommend feasible train/validation counts on the actual capture grid.
 
@@ -256,54 +325,20 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
         ),
     )
     validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
+    capacity, validation_capacity, _ = capture_grid_limits(controls)
     if active and all(isinstance(c, SwitchSpec) for c in active):
-        # Keep the existing categorical-only policy. Fully sampled switches
-        # have no unseen settings; the GUI can validate on separate audio.
-        capacity = _math.prod(len(c.enum_names) for c in active) // combinations
-        train = min(train, capacity)
-        validation = min(validation, max(0, capacity - train))
+        # Capture every categorical state. The main trainer can additionally
+        # record the *same* states using independent validation audio.
+        train = capacity
+        validation = 0
     elif any(isinstance(c, KnobSpec) for c in active):
-        # Import lazily: planner imports the control specifications from here.
-        from .planner import (
-            _grid_capacity,
-            corner_settings,
-            settings_on_capture_grid,
-        )
-
-        per_state = [
-            c for c in active
-            if not (isinstance(c, SwitchSpec) and c.planning_mode == "complex")
-        ]
-        specs = tuple(c.to_param_spec() for c in per_state)
-        capacity = _grid_capacity(specs, DEFAULT_KNOB_STEP)
-        anchor = {
-            s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
-            for s in specs
-        }
-        if not settings_on_capture_grid(anchor, specs, DEFAULT_KNOB_STEP):
-            # Explicit off-grid defaults remain trainable and consume one slot.
-            capacity += 1
-
-        corners = corner_settings(
-            specs, gain_index=gain_knob_index(per_state),
-            default_step=DEFAULT_KNOB_STEP,
-        )
-        reserved = {
-            tuple(point[s.name] for s in specs) for point in corners
-        }
-        reserved.add(tuple(anchor[s.name] for s in specs))
-        validation_capacity = max(0, capacity - len(reserved))
         budget = min(capacity, train + validation)
         if budget < 4 or not validation_capacity:
-            # No useful held-out setting exists; favor training coverage.
             train = min(train, capacity)
             validation = 0
         else:
-            # Preserve roughly 20% held-out settings on a small grid, then
-            # spend remaining capacity on training up to its original target.
             held_out = min(
-                validation, validation_capacity,
-                max(1, _math.ceil(budget / 5)),
+                validation, validation_capacity, max(1, _math.ceil(budget / 5))
             )
             train = min(train, budget - held_out)
             validation = min(validation, validation_capacity, budget - train)
