@@ -71,7 +71,17 @@ jobs:
           assert release['draft'] and not release['prerelease'], 'Draft must remain unpublished'
           assert release['tag_name'] == 'v0.7.5' or release['tag_name'].startswith('untagged-')
           assert release['name'] == 'ParaNAM Trainer 0.7.5'
-          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', '4888dd0f34942baeb96b8cc33d2af112c6335b29', 'main', os.environ['GITHUB_SHA'])
+          # Existing draft assets can point to an earlier main commit. Accept
+          # descendants, but never switch to an unrelated release source.
+          old = release['target_commitish']
+          if old not in ('main', os.environ['GITHUB_SHA']):
+              comparison = json.loads(subprocess.check_output([
+                  'gh', 'api',
+                  'repos/' + os.environ['GH_REPO'] + '/compare/'
+                  + old + '...' + os.environ['GITHUB_SHA']
+              ]))
+              assert comparison['status'] in ('ahead', 'identical'), (
+                  'Draft source is unrelated to this build')
           assert '__version__ = "0.7.5"' in Path('paranam/__init__.py').read_text()
           PY
       - name: Free Linux runner disk space
@@ -189,8 +199,11 @@ jobs:
           assert release['name'] == 'ParaNAM Trainer 0.7.5', 'Unexpected draft release'
           assert (release['tag_name'] == 'v0.7.5'
                   or release['tag_name'].startswith('untagged-')), 'Unexpected release tag'
-          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', '4888dd0f34942baeb96b8cc33d2af112c6335b29', sha, 'main'), (
-              'Draft source changed unexpectedly')
+          old = release['target_commitish']
+          if old not in ('main', sha):
+              comparison = api('GET', '/compare/' + old + '...' + sha)
+              assert comparison['status'] in ('ahead', 'identical'), (
+                  'Draft source changed unexpectedly')
           current = api('GET', '/git/ref/heads/main')['object']['sha']
           assert current == sha, 'Main changed during build; refusing stale installers'
 
