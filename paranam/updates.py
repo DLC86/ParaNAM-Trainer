@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import ssl
 import tempfile
 import threading
@@ -30,6 +31,46 @@ from . import __version__
 REPOSITORY = "DLC86/ParaNAM-Trainer"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases/latest"
+
+
+def update_download_root():
+    """Folder reserved for updater downloads, not user projects or captures."""
+    return Path(
+        QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppLocalDataLocation
+        )
+    ) / "updates"
+
+
+def cleanup_staged_installers(root, preserve=None):
+    """Remove *all* obsolete updater download folders, including old versions.
+
+    Only direct children with tempfile's installer-<random> naming convention
+    are eligible. Never traverse links; preserve an unfinished update. Locked
+    files are retried automatically on the next application launch.
+    """
+    root = Path(root)
+    protected = Path(preserve).absolute() if preserve is not None else None
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return 0
+    removed = 0
+    for child in children:
+        if not re.fullmatch(r"installer-[A-Za-z0-9_]{8,}", child.name):
+            continue
+        if protected is not None and child.absolute() == protected:
+            continue
+        try:
+            if child.is_symlink() or not child.is_dir():
+                continue
+            shutil.rmtree(child)
+            removed += 1
+        except OSError:
+            # In-use installer, antivirus lock or filesystem permissions.
+            # Keep the application usable and retry at next startup.
+            continue
+    return removed
 
 
 def version_number(value):
@@ -239,6 +280,11 @@ class UpdateActions:
                 self.settings.remove("update_result_path")
             except (OSError, ValueError):
                 pass
+        # The updater has already written its result before restarting the app.
+        # If its result is still pending, keep that one directory untouched.
+        pending = self.settings.value("update_result_path", "")
+        preserve = Path(pending).parent if pending else None
+        cleanup_staged_installers(update_download_root(), preserve=preserve)
         if os.environ.get("PARANAM_DISABLE_UPDATE_CHECK") != "1":
             QTimer.singleShot(1500, self.start_update_check)
 
@@ -361,15 +407,7 @@ class UpdateActions:
     def download_update(self):
         if self.update_download_worker is not None:
             return
-        directory = (
-            Path(
-                QStandardPaths.writableLocation(
-                    QStandardPaths.StandardLocation.AppLocalDataLocation
-                )
-            )
-            / "updates"
-        )
-        worker = UpdateWorker(self.update_info, directory, self)
+        worker = UpdateWorker(self.update_info, update_download_root(), self)
         self.update_download_worker = worker
         self._update_install_button.setEnabled(False)
         self._update_progress.show()

@@ -30,6 +30,100 @@ def published_release(version="99.0.0", payload=b"verified installer"):
     )
 
 
+
+def test_update_cleanup_removes_all_old_staged_installers_without_touching_user_files(
+    tmp_path,
+):
+    import tempfile
+
+    root = tmp_path / "updates"
+    root.mkdir()
+    old = [
+        Path(tempfile.mkdtemp(prefix="installer-", dir=root))
+        for _ in range(4)
+    ]
+    names = [
+        "ParaNAM-Trainer-0.7.1-Windows-x64-Setup.exe",
+        "ParaNAM-Trainer-0.7.2-macOS-arm64.dmg",
+        "ParaNAM-Trainer-0.7.3-Linux-amd64.deb",
+        "ParaNAM-Trainer-0.7.4-Linux-x86_64.tar.gz",
+    ]
+    for folder, name in zip(old, names):
+        (folder / name).write_bytes(b"old installer")
+        (folder / "install.json").write_text("{}")
+        (folder / "installer.log").write_text("log")
+        (folder / "update-result.json").write_text('{"ok": true}')
+        (folder / "nested").mkdir()
+        (folder / "nested" / "temporary.part").write_bytes(b"part")
+
+    user_data = root / "my-captures"
+    user_data.mkdir()
+    (user_data / "keep.wav").write_bytes(b"recording")
+    unrelated = root / "installer-not-a-temp-folder"
+    unrelated.mkdir()
+    (unrelated / "keep.txt").write_text("keep")
+
+    assert updates.cleanup_staged_installers(root) == len(old)
+    assert all(not folder.exists() for folder in old)
+    assert (user_data / "keep.wav").read_bytes() == b"recording"
+    assert (unrelated / "keep.txt").read_text() == "keep"
+    assert updates.cleanup_staged_installers(root) == 0
+
+
+def test_update_cleanup_protects_incomplete_install_and_retries_locked_files(
+    tmp_path, monkeypatch,
+):
+    import tempfile
+
+    root = tmp_path / "updates"
+    root.mkdir()
+    protected = Path(tempfile.mkdtemp(prefix="installer-", dir=root))
+    stale = Path(tempfile.mkdtemp(prefix="installer-", dir=root))
+    (protected / "update-result.json.part").write_text("in progress")
+    (stale / "installer.exe").write_bytes(b"stale")
+
+    real_rmtree = updates.shutil.rmtree
+
+    def locked_once(path):
+        if Path(path) == stale:
+            raise PermissionError("Installer still in use")
+        return real_rmtree(path)
+
+    monkeypatch.setattr(updates.shutil, "rmtree", locked_once)
+    assert updates.cleanup_staged_installers(root, preserve=protected) == 0
+    assert stale.exists() and protected.exists()
+    monkeypatch.setattr(updates.shutil, "rmtree", real_rmtree)
+    assert updates.cleanup_staged_installers(root, preserve=protected) == 1
+    assert not stale.exists() and protected.exists()
+    assert updates.cleanup_staged_installers(root) == 1
+    assert not protected.exists()
+
+
+def test_update_startup_consumes_result_before_removing_old_installers(
+    window, monkeypatch, tmp_path,
+):
+    import tempfile
+
+    root = tmp_path / "updates"
+    root.mkdir()
+    stale = Path(tempfile.mkdtemp(prefix="installer-", dir=root))
+    current = Path(tempfile.mkdtemp(prefix="installer-", dir=root))
+    (stale / "old.exe").write_bytes(b"old")
+    monkeypatch.setattr(updates, "update_download_root", lambda: root)
+    # If a helper has not completed, its downloaded installer remains in place.
+    window.settings.setValue(
+        "update_result_path", str(current / "update-result.json")
+    )
+    window.setup_updates()
+    assert not stale.exists() and current.exists()
+
+    # Next launch consumes the saved result and removes this installer too.
+    (current / "update-result.json").write_text('{"ok": true}')
+    window.setup_updates()
+    assert not current.exists()
+    assert not window.settings.value("update_result_path", "")
+
+
 def test_platform_selection_and_numeric_version_order():
     assert updates.version_number("v0.6.0-preview") == updates.version_number("0.6.0")
     assert updates.version_number("0.5.10") > updates.version_number("0.5.9")

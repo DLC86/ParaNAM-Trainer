@@ -1,0 +1,58 @@
+name: Prepare ParaNAM Trainer 0.7.5 draft
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prepare-v075-draft.yml'
+      - 'docs/release-0.7.5.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-draft:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or update the draft without publishing or building
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx '__version__ = "0.7.5"' paranam/__init__.py
+          grep -qx 'version = "0.7.5"' pyproject.toml
+          existing="$(gh api "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "v0.7.5" or .name == "ParaNAM Trainer 0.7.5") | .id' | head -n 1)"
+          if [ -z "$existing" ]; then
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="v0.7.5" \
+              -f target_commitish="$COMMIT_SHA" \
+              -f name="ParaNAM Trainer 0.7.5" \
+              -f body="$(cat docs/release-0.7.5.md)" \
+              -F draft=true -F prerelease=false > "$RUNNER_TEMP/release.json"
+          else
+            status="$(gh api "repos/$GH_REPO/releases/$existing" --jq .draft)"
+            if [ "$status" != "true" ]; then
+              echo "::error::Version 0.7.5 is already published; refusing to modify it."
+              exit 1
+            fi
+            gh api --method PATCH "repos/$GH_REPO/releases/$existing" \
+              -f tag_name="v0.7.5" \
+              -f target_commitish="$COMMIT_SHA" \
+              -f name="ParaNAM Trainer 0.7.5" \
+              -f body="$(cat docs/release-0.7.5.md)" \
+              -F draft=true -F prerelease=false > "$RUNNER_TEMP/release.json"
+          fi
+          jq -e --arg sha "$COMMIT_SHA" '
+            .draft == true and
+            .prerelease == false and
+            .tag_name == "v0.7.5" and
+            .target_commitish == $sha and
+            .name == "ParaNAM Trainer 0.7.5"
+          ' "$RUNNER_TEMP/release.json"
+          jq -r '"Draft release created/updated: ID \(.id), source \(.target_commitish), tag \(.tag_name)"' "$RUNNER_TEMP/release.json"

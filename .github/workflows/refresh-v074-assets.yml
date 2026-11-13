@@ -1,8 +1,7 @@
 name: Refresh draft 0.7.4 — verified native installers
 
+# The 0.7.4 release is published; never rebuild or modify it on later pushes.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
