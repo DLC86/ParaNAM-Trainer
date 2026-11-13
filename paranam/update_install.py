@@ -71,9 +71,9 @@ def ps_literal(value):
 def windows_script(data, result):
     """Use an external helper so no old frozen Python library locks the install."""
     expected = data["digest"].removeprefix("sha256:")
+    # This update originates from a user-confirmed notification: keep the
+    # installer GUI visible so users can review and follow its progress.
     installer_args = [
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
         "/NORESTART",
         "/CLOSEAPPLICATIONS",
         f'/DIR="{data["target"]}"',
@@ -100,7 +100,7 @@ try {{
 {launcher_wait}
 {worker_waits}
     if ((Get-FileHash -LiteralPath {ps_literal(data['asset'])} -Algorithm SHA256).Hash.ToLowerInvariant() -ne {ps_literal(expected)}) {{ throw 'Installer integrity check failed' }}
-    $installer = Start-Process -FilePath {ps_literal(data['asset'])} -ArgumentList @({arguments}) -Wait -PassThru -WindowStyle Hidden
+    $installer = Start-Process -FilePath {ps_literal(data['asset'])} -ArgumentList @({arguments}) -Wait -PassThru
     if ($installer.ExitCode -ne 0) {{ throw ('Installer exited with code ' + $installer.ExitCode) }}
     $result.ok = $true
 }} catch {{ $result.error = $_.Exception.Message }}

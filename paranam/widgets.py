@@ -115,7 +115,7 @@ QComboBox::drop-down { subcontrol-origin: border; subcontrol-position: top right
 QComboBox::down-arrow { image: url("ASSET_ROOT/chevron.svg"); width: 12px; height: 12px; }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #bf0000; }
 QComboBox QAbstractItemView { background: #000000; selection-background-color: #4d4d4d; }
-QTableWidget, QListWidget, QPlainTextEdit { background: #171717; border: 1px solid #343434; border-radius: 8px; alternate-background-color: #1f1f1f; }
+QTableWidget, QListWidget, QPlainTextEdit, QTextBrowser { background: #171717; border: 1px solid #343434; border-radius: 8px; alternate-background-color: #1f1f1f; }
 QListWidget::item { padding: 14px; border-bottom: 1px solid #2d2d2d; }
 QListWidget::item:selected { background: #3f3f3f; color: #ffffff; }
 QTableWidget::item:selected { background: #3f3f3f; }

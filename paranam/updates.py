@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QProgressBar,
-    QPlainTextEdit,
+    QTextBrowser,
+    QSizePolicy,
 )
 
 from . import __version__
@@ -276,7 +277,7 @@ class UpdateActions:
         self.update_blink.start()
         self._blink_update_led()
         if self._update_dialog is not None:
-            self._update_notes.setPlainText(info["notes"])
+            self._update_notes.setMarkdown(info["notes"])
             self._update_install_button.setEnabled(
                 info["asset"] is not None and self.update_download_worker is None
             )
@@ -308,14 +309,18 @@ class UpdateActions:
         )
         text.setWordWrap(True)
         text.setTextFormat(Qt.TextFormat.PlainText)
+        # Extra dialog height belongs to the notes, not the update notice.
+        text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(text)
-        notes = QPlainTextEdit()
-        notes.setReadOnly(True)
-        notes.setPlainText(self.update_info["notes"])
+        notes = QTextBrowser()
+        notes.setOpenExternalLinks(True)
+        # QTextBrowser uses Qt's GitHub-flavored Markdown renderer: headings,
+        # emphasis, lists, links, code blocks and tables remain formatted.
+        notes.setMarkdown(self.update_info["notes"])
         notes.setMinimumHeight(160)
-        notes.setMaximumHeight(260)
+        notes.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._update_notes = notes
-        layout.addWidget(notes)
+        layout.addWidget(notes, 1)
         progress = QProgressBar()
         progress.hide()
         layout.addWidget(progress)

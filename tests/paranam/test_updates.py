@@ -133,6 +133,49 @@ def test_dismiss_persists_for_that_release_but_led_and_new_release_remain(window
     window._update_dialog.reject()
 
 
+def test_release_notes_render_github_markdown_and_expand_on_resize(window, qapp):
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QTextBrowser, QSizePolicy
+
+    info = updates.release_info(published_release())
+    info["notes"] = (
+        "# Release heading\\n\\n"
+        "## Improvements\\n\\n"
+        "**Bold text**, *italic text*, and ~~removed~~.\\n\\n"
+        "- First item\\n- Second item\\n\\n"
+        "[Release link](https://github.com/DLC86/ParaNAM-Trainer)\\n\\n"
+        "| Change | Status |\\n| --- | --- |\\n| Installer | Visible |"
+    ).replace("\\\\n", "\\n")
+    window._update_checked(info)
+    notes = window._update_notes
+    assert isinstance(notes, QTextBrowser)
+    assert notes.isReadOnly() and notes.openExternalLinks()
+    assert notes.verticalSizePolicy() == QSizePolicy.Policy.Expanding
+    assert window._update_message.verticalSizePolicy() == QSizePolicy.Policy.Fixed
+    assert notes.document().firstBlock().blockFormat().headingLevel() == 1
+    bold = notes.document().find("Bold text")
+    assert not bold.isNull() and bold.charFormat().fontWeight() >= QFont.Weight.Bold
+    assert "**Bold text**" not in notes.toPlainText()
+    assert "<table" in notes.toHtml()
+    assert "https://github.com/DLC86/ParaNAM-Trainer" in notes.toHtml()
+
+    dialog = window._update_dialog
+    dialog.show()
+    qapp.processEvents()
+    top_height = window._update_message.height()
+    notes_height = notes.height()
+    dialog.resize(dialog.width(), dialog.height() + 170)
+    qapp.processEvents()
+    assert notes.height() > notes_height
+    assert window._update_message.height() == top_height
+
+    changed = dict(info, notes="## Fixed\\n\\nA **new** update.")
+    window._update_checked(changed)
+    assert notes.document().firstBlock().blockFormat().headingLevel() == 2
+    assert "A new update." in notes.toPlainText()
+    window._update_dialog.reject()
+
+
 def test_download_installs_only_after_safe_app_shutdown(window, monkeypatch, tmp_path):
     from paranam import update_install
 
@@ -211,5 +254,9 @@ def test_windows_helper_waits_checks_hash_and_uses_exact_install_path(tmp_path):
     )
     script = windows_script(data, tmp_path / "update-result.json")
     assert "Wait-Process -Timeout" in script and "Get-FileHash -LiteralPath" in script
-    assert "User''s folder" in script and "/VERYSILENT" in script
-    assert "-WindowStyle Hidden" in script and "Start-Process -FilePath" in script
+    assert "User''s folder" in script
+    assert "/VERYSILENT" not in script and "/SUPPRESSMSGBOXES" not in script
+    assert "-WindowStyle Hidden" not in script
+    assert "Start-Process -FilePath" in script
+    assert "-Wait -PassThru" in script
+    assert "/NORESTART" in script and "/CLOSEAPPLICATIONS" in script
