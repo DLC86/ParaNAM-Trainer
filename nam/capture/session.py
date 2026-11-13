@@ -685,6 +685,29 @@ class CaptureSession:
         if close is not None:
             close()
 
+    def reserve_audio(self, on_error):
+        """Keep the capture recorder open and silent between takes."""
+        audio = self.project.audio
+        self._recorder.reserve(
+            on_error=on_error,
+            host_api=audio.host_api,
+            sample_rate=self.project.sample_rate or 48000,
+            input_channel=audio.input_channel,
+            output_channel=audio.output_channel,
+            loopback_input_channel=(
+                audio.loopback_input_channel if audio.loopback_enabled else None
+            ),
+            loopback_output_channel=(
+                audio.loopback_output_channel if audio.loopback_enabled else None
+            ),
+            monitor_return_enabled=audio.monitor_return_enabled,
+            monitor_output_left=audio.monitor_output_left,
+            monitor_output_right=audio.monitor_output_right,
+            blocksize=audio.blocksize,
+            latency=audio.latency,
+            **self._resolve_devices(),
+        )
+
     def load_inputs(self) -> int:
         """
         Load (and cache) both input WAVs, verify they are mono and share one sample

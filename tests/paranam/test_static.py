@@ -143,6 +143,11 @@ def test_real_static_batch_pause_resume_and_metadata(
             Path(training.export_saved_best(job, ws.directory / "Paused.nam"))
         )
         assert snapshot["architecture"] == "SlimmableContainer"
+        assert snapshot["version"] == "0.7.0"
+        assert all(
+            child["model"]["version"] == "0.7.0"
+            for child in snapshot["config"]["submodels"]
+        )
         assert snapshot["metadata"]["name"] == "Capture 1"
         assert snapshot["metadata"]["input_level_dbu"] == 18
         assert snapshot["metadata"]["custom"] == {"keep": True}
@@ -159,7 +164,9 @@ def test_real_static_batch_pause_resume_and_metadata(
         model = read_json(Path(path))
         assert Path(path).name == name + ".nam"
         assert model["architecture"] == "SlimmableContainer"
+        assert model["version"] == "0.7.0"
         children = model["config"]["submodels"]
+        assert all(child["model"]["version"] == "0.7.0" for child in children)
         assert [child["max_value"] for child in children] == [0.5, 1.0]
         assert [
             child["model"]["config"]["layers"][0]["channels"] for child in children

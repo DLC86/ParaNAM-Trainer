@@ -22,7 +22,7 @@ def test_impedance_round_trip(text, ohms, display):
     assert parse_impedance(display) == ohms
 
 
-def test_legacy_switch_export_keeps_neural_values_in_full_and_lite(tmp_path):
+def test_indexed_switch_export_keeps_neural_values_in_full_and_lite(tmp_path):
     from nam.models.factory import init
     from nam.models.metadata import UserMetadata
     from nam.models.parametric import export_parametric
@@ -47,9 +47,13 @@ def test_legacy_switch_export_keeps_neural_values_in_full_and_lite(tmp_path):
     config = payload["config"]
     for cfg in [config, *(child["config"] for child in config["submodels"])]:
         param = cfg["params"][0]
-        assert param["enum_names"] == ["Clean", "Crunch", "Lead"]
+        assert param["options"] == [
+            {"name": "Clean", "value": 0, "index_sw": 1},
+            {"name": "Crunch", "value": 1, "index_sw": 2},
+            {"name": "Lead", "value": 2, "index_sw": 0},
+        ]
         assert param["default"] == 1
-        assert "options" not in param
+        assert "enum_names" not in param
 
 
 def test_plan_avoids_negative_min_but_keeps_zero():

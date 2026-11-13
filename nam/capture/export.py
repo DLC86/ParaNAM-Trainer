@@ -339,19 +339,26 @@ def apply_model_display_indices(
     if len(names) != len(expected) or set(names) != set(expected) or len(set(names)) != len(names):
         raise ValueError("Plan controls do not match exported model parameters")
     positions = {name: index for index, name in enumerate(names)}
+    controls_by_name = {control["name"]: control for control in plan_controls}
 
     def assign(params):
+        from ..models.parametric._spec import ParamSpec
+
         if [p["name"] for p in params] != neural_names:
             raise ValueError("Full/Lite parameter order differs from the parent model")
         for param in params:
             param["index"] = positions[param["name"]]
-            # Resumed jobs may hold checkpoint JSON from the indexed preview.
-            # Emit labels in neural order so legacy readers use the same weights.
-            if param.get("type") == "switch" and "options" in param:
-                param["enum_names"] = [
-                    option["name"]
-                    for option in sorted(param.pop("options"), key=lambda option: option["value"])
-                ]
+            if param.get("type") == "switch":
+                spec = ParamSpec.from_dict(param)
+                options = spec.to_dict()["options"]
+                control = controls_by_name[param["name"]]
+                labels = control.get("enum_names") or ()
+                if len(labels) == len(options) and set(labels) == set(spec.enum_names):
+                    display = dict(zip(labels, control.get("option_indices") or range(len(labels))))
+                    for option in options:
+                        option["index_sw"] = display[option["name"]]
+                param.pop("enum_names", None)
+                param["options"] = options
 
     assign(neural)
     for branch in config.get("submodels", []):

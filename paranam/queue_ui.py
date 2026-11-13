@@ -169,6 +169,7 @@ class QueueActions:
                 selected = entry
                 table.selectRow(row)
         table.blockSignals(False)
+        table.resizeColumnsToContents()
         self.job = Path(selected["job"]) if selected else None
         self.process = (
             self.queue_controller.process
@@ -282,9 +283,10 @@ class QueueActions:
             self.plan_card,
             self.signal_card,
             self.training_settings,
-            self.metadata_card,
         ):
             widget.setEnabled(present and not active)
+        # Metadata can be saved without touching the active capture stream.
+        self.metadata_card.setEnabled(present)
         self.static_card.setEnabled(present and not active)
         self.route_button.setEnabled(
             not active and self.device.currentData() is not None
@@ -483,6 +485,8 @@ class QueueActions:
         self.close_audio()
         self.timer.stop()
         self.queue_seconds_timer.stop()
+        self.settings.setValue("window_geometry", self.saveGeometry())
+        self.settings.sync()
         if getattr(self, "_update_dialog", None) is not None:
             self._update_dialog.accept()
         event.accept()

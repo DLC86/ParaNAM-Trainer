@@ -283,8 +283,8 @@ def test_export_parametric_round_trips_through_factory(tmp_path):
     assert model_dict["architecture"] == "HyperWaveNet"
     exported_params = model_dict["config"]["params"]
     assert exported_params[0] == model.param_specs[0].to_dict()
-    assert exported_params[1]["enum_names"] == ["clean", "crunch", "lead"]
-    assert "options" not in exported_params[1]
+    assert exported_params[1] == model.param_specs[1].to_dict()
+    assert "enum_names" not in exported_params[1]
     assert set(model_dict["config"]) == {
         "head",
         "head_scale",

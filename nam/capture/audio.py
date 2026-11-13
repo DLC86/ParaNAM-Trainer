@@ -485,6 +485,7 @@ def _raise_on_dropout(status, *, latency: _Latency, blocksize: int) -> None:
 class SounddeviceRecorder:
     def __init__(self):
         self._asio = None
+        self._persistent_host = None
 
     @property
     def actual_blocksize(self):
@@ -494,6 +495,16 @@ class SounddeviceRecorder:
         if self._asio is not None:
             self._asio.close()
             self._asio = None
+        self._persistent_host = None
+
+    def reserve(self, *, host_api, on_error, **settings):
+        from ._asio_stream import AsioRecorder
+
+        if self._asio is None or self._persistent_host != host_api:
+            self.close()
+            self._asio = AsioRecorder(native_asio=host_api == "ASIO")
+            self._persistent_host = host_api
+        self._asio.reserve(on_error, **settings)
 
     _POLL_MS = 50
 
@@ -527,7 +538,9 @@ class SounddeviceRecorder:
                 "Select a Send output and Return input before capturing audio."
             )
         playback = _np.asarray(playback, dtype=_np.float32)
-        if host_api == "ASIO":
+        if host_api == "ASIO" or (
+            self._asio is not None and self._persistent_host == host_api
+        ):
             from ._asio_stream import AsioRecorder
 
             if self._asio is None:
@@ -547,6 +560,7 @@ class SounddeviceRecorder:
                 monitor_output_left=monitor_output_left,
                 monitor_output_right=monitor_output_right,
                 blocksize=blocksize,
+                latency=latency,
                 progress=progress,
                 cancel=cancel,
                 **({"meter": meter} if meter is not None else {}),

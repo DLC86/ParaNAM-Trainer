@@ -181,6 +181,69 @@ def test_public_recorder_closes_persistent_owner():
     assert closed == [True]
 
 
+@pytest.mark.parametrize("host_api", ["ASIO", "Core Audio"])
+def test_silent_reservation_and_recording_use_the_same_stream(monkeypatch, host_api):
+    import sounddevice as sd
+    from contextlib import nullcontext
+    from nam.capture import _asio_stream
+
+    streams = []
+    silence = []
+    status = SimpleNamespace(input_overflow=False, output_underflow=False)
+
+    class Stream:
+        def __init__(self, callback, **kwargs):
+            self.callback = callback
+            self.active = False
+            streams.append(self)
+
+        def start(self):
+            self.active = True
+            outgoing = np.ones((8, 2), dtype=np.float32)
+            self.callback(np.zeros_like(outgoing), outgoing, 8, None, status)
+            silence.append(not outgoing.any())
+
+        def stop(self):
+            self.active = False
+
+        def close(self):
+            pass
+
+    def exchange(self, main, loop, cancel, progress, meter):
+        job = _BlockJob(main, loop, np.zeros_like(main), None)
+        self.job = job
+        incoming = np.ones((8, 2), dtype=np.float32) * 0.25
+        outgoing = np.zeros_like(incoming)
+        self.stream.callback(incoming, outgoing, 8, None, status)
+        assert job.done.is_set()
+        assert np.array_equal(outgoing[:, 0], main)
+        return job.recorded, None
+
+    monkeypatch.setattr(_asio_stream, "asio_com_apartment", nullcontext)
+    monkeypatch.setattr(AsioRecorder, "_exchange", exchange)
+    monkeypatch.setattr(sd, "Stream", Stream)
+    monkeypatch.setattr(
+        sd, "query_devices", lambda *_: dict(max_input_channels=2, max_output_channels=2)
+    )
+    recorder = SounddeviceRecorder()
+    routing = dict(input_device=0, output_device=0, input_channel=1,
+                   output_channel=1, blocksize=0, latency="low", host_api=host_api)
+    playback = np.ones(8, dtype=np.float32) * 0.5
+    errors = []
+    try:
+        recorder.reserve(sample_rate=48000, on_error=errors.append, **routing)
+        for _ in range(2):
+            result, _ = recorder.playrec(playback, 48000, **routing)
+            assert np.array_equal(result, playback * 0.5)
+        assert not errors
+        assert silence == [True]
+        assert len(streams) == 1
+        assert streams[0].active
+    finally:
+        recorder.close()
+    assert not streams[0].active
+
+
 def test_initially_stable_measurements_do_not_skip_startup_observation(
     monkeypatch, signal
 ):

@@ -102,9 +102,12 @@ class _BlockJob:
 class AsioRecorder:
     """All stream operations stay on one long-lived COM thread, across GUI workers."""
 
-    def __init__(self):
+    def __init__(self, *, native_asio=True):
+        self.native_asio = native_asio
         self.commands = queue.Queue()
-        self.thread = threading.Thread(target=self._serve, name="NAM ASIO", daemon=True)
+        self.thread = threading.Thread(
+            target=self._serve, name="NAM Capture Audio", daemon=True
+        )
         self.stream = None
         self.config = None
         self.job = None
@@ -124,6 +127,10 @@ class AsioRecorder:
             raise result[0]
         return result[0]
 
+    def reserve(self, on_error, **settings):
+        """Open the same silent duplex stream that will record the next take."""
+        self.commands.put((settings, None, on_error))
+
     def close(self):
         self.commands.put(None)
         self.thread.join(timeout=5)
@@ -141,7 +148,10 @@ class AsioRecorder:
                         return
                     settings, done, result = command
                     try:
-                        result.append(self._capture(**settings))
+                        if done is None:
+                            self._open(settings)
+                        else:
+                            result.append(self._capture(**settings))
                     except BaseException as exc:
                         self.reference = None
                         if isinstance(exc, AudioDropoutError):
@@ -149,9 +159,13 @@ class AsioRecorder:
                                 self._close_stream()
                             except Exception:
                                 pass  # Preserve the original recording failure.
-                        result.append(exc)
+                        if done is None:
+                            result(exc)
+                        else:
+                            result.append(exc)
                     finally:
-                        done.set()
+                        if done is not None:
+                            done.set()
                         # Do not retain a completed recording or a retired GUI
                         # worker's bound callbacks while waiting for the next job.
                         del command, settings, done, result
@@ -187,6 +201,7 @@ class AsioRecorder:
             "monitor_output_left",
             "monitor_output_right",
             "blocksize",
+            "latency",
         )
         config = tuple(
             settings.get(k, False if k == "monitor_return_enabled" else None)
@@ -197,6 +212,7 @@ class AsioRecorder:
         self._close_stream()
         rate = settings["sample_rate"]
         requested = settings["blocksize"]
+        native_asio = getattr(self, "native_asio", True)
         ins = int(sd.query_devices(settings["input_device"])["max_input_channels"])
         outs = int(sd.query_devices(settings["output_device"])["max_output_channels"])
         for name, maximum in (
@@ -244,8 +260,12 @@ class AsioRecorder:
             device=(settings["input_device"], settings["output_device"]),
             channels=(ins, outs),
             dtype="float32",
-            blocksize=0,
-            latency=requested / rate if requested else "low",
+            blocksize=0 if native_asio else requested,
+            latency=(
+                (requested / rate if requested else "low")
+                if native_asio
+                else settings.get("latency", "low")
+            ),
             callback=self._callback,
         )
         self.config = config
@@ -256,23 +276,24 @@ class AsioRecorder:
         outgoing.fill(0)
         self.actual_blocksize = frames
         job = self.job
-        if status.input_overflow or status.output_underflow:
-            self.last_status = str(status)
         if job is None:
             return
+        if status.input_overflow or status.output_underflow:
+            self.last_status = str(status)
         if job.cancelled:
             self.job = None
             job.done.set()
             return
         try:
             requested = self.settings["blocksize"]
-            if requested and frames != requested:
+            if getattr(self, "native_asio", True) and requested and frames != requested:
                 raise AudioDeviceError(
                     f"ASIO requested {requested} samples but the driver uses {frames}. Choose a supported native buffer size."
                 )
             if self.last_status:
+                backend = "ASIO" if getattr(self, "native_asio", True) else "Capture"
                 raise AudioDropoutError(
-                    f"ASIO lost audio: {self.last_status}. Increase the buffer and record again."
+                    f"{backend} lost audio: {self.last_status}. Increase the buffer and record again."
                 )
             start = job.position
             n = min(frames, len(job.main) - start)
@@ -431,7 +452,9 @@ class AsioRecorder:
         loop = settings["loopback_playback"]
         if main.ndim != 1 or not len(main):
             raise AudioDeviceError("ASIO playback must be non-empty mono audio.")
-        verify_timing = settings.get("verify_asio_timing", True)
+        verify_timing = getattr(self, "native_asio", True) and settings.get(
+            "verify_asio_timing", True
+        )
         if loop is not None:
             if np.shape(loop) != np.shape(main):
                 raise AudioDeviceError(
