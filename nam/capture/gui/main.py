@@ -59,6 +59,8 @@ from ..export import write_hyper_a2_training_configs as _write_hyper_a2_training
 from ..params import KnobSpec as _KnobSpec
 from ..params import SwitchSpec as _SwitchSpec
 from ..params import capture_recommendations as _capture_recommendations
+from ..params import capture_grid_limits as _capture_grid_limits
+from ..params import capture_count_maxima as _capture_count_maxima
 from ..params import validate_knobs as _validate_knobs
 from ..planner import corner_capture_count as _corner_capture_count
 from ..planner import settings_sort_key as _settings_sort_key
@@ -617,6 +619,8 @@ class MainWindow(_QMainWindow):
         self.n_validation_spin = _QSpinBox()
         self.n_validation_spin.setRange(0, 100_000)
         self.n_validation_spin.setValue(5)
+        self.n_train_spin.valueChanged.connect(self._sync_plan_limits)
+        self.n_validation_spin.valueChanged.connect(self._sync_plan_limits)
         self.n_validation_recommended_label = _QLabel("")
         self.n_validation_recommended_label.setWordWrap(True)
         n_validation_row = _QHBoxLayout()
@@ -1274,6 +1278,8 @@ class MainWindow(_QMainWindow):
             self._add_knob_row(
                 knob.name, knob.min, knob.max, knob.step, knob.avoid_zero, knob.is_gain
             )
+        self.n_train_spin.setMaximum(100_000)
+        self.n_validation_spin.setMaximum(100_000)
         self.n_train_spin.setValue(
             self.project.n_train_lhs
             or len(self.project.entries_for_split("train"))
@@ -1428,6 +1434,45 @@ class MainWindow(_QMainWindow):
                 )
             return _capture_recommendations(controls)
 
+    def _sync_plan_limits(self, *_):
+        """Limit the two Plan fields to unique feasible control combinations."""
+        if getattr(self, "n_validation_spin", None) is None:
+            return
+        try:
+            controls = knob_rows_to_specs(self._knob_table_rows())
+        except (ValueError, TypeError, AttributeError):
+            return
+        if not controls:
+            return
+        capacity, _, combinations = _capture_grid_limits(controls)
+        switches_only = all(isinstance(c, _SwitchSpec) for c in controls)
+        if switches_only:
+            train = train_min = train_max = capacity * combinations
+            validation = validation_max = 0
+        else:
+            train_min = combinations
+            train = min(
+                max(train_min, self.n_train_spin.value()),
+                capacity * combinations,
+            )
+            _, validation_max = _capture_count_maxima(controls, train, 0)
+            validation = min(self.n_validation_spin.value(), validation_max)
+            if 0 < validation < combinations:
+                validation = 0
+            train_max, validation_max = _capture_count_maxima(
+                controls, train, validation
+            )
+        for field in (self.n_train_spin, self.n_validation_spin):
+            field.blockSignals(True)
+        try:
+            self.n_train_spin.setRange(train_min, max(train_min, train_max))
+            self.n_train_spin.setValue(train)
+            self.n_validation_spin.setRange(0, validation_max)
+            self.n_validation_spin.setValue(validation)
+        finally:
+            for field in (self.n_train_spin, self.n_validation_spin):
+                field.blockSignals(False)
+
     def _on_add_knob_row(self) -> None:
         self._add_knob_row("", 0.0, 10.0, 0.5, False, False)
         self._apply_n_train_recommendation()
@@ -1503,6 +1548,7 @@ class MainWindow(_QMainWindow):
         # label, so this can run before the label exists.
         if getattr(self, "corner_count_label", None) is None:
             return
+        self._sync_plan_limits()
         self._refresh_n_train_recommendation()
         self._refresh_n_validation_recommendation()
         try:
