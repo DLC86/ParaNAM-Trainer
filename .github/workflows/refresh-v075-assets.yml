@@ -1,6 +1,6 @@
 name: Refresh draft 0.7.5 — verified native installers
 
-# Automatically build once on workflow creation, or dispatch for future updates.
+# Automatically build and verify the corrected 0.7.5 GUI and flexible Capture layout.
 on:
   push:
     branches: [main]

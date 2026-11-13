@@ -9,7 +9,7 @@
 ## Main window
 
 - **Project header:** the open project's name is displayed **larger and in white**, while the separator dot and the **Automatically saved** status keep their previous size and muted color.
-- **Subtle grey separators** distinguish the project header and bottom Back/Next navigation bar from the central page content, without changing the page layouts.
+- **Subtle grey separators** distinguish the project header and bottom Back/Next navigation bar from the central page content. The separators are grouped with their bars to preserve the space available to the resizable Capture table.
 
 ## Update notification
 

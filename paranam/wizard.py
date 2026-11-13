@@ -317,13 +317,19 @@ class WizardWindow(
         content.setSpacing(18)
         self.project_label = label("No project open", "muted")
         self.project_label.setTextFormat(Qt.TextFormat.RichText)
-        content.addWidget(self.project_label)
-        # Divide the persistent project header from the scrollable page.
+        # Group each separator with its bar. Without this grouping, the
+        # global 18px spacing adds extra vertical rows and steals height
+        # from the resizable Capture table at common window sizes.
+        self.header_bar = QVBoxLayout()
+        self.header_bar.setContentsMargins(0, 0, 0, 0)
+        self.header_bar.setSpacing(6)
+        self.header_bar.addWidget(self.project_label)
         self.header_divider = QFrame()
         self.header_divider.setObjectName("contentDivider")
         self.header_divider.setFixedHeight(1)
         self.header_divider.setStyleSheet("border: none; background-color: #515151;")
-        content.addWidget(self.header_divider)
+        self.header_bar.addWidget(self.header_divider)
+        content.addLayout(self.header_bar)
         self.build_recovery_notice(content)
         self.pages = QStackedWidget()
         self.page_contents = []
@@ -360,12 +366,14 @@ class WizardWindow(
             self.pages.addWidget(scroll)
             self.page_contents.append(page)
         content.addWidget(self.pages, 1)
-        # Keep Back/Next navigation separate from the central page content.
+        self.footer_bar = QVBoxLayout()
+        self.footer_bar.setContentsMargins(0, 0, 0, 0)
+        self.footer_bar.setSpacing(6)
         self.footer_divider = QFrame()
         self.footer_divider.setObjectName("contentDivider")
         self.footer_divider.setFixedHeight(1)
         self.footer_divider.setStyleSheet("border: none; background-color: #515151;")
-        content.addWidget(self.footer_divider)
+        self.footer_bar.addWidget(self.footer_divider)
         footer = QHBoxLayout()
         self.back_button = button("← Back", self.back)
         self.back_button.setFixedWidth(100)
@@ -377,7 +385,8 @@ class WizardWindow(
         self.play_transport_bar.hide()
         footer.addStretch(1)
         footer.addWidget(self.next_button)
-        content.addLayout(footer)
+        self.footer_bar.addLayout(footer)
+        content.addLayout(self.footer_bar)
         root.addWidget(right, 1)
         self.setCentralWidget(central)
 

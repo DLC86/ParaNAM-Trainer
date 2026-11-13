@@ -62,10 +62,14 @@ def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
     assert "#515151" in window.header_divider.styleSheet()
     assert "#515151" in window.footer_divider.styleSheet()
     content = window.pages.parentWidget().layout()
-    header_index = content.indexOf(window.header_divider)
-    pages_index = content.indexOf(window.pages)
-    footer_index = content.indexOf(window.footer_divider)
-    assert 0 < header_index < pages_index < footer_index < content.count() - 1
+    assert content.itemAt(0).layout() is window.header_bar
+    assert window.header_bar.indexOf(window.project_label) == 0
+    assert window.header_bar.indexOf(window.header_divider) == 1
+    assert content.indexOf(window.pages) > 0
+    assert content.itemAt(content.count() - 1).layout() is window.footer_bar
+    assert window.footer_bar.indexOf(window.footer_divider) == 0
+    assert window.footer_bar.itemAt(1).layout() is not None
+    assert window.header_bar.spacing() == window.footer_bar.spacing() == 6
 
 
 def test_add_control_card_matches_knob_tile_and_arc_sweep(window, workspace):
