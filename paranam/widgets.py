@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from nam.capture.params import KnobSpec, SwitchSpec
 from .control_paint import paint_slide_switch
+from .value_format import format_knob_value
 
 # Both Plan and Capture map the full knob range to precisely 300 degrees.
 KNOB_START_DEGREES = 210.0
@@ -346,7 +347,7 @@ class ControlScene(QWidget):
                     painter.drawText(
                         QRectF(center.x() + side * 37 - 22, center.y() + 30, 44, 15),
                         Qt.AlignmentFlag.AlignCenter,
-                        f"{limit:g}",
+                        format_knob_value(limit, control.min, control.max),
                     )
                 painter.setBrush(QColor("#2e2e2e"))
                 painter.setPen(QPen(QColor("#656565"), 1))
@@ -369,7 +370,7 @@ class ControlScene(QWidget):
                 painter.drawText(
                     QRectF(x + 10, y + 134, width - 20, 29),
                     Qt.AlignmentFlag.AlignCenter,
-                    f"{float(value):g}",
+                    format_knob_value(float(value), control.min, control.max),
                 )
 
 

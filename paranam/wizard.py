@@ -69,6 +69,7 @@ from nam.capture.planner import corner_capture_count
 from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write_json
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
+from .value_format import format_knob_value
 from .widgets import (
     THEME,
     ControlScene,
@@ -2934,6 +2935,11 @@ class WizardWindow(
                 "Warnings",
             ]
         self._capture_entries = entries
+        knob_ranges = {
+            control.name: (control.min, control.max)
+            for control in project.control_specs()
+            if isinstance(control, KnobSpec)
+        } if not static else {}
         self.capture_table.blockSignals(True)
         header = self.capture_table.horizontalHeader()
         header.blockSignals(True)
@@ -2979,7 +2985,9 @@ class WizardWindow(
             else:
                 params = ", ".join(
                     (
-                        f"{name}={value:g}"
+                        f"{name}={format_knob_value(value, *knob_ranges[name])}"
+                        if name in knob_ranges and isinstance(value, (float, int))
+                        else f"{name}={value:g}"
                         if isinstance(value, (float, int))
                         else f"{name}={value}"
                     )

@@ -32,6 +32,7 @@ from .preview import preview_files
 from .ui_widgets import navigation_icon
 from .compare_layout import ControlFlowLayout, ControlPanel, AssetList
 from .control_paint import paint_slide_switch
+from .value_format import format_knob_value
 
 
 class PlayDial(QDial):
@@ -238,7 +239,9 @@ class ControlValue(QDoubleSpinBox):
         )
 
     def textFromValue(self, value):
-        return self.locale().toString(value, "g", 12)
+        # Keep the existing locale and precision; only add a sign for bipolar knobs.
+        text = self.locale().toString(value, "g", 12)
+        return format_knob_value(value, self.minimum(), self.maximum(), text)
 
 
 class ModelInfoLoader(QThread):
