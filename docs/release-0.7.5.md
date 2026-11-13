@@ -8,9 +8,9 @@
 
 ## Main window
 
-- **Updated TTS branding:** the Trainer uses the supplied red-and-grey transparent logo for its interface, window/taskbar icon and installer icons across Windows, macOS and Linux. The artwork is downscaled and optimized to keep the application lightweight.
+- **Updated TTS branding:** the Trainer now uses the original, user-supplied **256×256 transparent PNG without resizing, recompression or color changes**, preserving the artwork's smooth gradients. The same source is used for the interface, window/taskbar icon and native installer icons across Windows, macOS and Linux.
 - **Project header:** the open project's name is displayed **larger and in white**, while the separator dot and the **Automatically saved** status keep their previous size and muted color.
-- **Subtle grey separators** distinguish the project header and bottom Back/Next navigation bar from the central page content. The separators are grouped with their bars to preserve the space available to the resizable Capture table.
+- **Full-width grey separators** now extend from the border of the left navigation panel to the right edge of the window. The project name, pages and Back/Next controls retain their 30px side padding, preserving the resizable Capture table.
 
 ## Update notification
 

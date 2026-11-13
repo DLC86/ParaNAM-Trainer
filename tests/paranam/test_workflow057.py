@@ -63,13 +63,29 @@ def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
     assert "#515151" in window.footer_divider.styleSheet()
     content = window.pages.parentWidget().layout()
     assert content.itemAt(0).layout() is window.header_bar
-    assert window.header_bar.indexOf(window.project_label) == 0
+    assert window.header_bar.itemAt(0).layout() is window.header_label_row
     assert window.header_bar.indexOf(window.header_divider) == 1
-    assert content.indexOf(window.pages) > 0
+    assert content.indexOf(window.page_body) > 0
+    assert window.page_body.indexOf(window.pages) == 0
     assert content.itemAt(content.count() - 1).layout() is window.footer_bar
     assert window.footer_bar.indexOf(window.footer_divider) == 0
     assert window.footer_bar.itemAt(1).layout() is not None
     assert window.header_bar.spacing() == window.footer_bar.spacing() == 6
+
+    # Neither rule should stop at the 30px inset of the text, pages or buttons.
+    sidebar = window.findChild(type(window.header_divider), "sidebar")
+    central = window.centralWidget()
+    for rule in (window.header_divider, window.footer_divider):
+        assert rule.mapTo(central, QPoint(0, 0)).x() == sidebar.width()
+        assert rule.width() == central.width() - sidebar.width()
+    assert window.header_label_row.contentsMargins().left() == 30
+    assert window.page_body.contentsMargins().right() == 30
+    assert window.footer_bar.itemAt(1).layout().contentsMargins().left() == 30
+
+    window.resize(1440, 900)
+    qapp.processEvents()
+    for rule in (window.header_divider, window.footer_divider):
+        assert rule.width() == central.width() - sidebar.width()
 
 
 def test_add_control_card_matches_knob_tile_and_arc_sweep(window, workspace):
