@@ -1,6 +1,6 @@
 name: Refresh draft 0.7.5 — verified native installers
 
-# Refresh 0.7.5 after updating the shared TTS logo and native app icons.
+# Rebuild 0.7.5 with the exact, unmodified 256px logo and edge-to-edge dividers.
 on:
   push:
     branches: [main]
