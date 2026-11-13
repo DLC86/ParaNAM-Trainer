@@ -199,6 +199,109 @@ def test_native_full_lite_multiple_switch_combinations_and_calibration(tmp_path)
         native.close()
 
 
+def test_compare_outer_calibration_and_selected_loudness_for_both_model_types(tmp_path):
+    """Compare must use root input/output dBu and selected Lite/Full loudness.
+
+    These synthetic NAM/PNAM files reproduce the metadata layout of real
+    SlimmableContainer exports without committing a user's captured model.
+    """
+    require_native()
+    from nam.models.parametric import bake
+
+    torch.set_num_threads(1)
+    torch.manual_seed(43)
+    model = HyperA2.init_from_config(
+        dict(
+            sample_rate=48000,
+            params=[dict(name="Gain", type="continuous", min=0, max=10, default=5)],
+            hypernet=dict(hidden_sizes=[4], mode="full", selector={}),
+        )
+    ).eval()
+    root_metadata = dict(
+        input_level_dbu=18.0,
+        output_level_dbu=12.0,
+        loudness=-20.0,  # fallback only
+        gear_type="amp_cab",
+    )
+    child_loudness = {"lite": -24.0, "full": -22.0}
+
+    export_parametric(model, tmp_path, basename="base")
+    parametric = json.loads((tmp_path / "base.pnam").read_text(encoding="utf8"))
+    parametric["metadata"] = root_metadata.copy()
+    for size, entry in zip(("lite", "full"), parametric["config"]["submodels"]):
+        # HyperA2 branch metadata lives on the submodel entry itself.
+        entry["metadata"] = {"loudness": child_loudness[size]}
+
+    static_children = []
+    for size, maximum in (("lite", 0.5), ("full", 1.0)):
+        fixed = bake(model.branch(size), [5.0])
+        fixed.export(tmp_path, basename=f"baked-{size}")
+        child = json.loads(
+            (tmp_path / f"baked-{size}.nam").read_text(encoding="utf8")
+        )
+        # Real-world SlimmableContainer: child metadata contains loudness,
+        # NOT input_level_dbu or output_level_dbu.
+        child["metadata"] = {"loudness": child_loudness[size]}
+        static_children.append({"max_value": maximum, "model": child})
+    static = dict(
+        version=static_children[-1]["model"]["version"],
+        architecture="SlimmableContainer",
+        sample_rate=48000,
+        weights=[],
+        config={"submodels": static_children},
+        metadata=root_metadata.copy(),
+    )
+
+    for architecture, base in (("parametric", parametric), ("static", static)):
+        for missing in (None, "missing", "invalid"):
+            document = json.loads(json.dumps(base))
+            if missing:
+                entry = document["config"]["submodels"][0]
+                metadata = (
+                    entry["model"]["metadata"]
+                    if architecture == "static"
+                    else entry["metadata"]
+                )
+                if missing == "missing":
+                    metadata.pop("loudness")
+                else:
+                    metadata["loudness"] = None
+            model_path = tmp_path / f"{architecture}-{missing or 'children'}.nam"
+            model_path.write_text(json.dumps(document), encoding="utf8")
+            for lite, size in ((True, "lite"), (False, "full")):
+                native = NativeModel(model_path, block_size=64, lite=lite)
+                try:
+                    assert native.info["size_selection"]
+                    expected_loudness = (
+                        root_metadata["loudness"]
+                        if lite and missing
+                        else child_loudness[size]
+                    )
+                    # Input calibration must change drive; no change to the
+                    # calibrated output reference is allowed.
+                    assert native.calibration(12, 18, "calibrated") == pytest.approx(
+                        (10 ** (-6 / 20), 10 ** (-6 / 20))
+                    )
+                    assert native.calibration(24, 18, "calibrated") == pytest.approx(
+                        (10 ** (6 / 20), 10 ** (-6 / 20))
+                    )
+                    assert native.calibration(24, 18, "raw") == pytest.approx(
+                        (10 ** (6 / 20), 1.0)
+                    )
+                    assert native.calibration(24, 18, "normalized") == pytest.approx(
+                        (
+                            10 ** (6 / 20),
+                            10 ** ((-18 - expected_loudness) / 20),
+                        )
+                    )
+                    # No interface input calibration means no input trim.
+                    assert native.calibration(None, 18, "calibrated") == pytest.approx(
+                        (1.0, 10 ** (-6 / 20))
+                    )
+                finally:
+                    native.close()
+
+
 def test_play_callback_routes_only_send_and_stereo_monitors(qapp, monkeypatch):
     from paranam import playback
     import sounddevice
