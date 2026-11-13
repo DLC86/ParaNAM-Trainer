@@ -193,7 +193,9 @@ def test_switch_coverage_recommendations_and_signal_selection(window, workspace)
     window._attach(workspace)
     window.refresh_recommendation(True)
     assert window.n_train.value() == 96
-    assert window.n_validation.value() == 48
+    # The actual stepped control grid has only five reserved-free validation
+    # positions per Complex Switch combination, rather than the old heuristic 8.
+    assert window.n_validation.value() == 30
     assert "6 Complex Switch" in window.recommendation.text()
     assert not window.custom_button.isEnabled()
     window.signal_mode.setCurrentIndex(window.signal_mode.findData("custom"))

@@ -31,6 +31,8 @@ def test_controls_wrap_and_pages_expand_with_the_window(window, workspace, qapp)
         KnobSpec(f"Knob {i}", 0, 10).to_dict() for i in range(8)
     ]
     window.refresh_controls()
+    # Recomputing very large knob grids must never overflow QSpinBox's int.
+    assert window.n_train.maximum() <= 1000000
     window.resize(1150, 850)
     qapp.processEvents()
     assert window.control_strip._bounds(8).top() > window.control_strip._bounds(0).top()

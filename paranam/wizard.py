@@ -1747,6 +1747,10 @@ class WizardWindow(
                     metadata[key] = spin.value()
             workspace.project.user_metadata = dict(metadata)
             self.metadata_editor.set_metadata(metadata)
+            # A prior project's constrained spinbox range must not clip saved
+            # capture counts when opening another project.
+            self.n_train.setRange(1, 1000000)
+            self.n_validation.setRange(0, 1000000)
             for field, key in (
                 (self.n_train, "n_train"),
                 (self.n_validation, "n_validation"),
@@ -2458,12 +2462,19 @@ class WizardWindow(
         self.control_strip.set_controls(
             [control_from_dict(data) for data in self.workspace.draft_controls], index
         )
-        if isinstance(control, SwitchSpec):
-            for row, item in enumerate(self._switch_items()):
-                if control.option_indices is None:
+        if isinstance(control, SwitchSpec) and control.option_indices is None:
+            # Updating QListWidgetItem metadata emits itemChanged. Suppress
+            # reentrant partial saves while rebasing original neural indices
+            # after the user reorders positions.
+            from PySide6.QtCore import QSignalBlocker
+
+            blocker = QSignalBlocker(self.switch_positions)
+            try:
+                for row, item in enumerate(self._switch_items()):
                     item.setData(Qt.ItemDataRole.UserRole, row)
-            if control.option_indices is None:
-                self._refresh_switch_defaults(control.default)
+            finally:
+                blocker.unblock()
+            self._refresh_switch_defaults(control.default)
         excluded = {"name", "option_indices"}
         if {k: v for k, v in previous.items() if k not in excluded} != {
             k: v for k, v in after.items() if k not in excluded
@@ -2521,15 +2532,23 @@ class WizardWindow(
         except ValueError:
             return
 
+        # Qt QSpinBox is a bounded C++ int. Extremely fine multidimensional
+        # grids can exceed it even though Python integers do not overflow.
+        ui_limit = 1000000
+        train_min = min(train_min, ui_limit)
+        train_max = min(max(train_min, train_max), ui_limit)
+        validation_max = min(max(0, validation_max), ui_limit)
+        train = min(train, ui_limit)
+        validation = min(validation, ui_limit)
         for field in (self.n_train, self.n_validation):
             field.blockSignals(True)
         try:
-            self.n_train.setRange(train_min, max(train_min, train_max))
+            self.n_train.setRange(train_min, train_max)
             self.n_train.setValue(train)
-            self.n_validation.setRange(0, max(0, validation_max))
+            self.n_validation.setRange(0, validation_max)
             self.n_validation.setValue(validation)
             if switches_only:
-                self.n_validation.setRange(maximum, maximum)
+                self.n_validation.setRange(train, train)
         finally:
             for field in (self.n_train, self.n_validation):
                 field.blockSignals(False)
@@ -2572,7 +2591,11 @@ class WizardWindow(
             finally:
                 for field in (self.n_train, self.n_validation):
                     field.blockSignals(False)
-        self._sync_capture_limits()
+        # An existing captured plan should not be silently marked "changed"
+        # just because its historical capture split exceeds new grid limits.
+        # User edits and new plans still get the live constraints.
+        if autofill or not self.workspace.project.entries or self.workspace.plan_changed():
+            self._sync_capture_limits()
         if autofill:
             self.save_preferences()
 
