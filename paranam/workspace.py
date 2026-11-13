@@ -522,9 +522,9 @@ class Workspace:
             "n_train"
         ] == __import__("math").prod(len(c.enum_names) for c in controls)
         validation_count = prefs["n_validation"]
-        if validation_count < 1:
+        if validation_count < 0 or (switches_only and validation_count < 1):
             raise ValueError(
-                "Include validation captures: they use the fixed bundled validation signal and provide ESR."
+                "For switch-only captures, validate every state once with the separate signal."
             )
         replacement = new_project(
             controls,
