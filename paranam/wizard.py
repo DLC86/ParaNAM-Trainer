@@ -952,7 +952,7 @@ class WizardWindow(
                 9,
             ),
             ("lr_decay", "LR Decay", 0.994, 0, 1, 9),
-            ("hypernetwork_lr_decay", "Hypernetwork LR Decay", 0.998497, 0, 1, 9),
+            ("hypernetwork_lr_decay", "Hypernetwork LR Decay", 0.998496613, 0, 1, 9),
             ("ny", "NY (samples)", 8192, 1, 1048576, 0),
             ("mrstft_weight", "MRSTFT Weight", 0.0005, 0, 10, 9),
             ("weight_decay", "Weight Decay", 3.17e-7, 0, 10, 12),

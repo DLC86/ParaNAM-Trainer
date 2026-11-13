@@ -169,10 +169,16 @@ def test_compare_panel_reserves_height_for_wrapped_rows(window, workspace, qapp)
     assert last.y() > window.play_controls_layout.itemAt(0).widget().y()
 
 
+def test_hypernetwork_lr_decay_widget_has_full_nine_digit_default(window):
+    field = window.advanced_fields["hypernetwork_lr_decay"]
+    assert field.decimals() == 9
+    assert field.value() == 0.998496613
+
+
 def test_new_recipe_and_independent_epoch_budgets(window, workspace):
     recipe = training_preset("HyperA2")
     assert recipe["hypernetwork_learning_rate"] == 0.001
-    assert recipe["hypernetwork_lr_decay"] == 0.998497
+    assert recipe["hypernetwork_lr_decay"] == 0.998496613
     assert recipe["branch_loss_reduction"] == "sum"
     assert recipe["rate_preset"] == recipe["hypernetwork_rate_preset"] == "a2_updates"
     assert not training_preset("HyperWaveNet")["cudnn_benchmark"]

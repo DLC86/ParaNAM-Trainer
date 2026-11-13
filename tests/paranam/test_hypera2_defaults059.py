@@ -22,7 +22,7 @@ def requested_settings():
         "rate_preset": "a2_updates",
         "hypernetwork_rate_preset": "a2_updates",
         "hypernetwork_learning_rate": 0.001,
-        "hypernetwork_lr_decay": 0.998497,
+        "hypernetwork_lr_decay": 0.998496613,
         "branch_loss_reduction": "sum",
     }
 
@@ -79,7 +79,7 @@ def test_0252_architecture_optimizer_safety_flags_and_both_decay_clocks(workspac
         "class": "IndependentGroupLR",
         "kwargs": {
             "audio": {"interval": "step", "step_size": 62, "gamma": 0.994},
-            "hypernetwork": {"interval": "step", "step_size": 62, "gamma": 0.998497},
+            "hypernetwork": {"interval": "step", "step_size": 62, "gamma": 0.998496613},
         },
     }
     assert "gradient_clip_val" not in spec["learning"]["trainer"]

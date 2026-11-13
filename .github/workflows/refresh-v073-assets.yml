@@ -68,7 +68,9 @@ jobs:
           release = json.loads(subprocess.check_output(
               ['gh','api','repos/'+os.environ['GH_REPO']+'/releases/441009567']))
           assert release['draft'] and release['prerelease'], 'Draft must remain unpublished'
-          assert release['tag_name'] == 'v0.7.3'
+          assert release['tag_name'] in ('v0.7.3', 'untagged-8b084e95613a285e8bba')
+          assert release['name'] == 'ParaNAM Trainer 0.7.3'
+          assert release['target_commitish'] == '178e8977dc001e40ee096ea15ebd9c9d4a86d3bc'
           assert '__version__ = "0.7.3"' in Path('paranam/__init__.py').read_text()
           PY
       - name: Free Linux runner disk space
@@ -123,7 +125,15 @@ jobs:
             test "$(wc -c < "$package")" -gt 100000
             staged="$package.staged-$short"
             mv "$package" "$staged"
-            gh release upload v0.7.3 "$staged" --clobber
+            # Draft tags can be temporary untagged-* names; upload by release ID.
+            curl --fail-with-body --silent --show-error --retry 3 \\
+              --retry-delay 5 --retry-all-errors --max-time 900 \\
+              -H "Authorization: Bearer $GH_TOKEN" \\
+              -H "Accept: application/vnd.github+json" \\
+              -H "Content-Type: application/octet-stream" \\
+              --data-binary "@$staged" \\
+              "https://uploads.github.com/repos/$GH_REPO/releases/441009567/assets?name=$(basename "$staged")" \\
+              > /dev/null
           done
 
   finalize:
@@ -150,7 +160,7 @@ jobs:
           base = f'https://api.github.com/repos/{repo}'
           token = os.environ['GH_TOKEN']
           release_id = 441009567
-          old_sha = 'b2e7ca654b5a9f3dea7adce8182969983495d08f'
+          old_sha = '178e8977dc001e40ee096ea15ebd9c9d4a86d3bc'
           tag = 'v0.7.3'
           prefix = 'ParaNAM-Trainer-0.7.3-'
           names = {
@@ -173,7 +183,8 @@ jobs:
 
           release = api('GET', '/releases/' + str(release_id))
           assert release['draft'] and release['prerelease'], 'Never touch a published release'
-          assert release['tag_name'] == tag
+          assert release['tag_name'] in (tag, 'untagged-8b084e95613a285e8bba')
+          assert release['name'] == 'ParaNAM Trainer 0.7.3'
           assert release['target_commitish'] == old_sha, 'Draft source changed unexpectedly'
           assets = {a['name']: a for a in release['assets']}
           original = {name: assets[name] for name in names}
@@ -239,18 +250,16 @@ jobs:
               assert asset['state'] == 'uploaded'
               if staged[name].get('digest'):
                   assert asset['digest'] == staged[name]['digest']
-          marker = '<!-- v073-gemm-projects-singleton-refresh -->'
+          marker = '<!-- v073-hypernetwork-decay-998496613 -->'
           body = verified.get('body') or ''
           assert marker not in body
           body += (
               '\n\n' + marker + '\n'
-              '### Refreshed draft installers — 12 November 2026\n\n'
-              '- Compare: optimized single-network GEMM delta convolution smoothing '
-              'matching the NAM Parametric Plugin 0.5.2 implementation.\n'
-              '- Projects: confirm before Delete, optional (unchecked) folder deletion.\n'
-              '- Metadata: independent input/output dBu fields and a blank input-impedance hint.\n'
-              '- Windows: fast native Start-menu launcher. Windows, macOS and Linux: '
-              'only one interactive GUI instance; workers and update helpers remain independent.\n\n'
+              '### Hypernetwork LR Decay and taskbar refresh — 13 November 2026\n\n'
+              '- Hypernetwork LR Decay: 0.998496613 as the default field and '
+              'HyperA2 preset gamma (nine decimals). Saved project values remain unchanged.\n'
+              '- Windows: consistent taskbar identity for launcher and Qt Core.\n'
+              '- Sidebar branding: PNAM Trainer with a narrower left panel.\n\n'
               'All five native packages were rebuilt, tested, and checked from '
               '[commit ' + sha[:12] + '](https://github.com/' + repo +
               '/commit/' + sha + '). The draft remains unpublished.\n')

@@ -92,7 +92,7 @@ Switches; clean volume is measured separately. New-project default validation co
 plans are unchanged. ESR_worst is the maximum complete-setting validation ESR,
 reported beside the mean for Full/Lite. It does not change best-checkpoint selection.
 
-New HyperA2 projects use LR 0.004/0.001, decay 0.994/0.998497 per 62 optimizer
+New HyperA2 projects use LR 0.004/0.001, decay 0.994/0.998496613 per 62 optimizer
 updates, batch 16 and 50 epochs. Static models default to 200 epochs and retain
 per-epoch scheduling. Switching capture type preserves separate epoch budgets.
 
@@ -160,7 +160,7 @@ topologies, validation and compilation settings are common to both recipes.
 | NY / MRSTFT weight | 8192 / 0.0005 | 8192 / 0.0005 |
 | LR decay / weight decay | 0.994 / 3.17e-7 | 0.994 / 3.17e-7 |
 | Audio LR schedule | Every 62 optimizer updates, decay 0.994 | Manual, per epoch |
-| Hypernetwork LR schedule | Every 62 optimizer updates, decay 0.998497 | Manual, per epoch |
+| Hypernetwork LR schedule | Every 62 optimizer updates, decay 0.998496613 | Manual, per epoch |
 | cuDNN benchmark / deterministic algorithms | Disabled / disabled | Disabled / disabled |
 
 HyperA2 uses the explicit 0.6.2 defaults above. Old jobs retain their saved settings on resume.

@@ -39,7 +39,7 @@ def training_preset(name):
         cudnn_benchmark=False,
         deterministic_training=False,
         hypernetwork_rate_preset="a2_updates" if hyper_a2 else "manual",
-        hypernetwork_lr_decay=0.998497 if hyper_a2 else 0.994,
+        hypernetwork_lr_decay=0.998496613 if hyper_a2 else 0.994,
         hypernetwork_recipe=name,
         hypernetwork_mode="low_rank",
         hypernetwork_rank=2,

@@ -182,7 +182,7 @@ reduction instants can differ between a legacy job and a newly retrained job.
 
 New parametric projects default to **HyperA2**, **50 epochs** and batch 16.
 Static projects default to **200 epochs**. HyperA2 uses Adam, audio/hypernetwork
-LR **0.004/0.001**, decay **0.994/0.998497** per 62 updates, rank-2 deltas,
+LR **0.004/0.001**, decay **0.994/0.998496613** per 62 updates, rank-2 deltas,
 dilated convolution kernels excluded and summed Full/Lite losses. MRSTFT is on
 (NY 8192, weight 0.0005); weight decay is 3.17e-7. Clipping, NaN/Inf gradient
 scanning, cuDNN benchmark and deterministic training are off. HyperWaveNet is
