@@ -2243,9 +2243,15 @@ class WizardWindow(
         if all(isinstance(c, SwitchSpec) for c in controls) and val == 0:
             val = train
         count = corner_capture_count(controls)
+        note = (
+            " The capture grid has no free non-corner/default settings for "
+            "held-out validation; use a finer knob step to enable it."
+            if val == 0 and any(isinstance(c, KnobSpec) and not c.clean_volume for c in controls)
+            else ""
+        )
         self.recommendation.setText(
             f"Suggested: {train} training + {val} validation captures, plus up to {count} corners.\n"
-            f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts are starting guidelines, not an accuracy guarantee."
+            f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts account for actual control positions and are starting guidelines, not an accuracy guarantee.{note}"
         )
         if autofill:
             self.n_train.setValue(train)
