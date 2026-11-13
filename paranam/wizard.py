@@ -61,7 +61,10 @@ from PySide6.QtWidgets import (
 from nam.capture.audio import list_devices
 from nam.capture.export import update_data_json
 from nam.capture.gui.workers import CancelToken, SessionWorker
-from nam.capture.params import KnobSpec, SwitchSpec, capture_recommendations
+from nam.capture.params import (
+    KnobSpec, SwitchSpec, capture_recommendations,
+    capture_grid_limits, capture_count_maxima,
+)
 from nam.capture.planner import corner_capture_count
 from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write_json
 from nam.capture.session import CaptureSession, timebase_problem
@@ -786,6 +789,8 @@ class WizardWindow(
         self.active_learning_help = box.itemAt(box.count() - 1).widget()
         self.active_learning_help.hide()
         layout.addWidget(self.plan_card)
+        self.n_train.valueChanged.connect(self._sync_capture_limits)
+        self.n_validation.valueChanged.connect(self._sync_capture_limits)
         for field in (
             self.n_train,
             self.n_validation,
@@ -2226,6 +2231,60 @@ class WizardWindow(
             self.refresh_recommendation(True)
             self.workspace.save()
 
+    def _sync_capture_limits(self, *_):
+        """Bound both Capture Plan spinboxes to feasible, distinct settings.
+
+        Training has priority when controls change; editing either spinbox
+        recomputes the maximum of the other without resetting manual choices.
+        Signals are blocked while updating ranges to avoid recursive changes.
+        """
+        if self._loading or not self.workspace:
+            return
+        if self.capture_kind.currentData() == "static":
+            return
+        try:
+            controls = [
+                control_from_dict(c) for c in self.workspace.draft_controls
+            ]
+            if not controls:
+                return
+            capacity, _, combinations = capture_grid_limits(controls)
+            switches_only = all(isinstance(c, SwitchSpec) for c in controls)
+            if switches_only:
+                # Separate validation AUDIO repeats every categorical state.
+                maximum = capacity * combinations
+                train = validation = maximum
+                train_min = maximum
+                train_max = maximum
+                validation_max = maximum
+            else:
+                train_min = combinations
+                train = min(
+                    max(train_min, self.n_train.value()), capacity * combinations
+                )
+                _, validation_max = capture_count_maxima(controls, train, 0)
+                validation = min(self.n_validation.value(), validation_max)
+                if 0 < validation < combinations:
+                    validation = 0
+                train_max, validation_max = capture_count_maxima(
+                    controls, train, validation
+                )
+        except ValueError:
+            return
+
+        for field in (self.n_train, self.n_validation):
+            field.blockSignals(True)
+        try:
+            self.n_train.setRange(train_min, max(train_min, train_max))
+            self.n_train.setValue(train)
+            self.n_validation.setRange(0, max(0, validation_max))
+            self.n_validation.setValue(validation)
+            if switches_only:
+                self.n_validation.setRange(maximum, maximum)
+        finally:
+            for field in (self.n_train, self.n_validation):
+                field.blockSignals(False)
+
     def refresh_recommendation(self, autofill=False):
         if not self.workspace:
             return
@@ -2254,8 +2313,19 @@ class WizardWindow(
             f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts account for actual control positions and are starting guidelines, not an accuracy guarantee.{note}"
         )
         if autofill:
-            self.n_train.setValue(train)
-            self.n_validation.setValue(val)
+            for field in (self.n_train, self.n_validation):
+                field.blockSignals(True)
+            try:
+                self.n_train.setRange(1, 1000000)
+                self.n_validation.setRange(0, 1000000)
+                self.n_train.setValue(train)
+                self.n_validation.setValue(val)
+            finally:
+                for field in (self.n_train, self.n_validation):
+                    field.blockSignals(False)
+        self._sync_capture_limits()
+        if autofill:
+            self.save_preferences()
 
     def save_preferences(self, *_):
         if self._loading or not self.workspace or self.busy():
