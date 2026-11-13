@@ -37,7 +37,8 @@ def test_compare_control_value_uses_same_sign_rule(qapp):
     value = 1.25
     localized = control.locale().toString(value, "g", 12)
     assert control.textFromValue(value) == "+" + localized
-    assert control.textFromValue(0) == control.locale().toString(0, "g", 12)
+    assert control.textFromValue(0) == control.locale().toString(0.0, "g", 12)
+    assert control.textFromValue(2) == "+" + control.locale().toString(2.0, "g", 12)
     assert control.textFromValue(-value) == control.locale().toString(-value, "g", 12)
     control.setRange(0, 10)
     assert control.textFromValue(value) == localized

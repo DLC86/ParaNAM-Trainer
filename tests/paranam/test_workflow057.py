@@ -45,6 +45,29 @@ def test_controls_wrap_and_pages_expand_with_the_window(window, workspace, qapp)
     assert window.signal_mode.maximumWidth() <= 560
 
 
+def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
+    window._attach(workspace)
+    window.navigate(1)
+    window.show()
+    qapp.processEvents()
+    header = window.project_label.text()
+    assert "My rig" in header
+    assert "color: #ffffff" in header
+    assert "font-size: 19px" in header
+    assert "font-weight: 700" in header
+    assert "·  Automatically saved" in header
+    assert "Saved locally" not in header
+    assert window.header_divider.height() == 1
+    assert window.footer_divider.height() == 1
+    assert "#515151" in window.header_divider.styleSheet()
+    assert "#515151" in window.footer_divider.styleSheet()
+    content = window.pages.parentWidget().layout()
+    header_index = content.indexOf(window.header_divider)
+    pages_index = content.indexOf(window.pages)
+    footer_index = content.indexOf(window.footer_divider)
+    assert 0 < header_index < pages_index < footer_index < content.count() - 1
+
+
 def test_add_control_card_matches_knob_tile_and_arc_sweep(window, workspace):
     from paranam.widgets import KNOB_START_DEGREES, KNOB_SWEEP_DEGREES
 

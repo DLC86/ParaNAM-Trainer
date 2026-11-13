@@ -318,6 +318,12 @@ class WizardWindow(
         self.project_label = label("No project open", "muted")
         self.project_label.setTextFormat(Qt.TextFormat.RichText)
         content.addWidget(self.project_label)
+        # Divide the persistent project header from the scrollable page.
+        self.header_divider = QFrame()
+        self.header_divider.setObjectName("contentDivider")
+        self.header_divider.setFixedHeight(1)
+        self.header_divider.setStyleSheet("border: none; background-color: #515151;")
+        content.addWidget(self.header_divider)
         self.build_recovery_notice(content)
         self.pages = QStackedWidget()
         self.page_contents = []
@@ -354,6 +360,12 @@ class WizardWindow(
             self.pages.addWidget(scroll)
             self.page_contents.append(page)
         content.addWidget(self.pages, 1)
+        # Keep Back/Next navigation separate from the central page content.
+        self.footer_divider = QFrame()
+        self.footer_divider.setObjectName("contentDivider")
+        self.footer_divider.setFixedHeight(1)
+        self.footer_divider.setStyleSheet("border: none; background-color: #515151;")
+        content.addWidget(self.footer_divider)
         footer = QHBoxLayout()
         self.back_button = button("← Back", self.back)
         self.back_button.setFixedWidth(100)
@@ -1711,7 +1723,9 @@ class WizardWindow(
         except RecoveryRequired:
             pass  # Opening a project must remain available for queue rebuilding.
         self.project_label.setText(
-            f"<b>{escape(workspace.project.name or workspace.directory.name)}</b>  ·  Saved locally"
+            '<span style="color: #ffffff; font-size: 19px; font-weight: 700;">'
+            f'{escape(workspace.project.name or workspace.directory.name)}'
+            '</span>  ·  Automatically saved'
         )
         audio = workspace.project.audio
         self.monitor_return.setChecked(audio.monitor_return_enabled)

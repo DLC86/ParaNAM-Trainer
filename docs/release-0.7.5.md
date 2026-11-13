@@ -6,6 +6,11 @@
 - The rule applies to the knob readouts in **Plan**, **Capture** and **Compare**, to the small **minimum and maximum** labels beside the knobs in Plan and Capture, and to the **Control settings** column of the Capture table.
 - Zero, negative values and strictly unipolar controls retain their previous notation. Only the displayed text changes; numeric parameter values, model files and audio processing are unaffected.
 
+## Main window
+
+- **Project header:** the open project's name is displayed **larger and in white**, while the separator dot and the **Automatically saved** status keep their previous size and muted color.
+- **Subtle grey separators** distinguish the project header and bottom Back/Next navigation bar from the central page content, without changing the page layouts.
+
 ## Update notification
 
 - **GitHub-style Markdown release notes** are rendered directly in the update window, including headings, bold and italic text, lists, links, code blocks and tables.
@@ -20,4 +25,4 @@
 
 ## Availability
 
-This release is prepared as a **draft**. Installer assets can be built and verified before publication.
+This release is prepared as a **draft**. All five native installers are built from the same source commit and verified before the draft assets are updated. The draft is **not published automatically**.

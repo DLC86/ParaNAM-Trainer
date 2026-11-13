@@ -240,7 +240,7 @@ class ControlValue(QDoubleSpinBox):
 
     def textFromValue(self, value):
         # Keep the existing locale and precision; only add a sign for bipolar knobs.
-        text = self.locale().toString(value, "g", 12)
+        text = self.locale().toString(float(value), "g", 12)
         return format_knob_value(value, self.minimum(), self.maximum(), text)
 
 
