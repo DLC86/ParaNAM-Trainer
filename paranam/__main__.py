@@ -252,6 +252,13 @@ def main():
     if not gui_guard.acquire():
         return 0
 
+    # The Start-menu shortcut runs the native launcher, while Qt windows
+    # belong to the frozen child Core. Match their Windows taskbar identity
+    # before creating any Qt windows, including the splash screen.
+    from .windows_identity import set_windows_app_user_model_id
+
+    set_windows_app_user_model_id()
+
     from PySide6.QtCore import Qt, QStandardPaths
     from PySide6.QtGui import QPixmap, QColor, QIcon
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox
@@ -261,7 +268,17 @@ def main():
     app.setApplicationName("ParaNAM Trainer")
     from .signals import asset_path
 
-    app.setWindowIcon(QIcon(str(asset_path("TTSLogo.png"))))
+    # Match the icon embedded in the Win32 launcher; retain the bundled
+    # PNG fallback for other platforms and unfrozen development launches.
+    window_icon_path = asset_path("TTSLogo.png")
+    if sys.platform == "win32":
+        windows_icon = asset_path("paranam.ico")
+        if windows_icon.is_file():
+            window_icon_path = windows_icon
+    window_icon = QIcon(str(window_icon_path))
+    if window_icon.isNull():
+        window_icon = QIcon(str(asset_path("TTSLogo.png")))
+    app.setWindowIcon(window_icon)
     pixmap = QPixmap(520, 230)
     pixmap.fill(QColor("#1b1b1b"))
     splash = QSplashScreen(pixmap)
@@ -299,6 +316,8 @@ def main():
             splash.show()
 
         window = WizardWindow()
+        # Give the actual Qt top-level HWND an explicit taskbar icon too.
+        window.setWindowIcon(window_icon)
         window.show()
         splash.finish(window)
         result = app.exec()

@@ -36,8 +36,9 @@ Source: "{#BuildRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; Replace program libraries as a unit, including upgrades from the old CUDA bundle.
 Type: filesandordirs; Name: "{app}\_internal"
 [Icons]
-Name: "{group}\ParaNAM Trainer"; Filename: "{app}\ParaNAM Trainer.exe"
-Name: "{autodesktop}\ParaNAM Trainer"; Filename: "{app}\ParaNAM Trainer.exe"; Tasks: desktopicon
+; Use the Qt Core's AppUserModelID for the launcher shortcuts, too.
+Name: "{group}\ParaNAM Trainer"; Filename: "{app}\ParaNAM Trainer.exe"; AppUserModelID: "DLC86.ParaNAMTrainer"
+Name: "{autodesktop}\ParaNAM Trainer"; Filename: "{app}\ParaNAM Trainer.exe"; AppUserModelID: "DLC86.ParaNAMTrainer"; Tasks: desktopicon
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "nvidia"; Description: "Install NVIDIA GPU support (downloads compatible libraries; Internet required)"; GroupDescription: "Optional acceleration:"; Flags: unchecked

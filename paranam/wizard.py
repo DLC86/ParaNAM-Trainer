@@ -226,7 +226,7 @@ class WizardWindow(
         root.setSpacing(0)
         sidebar = QFrame(central)
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(256)
+        sidebar.setFixedWidth(228)
         rail = QVBoxLayout(sidebar)
         rail.setContentsMargins(20, 30, 18, 24)
         brand = QHBoxLayout()
@@ -240,7 +240,7 @@ class WizardWindow(
         self.shop_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl("https://shop.thetonescientist.com"))
         )
-        self.brand_title = label("ParaNAM\nTrainer", "brand")
+        self.brand_title = label("PNAM\nTrainer", "brand")
         self.version_label = label(f"VERSION {__version__}", "eyebrow")
         self.version_label.setObjectName("version")
         self.brand_title.setParent(sidebar)

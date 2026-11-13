@@ -11,6 +11,10 @@ data = [(str(root / "LICENSE"), "licenses"),
         (str(root / "CREDITS.md"), "licenses"),
         (str(root / "nam/_dependencies/auraloss/LICENSE"), "licenses/auraloss"),
         (str(root / "THIRD_PARTY_NOTICES.md"), "licenses")]
+if sys.platform == "win32":
+    # build.py generates the multi-resolution icon before PyInstaller runs.
+    # Make it available to Qt as well as the native launcher resource.
+    data.append((str(root / "packaging" / "icon.ico"), "paranam/assets"))
 for package in ("nam", "paranam", "pytorch_lightning", "lightning_fabric", "librosa", "scipy", "torchmetrics"):
     data += collect_data_files(package)
 # Lightning checks these paths on disk before importing checkpoint version info.
