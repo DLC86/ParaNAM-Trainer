@@ -227,11 +227,10 @@ ControlSpec = KnobSpec | SwitchSpec
 
 
 def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int, int]:
-    """Recommended train/validation totals and minimum joint-state coverage.
+    """Recommend feasible train/validation counts on the actual capture grid.
 
-    Each switch combination needs its own continuous-knob coverage. With no knobs,
-    every state is captured once and there are no held-out settings for validation.
-    These are sampling heuristics, not an accuracy guarantee.
+    Counts are totals across Complex Switch states. Validation avoids corner
+    settings and the default training anchor, as the planner itself requires.
     """
     active = [c for c in controls if not getattr(c, "clean_volume", False)]
     n_knobs = sum(
@@ -258,11 +257,57 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
     )
     validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
     if active and all(isinstance(c, SwitchSpec) for c in active):
+        # Keep the existing categorical-only policy. Fully sampled switches
+        # have no unseen settings; the GUI can validate on separate audio.
         capacity = _math.prod(len(c.enum_names) for c in active) // combinations
         train = min(train, capacity)
         validation = min(validation, max(0, capacity - train))
-    return train * combinations, validation * combinations, combinations
+    elif any(isinstance(c, KnobSpec) for c in active):
+        # Import lazily: planner imports the control specifications from here.
+        from .planner import (
+            _grid_capacity,
+            corner_settings,
+            settings_on_capture_grid,
+        )
 
+        per_state = [
+            c for c in active
+            if not (isinstance(c, SwitchSpec) and c.planning_mode == "complex")
+        ]
+        specs = tuple(c.to_param_spec() for c in per_state)
+        capacity = _grid_capacity(specs, DEFAULT_KNOB_STEP)
+        anchor = {
+            s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
+            for s in specs
+        }
+        if not settings_on_capture_grid(anchor, specs, DEFAULT_KNOB_STEP):
+            # Explicit off-grid defaults remain trainable and consume one slot.
+            capacity += 1
+
+        corners = corner_settings(
+            specs, gain_index=gain_knob_index(per_state),
+            default_step=DEFAULT_KNOB_STEP,
+        )
+        reserved = {
+            tuple(point[s.name] for s in specs) for point in corners
+        }
+        reserved.add(tuple(anchor[s.name] for s in specs))
+        validation_capacity = max(0, capacity - len(reserved))
+        budget = min(capacity, train + validation)
+        if budget < 4 or not validation_capacity:
+            # No useful held-out setting exists; favor training coverage.
+            train = min(train, capacity)
+            validation = 0
+        else:
+            # Preserve roughly 20% held-out settings on a small grid, then
+            # spend remaining capacity on training up to its original target.
+            held_out = min(
+                validation, validation_capacity,
+                max(1, _math.ceil(budget / 5)),
+            )
+            train = min(train, budget - held_out)
+            validation = min(validation, validation_capacity, budget - train)
+    return train * combinations, validation * combinations, combinations
 
 def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
     """
