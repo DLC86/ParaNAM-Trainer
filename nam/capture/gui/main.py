@@ -1410,17 +1410,23 @@ class MainWindow(_QMainWindow):
             self.knob_table.blockSignals(False)
 
     def _control_recommendations(self):
-        # Names and numeric fields may still be incomplete while editing a row.
-        controls = []
-        for row in range(self.knob_table.rowCount()):
-            kind = self.knob_table.item(row, 6)
-            switch = kind.data(_Qt.ItemDataRole.UserRole) if kind else None
-            controls.append(
-                switch
-                if isinstance(switch, _SwitchSpec)
-                else _KnobSpec(f"Control {row}", 0, 10)
+        # Use actual ranges, steps and Avoid min/max rather than placeholders:
+        # they determine how many distinct capture settings can be planned.
+        try:
+            return _capture_recommendations(
+                knob_rows_to_specs(self._knob_table_rows())
             )
-        return _capture_recommendations(controls)
+        except (ValueError, TypeError, AttributeError):
+            # A row may be incomplete while the user is editing it.
+            controls = []
+            for row in range(self.knob_table.rowCount()):
+                kind = self.knob_table.item(row, 6)
+                switch = kind.data(_Qt.ItemDataRole.UserRole) if kind else None
+                controls.append(
+                    switch if isinstance(switch, _SwitchSpec)
+                    else _KnobSpec(f"Control {row}", 0, 10)
+                )
+            return _capture_recommendations(controls)
 
     def _on_add_knob_row(self) -> None:
         self._add_knob_row("", 0.0, 10.0, 0.5, False, False)
@@ -1474,6 +1480,8 @@ class MainWindow(_QMainWindow):
                 self.knob_table.blockSignals(True)
                 item.setCheckState(_Qt.CheckState.Unchecked)
                 self.knob_table.blockSignals(False)
+        self._apply_n_train_recommendation()
+        self._apply_n_validation_recommendation()
         self._refresh_corner_count()
 
     def _on_remove_knob_row(self) -> None:
@@ -1527,12 +1535,8 @@ class MainWindow(_QMainWindow):
             )
             return
         self.n_train_recommended_label.setText(
-            f"Recommended: {recommended} ({_RECOMMENDED_LHS_PER_KNOB} * {k} Knobs)"
-            + (
-                f" × {combinations} switch combinations; minimum: {combinations}"
-                if combinations > 1
-                else ""
-            )
+            f"Recommended: {recommended} (based on realizable control positions; "
+            f"minimum: {combinations})"
         )
 
     def _refresh_n_validation_recommendation(self) -> None:
@@ -1543,15 +1547,10 @@ class MainWindow(_QMainWindow):
         _, recommended, combinations = self._control_recommendations()
         self.n_validation_recommended_label.setText(
             f"Recommended: {recommended} "
-            f"({_RECOMMENDED_VALIDATION_PER_KNOB} per Knob, max {_RECOMMENDED_VALIDATION_MAX})"
             + (
-                f" per switch combination ({combinations}); minimum if enabled: {combinations}"
-                if recommended and combinations > 1
-                else (
-                    " — switches only: all states train, no held-out settings"
-                    if not recommended
-                    else ""
-                )
+                f"(distinct from training and corners; minimum if enabled: {combinations})"
+                if recommended
+                else "— no free held-out settings on this grid (or switches only)"
             )
         )
 
