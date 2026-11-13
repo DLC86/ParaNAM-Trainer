@@ -2594,8 +2594,18 @@ class WizardWindow(
         # An existing captured plan should not be silently marked "changed"
         # just because its historical capture split exceeds new grid limits.
         # User edits and new plans still get the live constraints.
-        if autofill or not self.workspace.project.entries or self.workspace.plan_changed():
+        if autofill or not self.workspace.project.entries:
             self._sync_capture_limits()
+        else:
+            # Selecting Custom before supplying its WAV is a valid editing
+            # state. plan_changed() may reject the missing file; that must not
+            # abort a preference change or leave the input picker disabled.
+            try:
+                changed = self.workspace.plan_changed()
+            except ValueError:
+                changed = True
+            if changed:
+                self._sync_capture_limits()
         if autofill:
             self.save_preferences()
 
