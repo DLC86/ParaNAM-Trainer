@@ -1,6 +1,6 @@
 name: Refresh draft 0.7.5 — verified native installers
 
-# Automatically build and verify the corrected 0.7.5 GUI and flexible Capture layout.
+# Refresh 0.7.5 after updating the shared TTS logo and native app icons.
 on:
   push:
     branches: [main]
@@ -71,7 +71,7 @@ jobs:
           assert release['draft'] and not release['prerelease'], 'Draft must remain unpublished'
           assert release['tag_name'] == 'v0.7.5' or release['tag_name'].startswith('untagged-')
           assert release['name'] == 'ParaNAM Trainer 0.7.5'
-          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', 'main', os.environ['GITHUB_SHA'])
+          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', '4888dd0f34942baeb96b8cc33d2af112c6335b29', 'main', os.environ['GITHUB_SHA'])
           assert '__version__ = "0.7.5"' in Path('paranam/__init__.py').read_text()
           PY
       - name: Free Linux runner disk space
@@ -189,7 +189,7 @@ jobs:
           assert release['name'] == 'ParaNAM Trainer 0.7.5', 'Unexpected draft release'
           assert (release['tag_name'] == 'v0.7.5'
                   or release['tag_name'].startswith('untagged-')), 'Unexpected release tag'
-          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', sha, 'main'), (
+          assert release['target_commitish'] in ('b4aa4f25f9d21bf269864699a497b56e0a35f60e', '4888dd0f34942baeb96b8cc33d2af112c6335b29', sha, 'main'), (
               'Draft source changed unexpectedly')
           current = api('GET', '/git/ref/heads/main')['object']['sha']
           assert current == sha, 'Main changed during build; refusing stale installers'
