@@ -235,7 +235,7 @@ class QueueActions:
         return data
 
     def refresh_training(self):
-        if not hasattr(self, "queue_table"):
+        if not hasattr(self, "queue_table") or getattr(self, "_foreground_calculation", False):
             return
         self.queue_controller.tick()
         active_id = self.queue_controller.active_id

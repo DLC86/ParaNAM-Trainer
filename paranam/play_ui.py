@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from .playback import NativeModel, PlayWorker, validate_route
 from .workspace import read_json
+from .busy_overlay import run_calculation
 from .ir import BUNDLED, prepare_ir, IRProcessor
 from .preview import preview_files
 from .ui_widgets import navigation_icon
@@ -800,34 +801,14 @@ class PlayActions:
         paths = self.settings.value("play_models", []) or []
         if isinstance(paths, str):
             paths = [paths]
-        if self.workspace:
-            paths += [
-                str(p)
-                for p in (self.workspace.directory / "models").rglob("*")
-                if p.suffix.lower() in (".nam", ".pnam")
-            ]
-        names = {}
-        for entry in self.queue_controller.store.entries():
-            progress = read_json(Path(entry["job"]) / "progress.json", {})
-            paths += progress.get("exports", [])
-            if progress.get("export"):
-                paths.append(progress["export"])
-            for exported in [*progress.get("exports", []), progress.get("export")]:
-                if exported:
-                    names[str(Path(exported).resolve())] = (
-                        f"{entry['name']} · {time.strftime('%d/%m %H:%M', time.localtime(entry['created_at']))} · {Path(exported).stem}"
-                    )
         hidden = self.settings.value("play_hidden_models", []) or []
         if isinstance(hidden, str):
             hidden = [hidden]
-        hidden = {str(Path(p).resolve()) for p in hidden}
-        paths = sorted(
-            {str(Path(p).resolve()) for p in paths if Path(p).is_file()} - hidden
+        directory = self.workspace.directory if self.workspace else None
+        store = self.queue_controller.store
+        choices = run_calculation(
+            self, lambda: self._discover_play_models(directory, paths, hidden, store)
         )
-        choices = [
-            (names.get(path, f"{Path(path).parent.name} / {Path(path).name}"), path)
-            for path in paths
-        ]
         current_choices = [
             (self.play_model.itemText(index), self.play_model.itemData(index))
             for index in range(self.play_model.count())
@@ -841,8 +822,14 @@ class PlayActions:
                 self.play_model.setItemData(
                     self.play_model.count() - 1, path, Qt.ItemDataRole.ToolTipRole
                 )
-            self.play_model.setCurrentIndex(max(0, self.play_model.findData(previous)))
             self.play_model.blockSignals(False)
+        index = max(0, self.play_model.findData(previous))
+        if self.play_model.currentIndex() != index:
+            blocked = self.play_model.blockSignals(True)
+            try:
+                self.play_model.setCurrentIndex(index)
+            finally:
+                self.play_model.blockSignals(blocked)
         self._play_model_options_loaded = True
         if self.play_model.currentData() is None:
             self._play_ready = False
@@ -876,6 +863,31 @@ class PlayActions:
             )
             self.play_buffer.setCurrentIndex(max(0, self.play_buffer.findData(wanted)))
             self.play_buffer.blockSignals(False)
+
+    @staticmethod
+    def _discover_play_models(directory, recent, hidden, store):
+        paths = list(recent)
+        if directory is not None:
+            paths.extend(
+                str(path)
+                for path in (directory / "models").rglob("*")
+                if path.suffix.lower() in (".nam", ".pnam")
+            )
+        names = {}
+        for entry in store.entries():
+            progress = read_json(Path(entry["job"]) / "progress.json", {})
+            for exported in [*progress.get("exports", []), progress.get("export")]:
+                if exported:
+                    paths.append(exported)
+                    path = Path(exported)
+                    date = time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"]))
+                    names[str(path.resolve())] = f"{entry['name']} · {date} · {path.stem}"
+        excluded = {str(Path(path).resolve()) for path in hidden}
+        found = {str(Path(path).resolve()) for path in paths if Path(path).is_file()}
+        return [
+            (names.get(path, f"{Path(path).parent.name} / {Path(path).name}"), path)
+            for path in sorted(found - excluded)
+        ]
 
     def _refresh_play_calibration(self):
         value = self.instrument_reference()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import copy, deepcopy
 from html import escape
 import math
 import re
@@ -70,6 +71,7 @@ from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
+from .busy_overlay import run_calculation
 from .widgets import (
     THEME,
     ControlScene,
@@ -1904,7 +1906,11 @@ class WizardWindow(
     def _reconnect_device(self):
         from PySide6.QtWidgets import QApplication
 
-        if self.busy() or QApplication.activeModalWidget():
+        if (
+            self.busy()
+            or getattr(self, "_foreground_calculation", False)
+            or QApplication.activeModalWidget()
+        ):
             return
         # Refresh only after a hardware notification or an explicit click.
         # Reinitializing PortAudio on a timer repeatedly unloads ASIO drivers.
@@ -2565,27 +2571,26 @@ class WizardWindow(
             ]
             if not controls:
                 return
-            capacity, _, combinations = capture_grid_limits(controls)
-            switches_only = all(isinstance(c, SwitchSpec) for c in controls)
-            if switches_only:
-                # Separate validation AUDIO repeats every categorical state.
-                maximum = capacity * combinations
-                train = validation = maximum
-                train_min = maximum
-                train_max = maximum
-                validation_max = maximum
-            else:
-                train_min = combinations
-                train = min(
-                    max(train_min, self.n_train.value()), capacity * combinations
-                )
+            requested_train = self.n_train.value()
+            requested_validation = self.n_validation.value()
+
+            def limits():
+                capacity, _, combinations = capture_grid_limits(controls)
+                if all(isinstance(c, SwitchSpec) for c in controls):
+                    # Separate validation audio repeats every categorical state.
+                    maximum = capacity * combinations
+                    return maximum, maximum, maximum, maximum, maximum, True
+                train = min(max(combinations, requested_train), capacity * combinations)
                 _, validation_max = capture_count_maxima(controls, train, 0)
-                validation = min(self.n_validation.value(), validation_max)
+                validation = min(requested_validation, validation_max)
                 if 0 < validation < combinations:
                     validation = 0
-                train_max, validation_max = capture_count_maxima(
-                    controls, train, validation
-                )
+                train_max, validation_max = capture_count_maxima(controls, train, validation)
+                return combinations, train_max, validation_max, train, validation, False
+
+            train_min, train_max, validation_max, train, validation, switches_only = (
+                run_calculation(self, limits)
+            )
         except ValueError:
             return
 
@@ -2623,10 +2628,12 @@ class WizardWindow(
         if not controls:
             self.recommendation.setText("Add at least one control to build a plan.")
             return
-        train, val, combinations = capture_recommendations(controls)
+        def recommendations():
+            return capture_recommendations(controls), corner_capture_count(controls)
+
+        (train, val, combinations), count = run_calculation(self, recommendations)
         if all(isinstance(c, SwitchSpec) for c in controls) and val == 0:
             val = train
-        count = corner_capture_count(controls)
         note = (
             " The capture grid has no free non-corner/default settings for "
             "held-out validation; use a finer knob step to enable it."
@@ -2827,7 +2834,14 @@ class WizardWindow(
                         self.workspace.save()
                         return False
                 self.close_audio()
-                self.workspace.generate_plan()
+                workspace = self.workspace
+                pending = copy(workspace)
+                pending.preferences = deepcopy(workspace.preferences)
+                pending.draft_controls = deepcopy(workspace.draft_controls)
+                run_calculation(self, pending.generate_plan)
+                workspace.project = pending.project
+                workspace.preferences = pending.preferences
+                workspace.draft_controls = pending.draft_controls
                 self.remember_capture_calibration()
             self.refresh_captures()
             return True
@@ -2981,7 +2995,11 @@ class WizardWindow(
             ]
             headers = ["Name", "Status", "Latency", "Peak (dBFS)", "Warnings"]
         else:
-            entries = order_captures(project.entries, project.control_specs())
+            planned_entries = tuple(project.entries)
+            controls = project.control_specs()
+            entries = run_calculation(
+                self, lambda: order_captures(planned_entries, controls)
+            )
             headers = [
                 "Type",
                 "Control settings",
