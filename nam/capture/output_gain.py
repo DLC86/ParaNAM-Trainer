@@ -7,9 +7,8 @@ import math
 import numpy as np
 
 from .params import SwitchSpec
-from .plan_rules import allows
 from .project import CaptureEntryModel
-from .planner import _planned_from_params, _quantize_to_capture_grid
+from .planner import _planned_from_params, _capture_grid_values
 
 MAX_POINTS = 65
 
@@ -21,18 +20,28 @@ def volume_control(project):
 
 
 def _context(project):
-    result = {}
-    for c in project.control_specs():
-        if isinstance(c, SwitchSpec):
-            result[c.name] = c.enum_names[-1]
-        else:
-            result[c.name] = round(float(
-                _quantize_to_capture_grid(
-                    np.array([c.max]), (c.to_param_spec(),), default_step=c.step
-                )[0]
-            ), 6)
-    return result
+    """Set every other knob to 10, ignoring capture avoids and plan rules.
 
+    If 10 is outside a knob's range or cannot be dialled on its capture grid,
+    use its nearest physically reachable value. Categorical switches retain
+    their highest position, as they have no numeric position 10.
+    """
+    result = {}
+    for control in project.control_specs():
+        if isinstance(control, SwitchSpec):
+            result[control.name] = control.enum_names[-1]
+        elif getattr(control, "clean_volume", False):
+            # Only the volume is swept; its maximum is the reference.
+            result[control.name] = control.max
+        else:
+            spec = replace(
+                control.to_param_spec(),
+                avoid_zero=False, avoid_max=False,
+                avoid_below=None, avoid_above=None,
+            )
+            values = _capture_grid_values(spec, control.step)
+            result[control.name] = min(values, key=lambda value: (abs(value - 10), -value))
+    return result
 
 def _append(project, positions, context, phase):
     volume = volume_control(project)
@@ -78,58 +87,25 @@ def _append(project, positions, context, phase):
 
 
 def initialize_calibration(project):
-    """Choose one allowed rig setting and measure its volume sweep."""
-    from .planner import _capture_grid_values
-
+    """Sweep clean volume with other controls at 10; bypass all plan restrictions."""
     control = volume_control(project)
     if control is None:
         return
-    grid = _capture_grid_values(
-        replace(control.to_param_spec(), avoid_zero=False, avoid_max=False),
-        control.step,
+    # Unlike neural train/validation captures, output-volume calibration
+    # deliberately includes the full volume sweep, even avoided endpoints.
+    spec = replace(
+        control.to_param_spec(),
+        avoid_zero=False, avoid_max=False,
+        avoid_below=None, avoid_above=None,
     )
-    # Keep the training reference at volume maximum. Measure the rest of
-    # the curve with the same tone/switch settings so levels are comparable.
-    grid = sorted({v for v in grid if round(control.min, 6) < v < round(control.max, 6)}
-                  | {control.min, control.max})
-    high = _context(project)
-    blocked_rules = [
-        rule for rule in project.plan_rules
-        if any(rule.excludes({**high, control.name: v}) for v in grid)
-    ]
-    affected = tuple(dict.fromkeys(
-        name for rule in blocked_rules for name in rule.controls if name != control.name
-    ))
-    contexts = [high]
-    if affected:
-        contexts.extend(
-            {**high, **{name: entry.params[name] for name in affected}}
-            for entry in project.entries if entry.split == "train"
-        )
-    context = None
-    positions = []
-    seen = set()
-    for candidate in contexts:
-        key = tuple(candidate[c.name] for c in project.control_specs() if c.name != control.name)
-        if key in seen:
-            continue
-        seen.add(key)
-        allowed = [v for v in grid if allows(project.plan_rules, {**candidate, control.name: v})]
-        if control.max not in allowed or len(allowed) <= len(positions):
-            continue
-        # Restore each control whose maximum still allows the whole sweep.
-        for name in affected:
-            restored = {**candidate, name: high[name]}
-            if all(allows(project.plan_rules, {**restored, control.name: v}) for v in allowed):
-                candidate = restored
-        context, positions = candidate, allowed
-        if len(positions) == len(grid):
-            break
-    if len(positions) < 2:
-        raise ValueError(
-            "Linear Volume needs an allowed maximum and at least one lower position "
-            "with the same rig settings. Adjust the plan rules."
-        )
+    grid = _capture_grid_values(spec, control.step)
+    positions = sorted(
+        {v for v in grid if round(control.min, 6) < v < round(control.max, 6)}
+        | {control.min, control.max}
+    )
+    context = _context(project)
+    # No plan rules apply to calibration, including rules on the volume knob
+    # or on other controls parked at 10.
     project.entries = [
         entry for entry in project.entries
         if entry.split != "gain"

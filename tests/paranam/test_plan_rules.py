@@ -8,7 +8,7 @@ from nam.capture.project import add_corner_captures, new_project
 from paranam.workspace import Workspace, migrate_knob_limits
 
 
-def test_plan_rules_filter_both_splits_corners_and_volume_calibration():
+def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
     knobs = [
         KnobSpec("Bass", 0, 3, 1, 1, avoid_above=2),
         KnobSpec("Treble", 0, 3, 1, 1),
@@ -24,20 +24,21 @@ def test_plan_rules_filter_both_splits_corners_and_volume_calibration():
     initialize_calibration(project)
     gain = [e for e in project.entries if e.split == "gain"]
     assert len(gain) == 3
-    assert all(e.params["Bass"] <= 2 and not rule.excludes(e.params) for e in gain)
-    assert len({(e.params["Bass"], e.params["Treble"]) for e in gain}) == 1
+    # These captures intentionally bypass both the threshold and the rule.
+    assert all(e.params["Bass"] == 3 and e.params["Treble"] == 3 for e in gain)
     assert gain[0].params["Volume"] == 2
+    assert any(rule.excludes(e.params) for e in gain)
 
     project.plan_rules.append(PlanRule(controls=("Volume",), operator="<", value=1))
     initialize_calibration(project)
-    assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {1, 2}
+    assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {0, 1, 2}
 
     project.plan_rules.append(PlanRule(controls=("Volume",), operator="=", value=1))
-    with pytest.raises(ValueError, match="at least one lower position"):
-        initialize_calibration(project)
+    initialize_calibration(project)
+    assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {0, 1, 2}
 
 
-def test_volume_calibration_keeps_unrelated_controls_at_their_maximum():
+def test_volume_calibration_sets_other_knobs_to_10_even_when_avoided():
     knobs = [
         KnobSpec("Gain", 0, 10, 1, 5),
         KnobSpec("Bass", 0, 10, 1, 5),
@@ -50,9 +51,11 @@ def test_volume_calibration_keeps_unrelated_controls_at_their_maximum():
     gain = project.entries_for_split("gain")
     assert len(gain) == 11
     assert all(
-        e.params["Bass"] == 10 and e.params["Treble"] == 8
-        and not rule.excludes(e.params) for e in gain
+        e.params["Gain"] == 10 and e.params["Bass"] == 10
+        and e.params["Treble"] == 10 for e in gain
     )
+    assert any(rule.excludes(e.params) for e in gain)
+    assert {e.params["Volume"] for e in gain} == set(range(11))
 
 
 def test_switch_rule_excludes_position_by_label():
@@ -100,3 +103,22 @@ def test_replan_keeps_matching_recordings_and_can_reuse_an_unused_take(workspace
         validation.y_path, "captured", validation.delay,
     )
     assert len(reopened.project.captured_entries()) == len(baseline)
+
+
+
+def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_end():
+    controls = [
+        KnobSpec("Gain", 0, 8, 1, 5, avoid_above=6),
+        KnobSpec("Bias", -2, 2, 1, 0, avoid_above=1),
+        SwitchSpec("Channel", ("A", "B", "C"), 0),
+        KnobSpec("Volume", 0, 2, 1, 1, clean_volume=True),
+    ]
+    project = new_project(controls, n_train=2, n_validation=0)
+    initialize_calibration(project)
+    entries = project.entries_for_split("gain")
+    assert len(entries) == 3
+    assert all(
+        e.params["Gain"] == 8 and e.params["Bias"] == 2
+        and e.params["Channel"] == "C"
+        for e in entries
+    )

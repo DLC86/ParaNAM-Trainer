@@ -456,7 +456,7 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     mute_targets = [
         {"name": knob.name, "edge": edge}
         for knob in project.knob_specs()
-        if not knob.clean_volume
+        if not getattr(knob, "clean_volume", False)
         for flag, edge in ((knob.mute_at_min, "min"), (knob.mute_at_max, "max"))
         if flag
     ]

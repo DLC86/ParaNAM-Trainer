@@ -39,6 +39,14 @@ jobs:
           jq -e --arg sha "$GITHUB_SHA" '.draft == true and .target_commitish == $sha' release.json
           release_id="$(jq -r '.id' release.json)"
           echo "Draft ID: $release_id"
+          # A previous 0.7.7 build may still be running from an older source
+          # revision. Cancel it before dispatch so stale binaries cannot race
+          # the corrected draft. The upload step also verifies the source SHA.
+          while IFS= read -r previous_run; do
+            [[ -n "$previous_run" ]] || continue
+            gh api --method POST "repos/$GH_REPO/actions/runs/$previous_run/cancel" || true
+          done < <(gh api "repos/$GH_REPO/actions/workflows/paranam-installers.yml/runs?per_page=50" \
+            --jq ".workflow_runs[] | select(.head_sha != \"$GITHUB_SHA\" and (.status == \"queued\" or .status == \"in_progress\")) | .id")
           gh workflow run paranam-installers.yml --ref main \
             -f target=all -f keep_draft=true -f release_id="$release_id"
           echo "Native installers dispatched for draft v0.7.7"
