@@ -122,3 +122,20 @@ def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_en
         and e.params["Channel"] == "C"
         for e in entries
     )
+
+
+
+def test_mute_anchor_targets_ignore_switches_and_keep_both_endpoints():
+    from nam.capture.export import build_hyper_a2_model_config
+
+    project = new_project([
+        KnobSpec("Drive", 0, 10, mute_at_min=True, mute_at_max=True),
+        SwitchSpec("Mode", ("A", "B")),
+    ], n_train=8, n_validation=1)
+    model = build_hyper_a2_model_config(project)
+    assert model["loss"]["mute_anchor"]["targets"] == [
+        {"name": "Drive", "edge": "min"},
+        {"name": "Drive", "edge": "max"},
+    ]
+    assert "mute_at_min" not in model["net"]["config"]["params"][0]
+    assert "mute_at_max" not in model["net"]["config"]["params"][0]

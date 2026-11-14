@@ -457,7 +457,8 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
         {"name": knob.name, "edge": edge}
         for knob in project.knob_specs()
         if not getattr(knob, "clean_volume", False)
-        for flag, edge in ((knob.mute_at_min, "min"), (knob.mute_at_max, "max"))
+        for flag, edge in ((getattr(knob, "mute_at_min", False), "min"),
+                           (getattr(knob, "mute_at_max", False), "max"))
         if flag
     ]
     loss = {"val_loss": "esr", "mrstft_weight": 0.0005}

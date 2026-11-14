@@ -47,6 +47,23 @@ jobs:
             gh api --method POST "repos/$GH_REPO/actions/runs/$previous_run/cancel" || true
           done < <(gh api "repos/$GH_REPO/actions/workflows/paranam-installers.yml/runs?per_page=50" \
             --jq ".workflow_runs[] | select(.head_sha != \"$GITHUB_SHA\" and (.status == \"queued\" or .status == \"in_progress\")) | .id")
+          # Only build installers after the repository test workflow for this exact
+          # source revision passes. Prevents expensive native builds on broken code.
+          tests_conclusion=""
+          for attempt in $(seq 1 120); do
+            tests_conclusion="$(gh api "repos/$GH_REPO/actions/runs?head_sha=$GITHUB_SHA&per_page=40" \
+              --jq '.workflow_runs[] | select(.name == "ParaNAM tests") | .conclusion' | head -n 1)"
+            if [[ "$tests_conclusion" == "success" ]]; then break; fi
+            if [[ -n "$tests_conclusion" && "$tests_conclusion" != "null" ]]; then
+              echo "::error::Tests for $GITHUB_SHA ended with $tests_conclusion"
+              exit 1
+            fi
+            sleep 10
+          done
+          test "$tests_conclusion" = "success" || {
+            echo "::error::Timed out waiting for tests on $GITHUB_SHA"
+            exit 1
+          }
           gh workflow run paranam-installers.yml --ref main \
             -f target=all -f keep_draft=true -f release_id="$release_id"
           echo "Native installers dispatched for draft v0.7.7"
