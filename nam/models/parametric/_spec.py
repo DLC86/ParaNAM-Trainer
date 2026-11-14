@@ -68,6 +68,9 @@ class ParamSpec:
     # neural index. Internal enum_names stay ordered by neural value.
     option_indices: _Optional[tuple[int, ...]] = None
 
+    avoid_below: _Optional[float] = None
+    avoid_above: _Optional[float] = None
+
     def __post_init__(self):
         if not self.name:
             raise ValueError("ParamSpec name must be non-empty")

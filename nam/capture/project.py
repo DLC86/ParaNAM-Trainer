@@ -34,6 +34,7 @@ from .params import DEFAULT_KNOB_STEP
 from .params import ControlSpec
 from .params import KnobSpec
 from .params import SwitchSpec
+from .plan_rules import PlanRule
 from .planner import CAPTURES_DIRNAME
 from .planner import plan_captures as _plan_captures
 from .planner import plan_corner_captures as _plan_corner_captures
@@ -198,6 +199,8 @@ class KnobModel(_BaseModel):
     avoid_max: bool = False
     sampling_bias: str = "linear"
     clean_volume: bool = False
+    avoid_below: _Optional[float] = None
+    avoid_above: _Optional[float] = None
 
     def to_knob_spec(self) -> KnobSpec:
         return KnobSpec(
@@ -209,6 +212,8 @@ class KnobModel(_BaseModel):
             avoid_zero=self.avoid_zero,
             is_gain=self.is_gain,
             avoid_max=self.avoid_max,
+            avoid_below=self.avoid_below,
+            avoid_above=self.avoid_above,
             sampling_bias=self.sampling_bias,
             clean_volume=self.clean_volume,
         )
@@ -376,6 +381,7 @@ class CaptureEntryModel(_BaseModel):
     status: Literal["pending", "captured"] = "pending"
     delay: _Optional[int] = None
     captured_at: _Optional[str] = None
+    is_corner: _Optional[bool] = None
     qa: _Optional[QAModel] = None
     # ``AudioSettingsModel.stream_fingerprint()`` at the time this was captured. Buffer
     # size and stream latency are the user's to change mid-project -- a session that
@@ -398,6 +404,7 @@ class CaptureProject(_BaseModel):
     user_metadata: dict[str, _Any] = _Field(default_factory=dict)
     knobs: list[KnobModel | SwitchModel]
     seed: int = 0
+    plan_rules: list[PlanRule] = _Field(default_factory=list)
     train_input: str = "input_train.wav"
     validation_input: str = "input_validation.wav"
     sample_rate: _Optional[int] = None
@@ -409,6 +416,7 @@ class CaptureProject(_BaseModel):
     )
     audio: AudioSettingsModel = _Field(default_factory=AudioSettingsModel)
     entries: list[CaptureEntryModel] = _Field(default_factory=list)
+    unused_recordings: dict[str, dict[str, _Any]] = _Field(default_factory=dict)
     # The number of LHS training points requested at plan-generation time. Recorded
     # explicitly rather than derived from ``entries_for_split("train")`` because that
     # count grows when corner captures are added, which would otherwise make the
@@ -493,6 +501,7 @@ def new_project(
     name: str = "",
     train_input: str = "input_train.wav",
     validation_input: str = "input_validation.wav",
+    plan_rules: _Sequence[PlanRule] = (),
 ) -> CaptureProject:
     """
     Plan every capture up front and return a project ready to save. Nothing is
@@ -502,6 +511,7 @@ def new_project(
         knobs, n_train=n_train, n_validation=n_validation, seed=seed,
         lhs_method=lhs_method,
         validation_method=validation_method,
+        rules=plan_rules,
     )
     entries = [
         CaptureEntryModel(
@@ -515,6 +525,7 @@ def new_project(
     return CaptureProject(
         name=name,
         knobs=[KnobModel.from_knob_spec(knob) for knob in knobs],
+        plan_rules=list(plan_rules),
         seed=seed,
         train_input=train_input,
         validation_input=validation_input,
@@ -530,6 +541,8 @@ CORNER_Y_PATH_PREFIX = "corner_"
 
 
 def _is_corner_entry(entry: CaptureEntryModel) -> bool:
+    if entry.is_corner is not None:
+        return entry.is_corner
     return _Path(entry.y_path).name.startswith(CORNER_Y_PATH_PREFIX)
 
 
@@ -562,6 +575,7 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
         exclude=existing_keys,
         index_offset=next_index,
         filename_start=corner_count,
+        rules=project.plan_rules,
     )
     added = [
         CaptureEntryModel(
@@ -569,6 +583,7 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
             split=capture.split,
             params=capture.params,
             y_path=capture.y_path,
+            is_corner=True,
         )
         for capture in planned
     ]
@@ -635,6 +650,7 @@ def reconcile_with_disk(project: CaptureProject, project_dir: _Path) -> list[str
                 "capturing this setting will overwrite it."
             )
     known = {str(_Path(entry.y_path)) for entry in project.entries}
+    known.update(str(_Path(path)) for path in project.unused_recordings)
     captures_dir = project_dir / CAPTURES_DIRNAME
     if captures_dir.is_dir():
         for wav_path in sorted(captures_dir.glob("*.wav")):
@@ -801,5 +817,5 @@ def mark_captured(
     entry.delay = delay
     entry.qa = qa
     entry.stream_config = stream_config
-    entry.captured_at = _datetime.now(_timezone.utc).isoformat(timespec="seconds")
+    entry.captured_at = _datetime.now(_timezone.utc).isoformat(timespec="microseconds")
 

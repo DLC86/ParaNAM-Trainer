@@ -256,10 +256,15 @@ class ControlScene(QWidget):
         self.update()
 
     def start_blink(self, names):
-        self.blink_names = set(names)
+        names = set(names)
+        if names == self.blink_names:
+            return
+        self.blink_names = names
         self.blink_started = time.monotonic()
         if self.blink_names:
             self.blink_timer.start()
+        else:
+            self.blink_timer.stop()
         self.update()
 
     def stop_blink(self):

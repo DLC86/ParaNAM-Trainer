@@ -59,6 +59,8 @@ class KnobSpec:
     avoid_max: bool = False
     sampling_bias: str = "linear"
     clean_volume: bool = False
+    avoid_below: _Optional[float] = None
+    avoid_above: _Optional[float] = None
 
     def __post_init__(self):
         if not str(self.name).strip():
@@ -106,11 +108,21 @@ class KnobSpec:
             object.__setattr__(self, "default", default)
         object.__setattr__(self, "avoid_zero", bool(self.avoid_zero))
         object.__setattr__(self, "is_gain", bool(self.is_gain))
+        for field in ("avoid_below", "avoid_above"):
+            limit = getattr(self, field)
+            if limit is not None:
+                limit = float(limit)
+                if not _math.isfinite(limit):
+                    raise ValueError(f"{field} must be finite")
+                object.__setattr__(self, field, limit)
+        if self.avoid_below is not None and self.avoid_above is not None:
+            if self.avoid_below > self.avoid_above:
+                raise ValueError("Avoid < must be at or below Avoid >")
         if self.sampling_bias not in ("linear", "lower", "upper"):
             raise ValueError("Choose uniform, lower-half or upper-half sampling")
-        if self.clean_volume and (self.avoid_max or self.is_gain):
+        if self.clean_volume and (self.avoid_max or self.is_gain or self.avoid_above is not None or self.avoid_below is not None):
             raise ValueError(
-                "Clean output volume requires its maximum reference and cannot be Gain/Drive or Avoid max"
+                "Linear volume cannot use Gain / Drive or capture thresholds"
             )
         if self.avoid_max and self.avoid_zero and not (
             (_math.floor(self.min / self.step + 1e-10) + 1) * self.step
@@ -128,6 +140,8 @@ class KnobSpec:
             step=self.step,
             avoid_zero=self.avoid_zero,
             avoid_max=self.avoid_max,
+            avoid_below=self.avoid_below,
+            avoid_above=self.avoid_above,
             sampling_bias=self.sampling_bias,
             clean_volume=self.clean_volume,
         )
@@ -142,6 +156,8 @@ class KnobSpec:
             "avoid_zero": self.avoid_zero,
             "is_gain": self.is_gain,
             **({"avoid_max": True} if self.avoid_max else {}),
+            **({"avoid_below": self.avoid_below} if self.avoid_below is not None else {}),
+            **({"avoid_above": self.avoid_above} if self.avoid_above is not None else {}),
             **(
                 {"sampling_bias": self.sampling_bias}
                 if self.sampling_bias != "linear"
@@ -167,6 +183,8 @@ class KnobSpec:
             avoid_zero=config.get("avoid_zero", False),
             is_gain=config.get("is_gain", False),
             avoid_max=config.get("avoid_max", False),
+            avoid_below=config.get("avoid_below"),
+            avoid_above=config.get("avoid_above"),
             sampling_bias=config.get("sampling_bias", "linear"),
             clean_volume=config.get("clean_volume", False),
         )

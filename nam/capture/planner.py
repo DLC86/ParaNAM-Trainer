@@ -34,6 +34,7 @@ from .params import DEFAULT_KNOB_STEP as _DEFAULT_KNOB_STEP
 from .params import gain_knob_indices as _gain_knob_index
 from .params import ControlSpec as _ControlSpec
 from .params import validate_knobs as _validate_knobs
+from .plan_rules import allowed_grid_size, allows, bound_rules, validate_plan_rules
 
 # Large, fixed offset so the validation draws are a different LHS stream than the train
 # draws (held-out settings), while staying reproducible from the same seed.
@@ -97,11 +98,22 @@ def _capture_grid_values(spec: _ParamSpec, default_step: float) -> list[float]:
         values.discard(round(spec.min, 6))
     if getattr(spec, "avoid_max", False):
         values.discard(round(spec.max, 6))
-    return sorted(values)
+    return sorted(
+        value for value in values
+        if (spec.avoid_below is None or value >= spec.avoid_below)
+        and (spec.avoid_above is None or value <= spec.avoid_above)
+    )
 
 
-def _grid_capacity(specs: _Sequence[_ParamSpec], default_step: float) -> int:
+def _grid_capacity(specs: _Sequence[_ParamSpec], default_step: float, rules=()) -> int:
     """Total number of distinct on-grid settings (switch combinations x continuous grid)."""
+    if rules:
+        axes = (
+            (spec.name, spec.enum_names if spec.type == "switch"
+             else _capture_grid_values(spec, default_step))
+            for spec in specs
+        )
+        return allowed_grid_size(axes, rules)
     capacity = 1
     for spec in specs:
         if spec.type == "switch":
@@ -197,6 +209,7 @@ def sample_unique_settings(
     lhs_method: str = "standard",
     exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
+    rules=(),
 ) -> list[dict[str, _Any]]:
     """
     Draw ``n`` distinct on-grid settings as decoded params dicts, none of them in
@@ -229,7 +242,7 @@ def sample_unique_settings(
             quantized = _quantize_to_capture_grid(raw, specs, default_step=default_step)
             params = _decode_named_params(quantized, specs)
             key = _settings_key(params, specs)
-            if key in seen:
+            if key in seen or not allows(rules, params):
                 continue
             seen.add(key)
             ordered.append(params)
@@ -297,7 +310,7 @@ def sample_unique_settings(
         specs, default_step, seed=int(rng.integers(0, 2**32))
     ):
         key = _settings_key(params, specs)
-        if key in seen:
+        if key in seen or not allows(rules, params):
             continue
         seen.add(key)
         ordered.append(params)
@@ -320,6 +333,7 @@ def _farthest_validation(
     *,
     seed: int,
     default_step: float,
+    rules=(),
 ) -> list[dict[str, _Any]]:
     """Greedy maximin holdout against train *and* the training corner settings.
 
@@ -340,7 +354,7 @@ def _farthest_validation(
         )
         for key in excluded
     )
-    available = _grid_capacity(specs, default_step) - grid_exclusions
+    available = _grid_capacity(specs, default_step, rules) - grid_exclusions
     if available < n_validation:
         raise ValueError("Not enough non-training, non-corner settings for validation")
     pool_size = min(available, max(n_validation, min(4096, max(256, 20 * n_validation))))
@@ -348,7 +362,7 @@ def _farthest_validation(
     # strength-2 orthogonal design, the pool need not have that special size.
     candidates = sample_unique_settings(
         specs, pool_size, seed=seed, default_step=default_step,
-        lhs_method="standard", exclude=excluded,
+        lhs_method="standard", exclude=excluded, rules=rules,
     )
 
     def vector(points):
@@ -441,6 +455,7 @@ def plan_unique_splits(
     validation_method: str = "independent",
     validation_exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
+    rules=(),
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
     """
     Draw ``n_train`` + ``n_validation`` distinct on-grid settings, with the validation
@@ -478,7 +493,7 @@ def plan_unique_splits(
     # from train. That is only possible if the knob grid has at least that many distinct
     # settings; fail loudly up front rather than after sampling work.
     required = n_train + n_validation
-    capacity = _grid_capacity(specs, default_step)
+    capacity = _grid_capacity(specs, default_step, rules)
     if anchor is not None and not settings_on_capture_grid(anchor, specs, default_step):
         # Explicit defaults may fall between the ordinary capture-grid positions.
         capacity += 1
@@ -502,7 +517,7 @@ def plan_unique_splits(
         # validation must be picked *after* seeing the train locations.
         train = sample_unique_settings(
             specs, n_train, seed=seed, default_step=default_step,
-            lhs_method=lhs_method, anchor=anchor,
+            lhs_method=lhs_method, anchor=anchor, rules=rules,
         )
         train_keys = {_settings_key(point, specs) for point in train}
         if capacity - len(reserved | train_keys) < n_validation:
@@ -512,15 +527,15 @@ def plan_unique_splits(
                 specs, n_train=n_train, n_validation=n_validation, seed=seed,
                 default_step=default_step, lhs_method=lhs_method,
                 validation_method="independent",
-                validation_exclude=validation_exclude, anchor=anchor,
+                validation_exclude=validation_exclude, anchor=anchor, rules=rules,
             )
         return train, _farthest_validation(
             specs, train, reserved, n_validation, seed=validation_seed,
-            default_step=default_step,
+            default_step=default_step, rules=rules,
         )
     if not reserved:
         train = sample_unique_settings(
-            specs, n_train, seed=seed, default_step=default_step, lhs_method=lhs_method
+            specs, n_train, seed=seed, default_step=default_step, lhs_method=lhs_method, rules=rules
         )
         validation = sample_unique_settings(
             specs,
@@ -529,6 +544,7 @@ def plan_unique_splits(
             default_step=default_step,
             lhs_method=lhs_method,
             exclude={_settings_key(params, specs) for params in train},
+            rules=rules,
         )
         return train, validation
 
@@ -542,6 +558,7 @@ def plan_unique_splits(
         default_step=default_step,
         lhs_method=lhs_method,
         exclude=reserved,
+        rules=rules,
     )
     train = sample_unique_settings(
         specs,
@@ -551,6 +568,7 @@ def plan_unique_splits(
         lhs_method=lhs_method,
         exclude={_settings_key(params, specs) for params in validation},
         anchor=anchor,
+        rules=rules,
     )
     return train, validation
 
@@ -819,6 +837,7 @@ def plan_captures(
     seed: int = 0,
     lhs_method: str = "standard",
     validation_method: str = "independent",
+    rules=(),
 ) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
     """
     Generate the full capture plan: ``n_train`` Latin-Hypercube training settings and
@@ -838,6 +857,9 @@ def plan_captures(
     there.
     """
     knobs = _validate_knobs(knobs)
+    if rules:
+        return _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method,
+                                validation_method, rules)
     if n_train <= 0:
         raise ValueError(f"n_train must be positive; got {n_train}")
     if n_validation < 0:
@@ -861,6 +883,11 @@ def plan_captures(
         return _planned_from_params(
             "lhs", "train", specs, merged(t)
         ), _planned_from_params("val_lhs", "validation", specs, merged(v))
+
+    for spec in specs:
+        if ((spec.avoid_below is not None and round(spec.default, 6) < spec.avoid_below)
+            or (spec.avoid_above is not None and round(spec.default, 6) > spec.avoid_above)):
+            raise ValueError(f"Default for {spec.name} is excluded by its capture thresholds")
 
     if any(
         spec.type != "switch" and spec.avoid_zero and spec.default == spec.min
@@ -1134,13 +1161,14 @@ def corner_settings(
 
 
 def corner_capture_count(
-    knobs: _Sequence[_ControlSpec], *, default_step: float = _DEFAULT_KNOB_STEP
+    knobs: _Sequence[_ControlSpec], *, default_step: float = _DEFAULT_KNOB_STEP, rules=()
 ) -> int:
     """How many distinct corner captures ``knobs`` will produce."""
     knobs = _validate_knobs(knobs)
     specs = tuple(knob.to_param_spec() for knob in knobs)
-    return len(
-        corner_settings(
+    validate_plan_rules(specs, rules)
+    return sum(
+        allows(rules, params) for params in corner_settings(
             specs, gain_index=_gain_knob_index(knobs), default_step=default_step
         )
     )
@@ -1152,6 +1180,7 @@ def plan_corner_captures(
     exclude: _Optional[set[tuple[_Any, ...]]] = None,
     index_offset: int = 0,
     filename_start: int = 0,
+    rules=(),
 ) -> tuple[list[PlannedCapture], int]:
     """
     Plan the corner captures for ``knobs`` as pending ``train`` captures, skipping any whose
@@ -1171,12 +1200,15 @@ def plan_corner_captures(
     specs = tuple(knob.to_param_spec() for knob in knobs)
     gain_index = _gain_knob_index(knobs)
     excluded = set() if exclude is None else set(exclude)
+    validate_plan_rules(specs, rules)
 
     unique: list[dict[str, _Any]] = []
     skipped = 0
     for params in corner_settings(
         specs, gain_index=gain_index, default_step=_DEFAULT_KNOB_STEP
     ):
+        if not allows(rules, params):
+            continue
         key = _settings_key(params, specs)
         if key in excluded:
             skipped += 1
@@ -1283,4 +1315,117 @@ def _plan_simple_switches(
     return (
         _planned_from_params("lhs", "train", specs, sort_settings(train, names)),
         _planned_from_params("val_lhs", "validation", specs, sort_settings(val, names)),
+    )
+
+
+@_dataclass
+class _RuleGroup:
+    fixed: dict
+    rules: tuple
+    anchor: dict | None
+    corners: set
+    capacity: int
+    validation_capacity: int
+
+
+def _rule_groups(controls, rules):
+    specs = tuple(c.to_param_spec() for c in controls)
+    validate_plan_rules(specs, rules)
+    switches_only = all(s.type == "switch" for s in specs)
+    fixed_specs = tuple(s for s in specs if s.clean_volume or (
+        s.type == "switch" and (switches_only or not s.simple_switch)
+    ))
+    active = tuple(s for s in specs if s not in fixed_specs)
+    defaults = {
+        s.name: s.enum_names[int(s.default)] if s.type == "switch" else
+        s.max if s.clean_volume else s.default for s in specs
+    }
+    if not allows(rules, defaults):
+        raise ValueError("Plan rules exclude the default setting. Change the rule or the default.")
+    for spec in active:
+        if spec.type == "switch":
+            continue
+        value = round(spec.default, 6)
+        if ((spec.avoid_zero and value == round(spec.min, 6))
+            or (spec.avoid_max and value == round(spec.max, 6))
+            or (spec.avoid_below is not None and value < spec.avoid_below)
+            or (spec.avoid_above is not None and value > spec.avoid_above)):
+            raise ValueError(f"Capture thresholds exclude the default for {spec.name}")
+    fixed_axes = [s.enum_names if s.type == "switch" else (s.max,) for s in fixed_specs]
+    allowed_corners = {}
+    for params in corner_settings(specs, gain_index=_gain_knob_index(controls)):
+        if allows(rules, params):
+            group_key = _settings_key(params, fixed_specs)
+            allowed_corners.setdefault(group_key, set()).add(_settings_key(params, active))
+    groups = []
+    for values in _itertools.product(*fixed_axes):
+        fixed = dict(zip((s.name for s in fixed_specs), values))
+        local_rules = bound_rules(rules, fixed)
+        capacity = _grid_capacity(active, _DEFAULT_KNOB_STEP, local_rules)
+        anchor = {s.name: defaults[s.name] for s in active}
+        if not allows(local_rules, anchor):
+            anchor = None
+        elif active and not settings_on_capture_grid(anchor, active):
+            capacity += 1
+        if not capacity:
+            continue
+        corners = allowed_corners.get(values, set())
+        reserved = corners | ({_settings_key(anchor, active)} if anchor is not None else set())
+        groups.append(_RuleGroup(fixed, local_rules, anchor, corners, capacity,
+                                 max(0, capacity - len(reserved))))
+    if not groups:
+        raise ValueError("Plan rules leave no valid capture settings.")
+    return specs, active, groups
+
+
+def _group_quota_limit(capacities):
+    """Largest total that fits the ordered round-robin quotas."""
+    count = len(capacities)
+    return min(value * count + i for i, value in enumerate(capacities))
+
+
+def rule_capture_limits(controls, rules, n_train=0, n_validation=0):
+    _, active, groups = _rule_groups(controls, rules)
+    count = len(groups)
+    if not active:
+        return count, count, count
+    train_max = _group_quota_limit([
+        group.capacity - (n_validation // count + (i < n_validation % count))
+        for i, group in enumerate(groups)
+    ])
+    validation_max = _group_quota_limit([
+        min(group.validation_capacity,
+            group.capacity - (n_train // count + (i < n_train % count)))
+        for i, group in enumerate(groups)
+    ])
+    return count, max(0, train_max), max(0, validation_max)
+
+
+def _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method, validation_method, rules):
+    specs, active, groups = _rule_groups(knobs, rules)
+    count = len(groups)
+    if n_train < count or n_validation < 0 or (0 < n_validation < count):
+        raise ValueError(f"Each enabled split needs at least {count} captures for the allowed switch states")
+    if not active:
+        if n_train != count or n_validation:
+            raise ValueError(f"Capture all {count} allowed states once using each signal")
+        return _planned_from_params("lhs", "train", specs, [g.fixed for g in groups]), []
+    train, validation = [], []
+    for i, group in enumerate(groups):
+        try:
+            t, v = plan_unique_splits(
+                active, n_train=n_train // count + (i < n_train % count),
+                n_validation=n_validation // count + (i < n_validation % count),
+                seed=(seed + i * 104729) % (2**32), default_step=_DEFAULT_KNOB_STEP,
+                lhs_method=lhs_method, validation_method=validation_method,
+                anchor=group.anchor, validation_exclude=group.corners, rules=group.rules,
+            )
+        except ValueError as exc:
+            context = f" for {group.fixed}" if group.fixed else ""
+            raise ValueError(f"Cannot generate a plan with these rules{context}: {exc}") from exc
+        train.extend({**point, **group.fixed} for point in sort_settings(t, [s.name for s in active]))
+        validation.extend({**point, **group.fixed} for point in sort_settings(v, [s.name for s in active]))
+    return (
+        _planned_from_params("lhs", "train", specs, train),
+        _planned_from_params("val_lhs", "validation", specs, validation),
     )

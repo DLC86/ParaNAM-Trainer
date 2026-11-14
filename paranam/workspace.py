@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from nam.capture.params import KnobSpec, SwitchSpec, validate_knobs
+from nam.capture.plan_rules import PlanRule
+from nam.capture.planner import rule_capture_limits
 from nam.capture.project import (
     AudioSettingsModel,
     CaptureProject,
@@ -95,6 +95,19 @@ def control_from_dict(data):
     return KnobSpec.from_dict(data)
 
 
+def migrate_knob_limits(data):
+    if data.get("type") == "switch":
+        return data
+    data = dict(data)
+    # The capture grid is compared at six decimal places. One unit at that
+    # precision turns the former endpoint exclusion into a strict threshold.
+    if data.pop("avoid_zero", False) and data.get("avoid_below") is None:
+        data["avoid_below"] = round(round(data["min"], 6) + 0.000001, 6)
+    if data.pop("avoid_max", False) and data.get("avoid_above") is None:
+        data["avoid_above"] = round(round(data["max"], 6) - 0.000001, 6)
+    return control_from_dict(data).to_dict()
+
+
 class Workspace:
     def __init__(self, directory: Path):
         self.directory = Path(directory).resolve()
@@ -161,8 +174,15 @@ class Workspace:
             self.preferences.update(
                 input_mode="custom", custom_input=self.project.train_input
             )
-        self.draft_controls = self.preferences.get("draft_controls") or [
-            c.to_dict() for c in self.project.control_specs()
+        self.draft_controls = [
+            migrate_knob_limits(data)
+            for data in self.preferences.get(
+                "draft_controls", [c.to_dict() for c in self.project.control_specs()]
+            )
+        ]
+        self.project.knobs = [
+            KnobModel.from_knob_spec(control_from_dict(migrate_knob_limits(c.model_dump())))
+            for c in self.project.knobs
         ]
         reconcile_with_disk(self.project, self.directory)
         from nam.capture.output_gain import (
@@ -246,6 +266,23 @@ class Workspace:
             return ()
         return validate_knobs([control_from_dict(c) for c in self.draft_controls])
 
+    def plan_rules(self):
+        return [
+            PlanRule.model_validate(rule)
+            for rule in self.preferences.get("draft_plan_rules", self.project.plan_rules)
+        ]
+
+    def rename_rule_control(self, old_name, new_name):
+        def rename(rule):
+            return rule.model_copy(update={"controls": tuple(
+                new_name if name == old_name else name for name in rule.controls
+            )})
+
+        self.preferences["draft_plan_rules"] = [
+            rename(rule).model_dump(mode="json") for rule in self.plan_rules()
+        ]
+        self.project.plan_rules = [rename(rule) for rule in self.project.plan_rules]
+
     def static_groups(self):
         groups = {}
         for entry in self.project.entries:
@@ -277,6 +314,11 @@ class Workspace:
                 project.output_gain["name"] = new_name
             project.control_name_history.append({"from": old_name, "to": new_name})
         self.project, self.draft_controls = project, draft
+        self.rename_rule_control(old_name, new_name)
+        for record in self.project.unused_recordings.values():
+            params = record["entry"]["params"]
+            if old_name in params and new_name not in params:
+                params[new_name] = params.pop(old_name)
         self._sync_control_configs({old_name: new_name})
         self.save()
 
@@ -458,6 +500,7 @@ class Workspace:
             or not self.validation_matches()
             or [c.to_dict() for c in self.controls()]
             != [c.to_dict() for c in self.project.control_specs()]
+            or self.plan_rules() != self.project.plan_rules
             or self.preferences["n_train"] != self.project.n_train_lhs
             or self.preferences["n_validation"]
             != len(self.project.entries_for_split("validation"))
@@ -467,40 +510,90 @@ class Workspace:
             or self.preferences["corners"] != self.project.include_initial_corners
         )
 
-    def archive_captures(self):
-        if not self.project.entries:
+    @staticmethod
+    def _recording_context(project, split, *, validation_matches):
+        if split != "train" and not validation_matches:
             return None
-        target = (
-            self.directory
-            / "history"
-            / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-        )
-        target.mkdir(parents=True)
-        for filename in (
-            "capture_project.json",
-            "data.json",
-            "paranam.json",
-            self.project.train_input,
-            self.project.validation_input,
-        ):
-            source = self.directory / filename
-            if source.is_file():
-                dest = target / filename
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, dest)
-        for name in ("captures", "captures_raw"):
-            source = self.directory / name
-            if source.exists():
-                # Every move is bounded by the project root; original recordings survive.
-                if (
-                    self.directory not in source.resolve().parents
-                    or source.is_symlink()
-                ):
-                    raise ValueError(
-                        "Cannot archive captures outside the project folder"
-                    )
-                source.rename(target / name)
-        return target
+        return [
+            project.capture_type, project.input_for_split(split),
+            project.capture_level_dbfs, project.input_level_dbu,
+            project.output_level_dbu, project.sample_rate,
+        ]
+
+    def _reuse_plan_recordings(self, replacement):
+        previous = self.project
+        validation_matches = self.validation_matches() if previous.captured_entries() else True
+        pool = dict(previous.unused_recordings)
+        for entry in previous.captured_entries():
+            context = self._recording_context(previous, entry.split, validation_matches=validation_matches)
+            if (self.directory / entry.y_path).is_file():
+                pool[entry.y_path] = {
+                    "entry": entry.model_dump(mode="json"), "context": context,
+                }
+
+        def key(entry, context):
+            return (tuple(context), entry.split, entry.capture_id, tuple(sorted(entry.params.items())))
+
+        available = {}
+        for path, record in pool.items():
+            if record["context"] is not None and (self.directory / path).is_file():
+                entry = CaptureEntryModel.model_validate(record["entry"])
+                if entry.validation_from_tail and not validation_matches:
+                    continue
+                signature = key(entry, record["context"])
+                prior = available.get(signature)
+                if prior is None or (entry.captured_at or "") >= (prior.captured_at or ""):
+                    available[signature] = entry
+
+        from nam.capture.session import raw_paths
+
+        reserved = set(pool)
+        for entry in replacement.entries:
+            context = self._recording_context(replacement, entry.split, validation_matches=True)
+            recorded = available.pop(key(entry, context), None)
+            if recorded is not None:
+                if entry.split == "train" and entry.is_corner is None:
+                    entry.is_corner = False
+                for field in ("y_path", "status", "delay", "captured_at", "qa",
+                              "stream_config", "validation_from_tail"):
+                    setattr(entry, field, getattr(recorded, field))
+                if entry.split == "gain":
+                    entry.user_metadata = dict(recorded.user_metadata)
+                del pool[entry.y_path]
+                continue
+            path = Path(entry.y_path)
+            suffix = 1
+            while (entry.y_path in reserved
+                   or (self.directory / entry.y_path).exists()
+                   or any(raw.exists() for raw in raw_paths(self.directory, entry.y_path))):
+                entry.y_path = path.with_stem(f"{path.stem}-take{suffix}").as_posix()
+                suffix += 1
+            reserved.add(entry.y_path)
+        replacement.unused_recordings = pool
+        replacement.alignment_reference = previous.alignment_reference
+        replacement.alignment_lead_samples = previous.alignment_lead_samples
+        replacement.created_with_version = previous.created_with_version
+        replacement.control_name_history = list(previous.control_name_history)
+
+        old_gain = {e.y_path for e in previous.entries if e.split == "gain"}
+        new_gain = {e.y_path for e in replacement.entries if e.split == "gain"}
+        if (old_gain and new_gain == old_gain
+                and all(e.status == "captured" for e in replacement.entries if e.split == "gain")):
+            replacement.output_gain = previous.output_gain
+            replacement.output_gain_state = dict(previous.output_gain_state)
+            if replacement.output_gain:
+                replacement.output_gain = dict(replacement.output_gain)
+                replacement.output_gain["index"] = next(
+                    i for i, c in enumerate(replacement.knobs)
+                    if c.name == replacement.output_gain["name"]
+                )
+        elif any(e.split == "gain" and e.status == "captured" for e in replacement.entries):
+            from nam.capture.output_gain import advance_calibration
+
+            try:
+                advance_calibration(replacement, self.directory)
+            except ValueError as error:
+                replacement.output_gain_state.update(status="failed", message=str(error))
 
     def generate_plan(self):
         from .calibration import gain_from_dbfs
@@ -537,17 +630,17 @@ class Workspace:
                 replacement.entries.extend(
                     self._static_pair(capture, len(replacement.entries))
                 )
-            self.archive_captures()
-            from .signals import install_signals
-
-            install_signals(self.directory)
-            self.project = replacement
-            prefs.pop("pending_calibration", None)
-            self.save()
-            return replacement
-        switches_only = all(isinstance(c, SwitchSpec) for c in controls) and prefs[
-            "n_train"
-        ] == __import__("math").prod(len(c.enum_names) for c in controls)
+            self._reuse_plan_recordings(replacement)
+            return self._install_plan(replacement)
+        rules = self.plan_rules()
+        all_switches = all(isinstance(c, SwitchSpec) for c in controls)
+        switches_only = all_switches and (
+            bool(rules) or prefs["n_train"] == __import__("math").prod(len(c.enum_names) for c in controls)
+        )
+        if rules and switches_only:
+            states, _, _ = rule_capture_limits(controls, rules)
+            if prefs["n_train"] != states:
+                raise ValueError(f"Capture all {states} allowed switch states using each signal.")
         validation_count = prefs["n_validation"]
         if validation_count < 0 or (switches_only and validation_count < 1):
             raise ValueError(
@@ -563,6 +656,7 @@ class Workspace:
             name=self.project.name,
             train_input=self.desired_train_input(),
             validation_input="input_validation.wav",
+            plan_rules=rules,
         )
         if switches_only:
             # No unseen categorical states exist, but the fixed validation AUDIO
@@ -606,13 +700,18 @@ class Workspace:
         from nam.capture.output_gain import initialize_calibration
 
         initialize_calibration(replacement)
-        self.archive_captures()
+        self._reuse_plan_recordings(replacement)
+        return self._install_plan(replacement)
+
+    def _install_plan(self, replacement):
+        from nam.capture.export import update_data_json
         from .signals import install_signals
 
         install_signals(self.directory)
         self.project = replacement
-        prefs.pop("pending_calibration", None)
+        self.preferences.pop("pending_calibration", None)
         self.save()
+        update_data_json(replacement, self.directory)
         return replacement
 
     def validation_matches(self):

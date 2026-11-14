@@ -37,7 +37,10 @@ def _context(project, defaults=False):
             value = c.default if defaults else c.max
             result[c.name] = float(
                 _quantize_to_capture_grid(
-                    np.array([value]), (c.to_param_spec(),), default_step=c.step
+                    np.array([value]),
+                    (replace(c.to_param_spec(), avoid_zero=False, avoid_max=False,
+                             avoid_below=None, avoid_above=None),),
+                    default_step=c.step
                 )[0]
             )
     return result

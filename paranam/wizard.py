@@ -66,11 +66,12 @@ from nam.capture.params import (
     KnobSpec, SwitchSpec, capture_recommendations, validate_knobs,
     capture_grid_limits, capture_count_maxima,
 )
-from nam.capture.planner import corner_capture_count
+from nam.capture.planner import corner_capture_count, rule_capture_limits
 from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write_json
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
+from .plan_rules_ui import PlanRuleDialog, describe_rule
 from .busy_overlay import foreground_operation, run_calculation
 from .project_files import change_project
 from .widgets import (
@@ -788,9 +789,20 @@ class WizardWindow(
         self.control_bias.addItem("Upper-half density", "upper")
         self.control_gain = QCheckBox("Gain / Drive")
         self.control_clean_volume = QCheckBox("Linear volume")
-        self.control_avoid_min = QCheckBox("Avoid min")
-        self.control_avoid_max = QCheckBox("Avoid max")
-        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), ("", self.control_avoid_min), ("", self.control_avoid_max)):
+        self.control_avoid_min = QCheckBox("Avoid <")
+        self.control_avoid_max = QCheckBox("Avoid >")
+        self.control_below = QDoubleSpinBox()
+        self.control_above = QDoubleSpinBox()
+        for checkbox, threshold in (
+            (self.control_avoid_min, self.control_below),
+            (self.control_avoid_max, self.control_above),
+        ):
+            threshold.setRange(-10000, 10000)
+            threshold.setDecimals(6)
+            threshold.setAccessibleName(checkbox.text() + " threshold")
+            checkbox.toggled.connect(threshold.setEnabled)
+            threshold.editingFinished.connect(self.save_control)
+        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), (self.control_avoid_min, self.control_below), (self.control_avoid_max, self.control_above)):
             knob_form.addRow(caption, field)
         switch_page = QWidget()
         switch_layout = QVBoxLayout(switch_page)
@@ -843,6 +855,23 @@ class WizardWindow(
         editor.addWidget(self.control_error)
         self.control_error.hide()
         box.addWidget(self.control_editor)
+        rules_card, rules_box = card("Plan rules")
+        rules_box.addWidget(label("Skip settings when all selected controls meet a rule.", "muted"))
+        self.plan_rule_list = QListWidget()
+        self.plan_rule_list.setAccessibleName("Plan rules")
+        self.plan_rule_list.setMaximumHeight(120)
+        self.plan_rule_list.itemDoubleClicked.connect(lambda _: self.edit_plan_rule())
+        rules_box.addWidget(self.plan_rule_list)
+        rule_buttons = QHBoxLayout()
+        self.add_rule_button = button("Add rule", lambda: self.edit_plan_rule(add=True))
+        self.edit_rule_button = button("Edit", lambda: self.edit_plan_rule())
+        self.delete_rule_button = button("Delete", self.delete_plan_rule)
+        for item in (self.add_rule_button, self.edit_rule_button, self.delete_rule_button):
+            rule_buttons.addWidget(item)
+        rule_buttons.addStretch()
+        rules_box.addLayout(rule_buttons)
+        self.plan_rule_list.currentRowChanged.connect(self._update_plan_rule_buttons)
+        box.addWidget(rules_card)
         layout.addWidget(self.control_card)
         self.signal_card, box = card("Input signal")
         signal_form = QFormLayout()
@@ -929,7 +958,7 @@ class WizardWindow(
             "Independent LHS keeps the existing validation settings selection. "
             "Farthest from train chooses on-grid validation points as far as possible "
             "from training LHS/default and corners, balancing Simple Switch states. "
-            "Regenerating an existing plan archives its previous captures."
+            "Updating the plan keeps compatible recordings and skips unused takes."
         )
         form.addRow("Validation selection", self.validation_method)
         form.addRow("Reproducible plan seed", self.seed)
@@ -1066,9 +1095,7 @@ class WizardWindow(
         self.capture_table.itemSelectionChanged.connect(self.select_capture)
         layout.addWidget(self.capture_table, 1)
         self.rig_ready.toggled.connect(self.update_enabled)
-        self.rig_ready.toggled.connect(
-            lambda checked: self.scene.stop_blink() if checked else None
-        )
+        self.rig_ready.toggled.connect(self._update_capture_blink)
 
     def _training(self, layout):
         layout.addWidget(label("TURN CAPTURES INTO AN INSTRUMENT", "eyebrow"))
@@ -1735,6 +1762,7 @@ class WizardWindow(
         if index == 5:
             self.refresh_play_models()
         if index == 2:
+            self._update_capture_blink()
             self._sync_capture_audio_hold()
         for i, step in enumerate(self.steps):
             step.setChecked(i == index)
@@ -1821,6 +1849,9 @@ class WizardWindow(
         self.close_audio()
         self._play_model_options_loaded = False
         self.scene.stop_blink()
+        self._last_recorded_params = None
+        self._confirmed_capture = None
+        self.rig_ready.setChecked(False)
         self.initialize_global_setup(workspace)
         self.workspace = workspace
         from .recovery import RecoveryRequired
@@ -2350,6 +2381,51 @@ class WizardWindow(
             text = f"{20 * math.log10(value):.1f} dBFS" if value > 1e-6 else "−∞ dBFS"
             getattr(self, f"route_{name}_peak").setText(text)
 
+    def _update_plan_rule_buttons(self, *_):
+        selected = self.plan_rule_list.currentRow() >= 0
+        self.edit_rule_button.setEnabled(selected and self.add_rule_button.isEnabled())
+        self.delete_rule_button.setEnabled(selected)
+
+    def _refresh_plan_rules(self):
+        row = self.plan_rule_list.currentRow()
+        self.plan_rule_list.clear()
+        rules = self.workspace.plan_rules()
+        self.plan_rule_list.addItems([describe_rule(rule) for rule in rules])
+        self.add_rule_button.setEnabled(bool(self.workspace.draft_controls))
+        self.plan_rule_list.setCurrentRow(min(max(0, row), len(rules) - 1))
+        self.plan_rule_list.setVisible(bool(rules))
+        self._update_plan_rule_buttons()
+
+    def edit_plan_rule(self, *, add=False):
+        if not self.workspace or self.busy():
+            return
+        rules = self.workspace.plan_rules()
+        index = -1 if add else self.plan_rule_list.currentRow()
+        if not add and index < 0:
+            return
+        controls = [control_from_dict(c) for c in self.workspace.draft_controls]
+        dialog = PlanRuleDialog(self, controls, rules[index] if index >= 0 else None)
+        if not dialog.exec():
+            return
+        if index >= 0:
+            rules[index] = dialog.rule
+        else:
+            rules.append(dialog.rule)
+        self._save_plan_rules(rules)
+
+    def delete_plan_rule(self):
+        index = self.plan_rule_list.currentRow()
+        if self.workspace and index >= 0 and not self.busy():
+            rules = self.workspace.plan_rules()
+            rules.pop(index)
+            self._save_plan_rules(rules)
+
+    def _save_plan_rules(self, rules):
+        self.workspace.preferences["draft_plan_rules"] = [r.model_dump(mode="json") for r in rules]
+        self._refresh_plan_rules()
+        self.refresh_recommendation()
+        self.save_preferences()
+
     def refresh_controls(self, *, refresh_recommendation=True):
         if not self.workspace:
             return
@@ -2359,6 +2435,7 @@ class WizardWindow(
             current = 0 if controls else -1
         self.selected_control_index = current
         self.control_strip.set_controls(controls, current)
+        self._refresh_plan_rules()
         self.control_editor.setVisible(current >= 0)
         self.control_error.hide()
         if current >= 0:
@@ -2413,6 +2490,8 @@ class WizardWindow(
             self.control_bias,
             self.control_avoid_min,
             self.control_avoid_max,
+            self.control_below,
+            self.control_above,
             self.switch_mode,
             self.switch_default,
         )
@@ -2443,8 +2522,10 @@ class WizardWindow(
             self.control_bias.setCurrentIndex(self.control_bias.findData(knob.sampling_bias))
             self.control_gain.setChecked(knob.is_gain)
             self.control_clean_volume.setChecked(knob.clean_volume)
-            self.control_avoid_min.setChecked(knob.avoid_zero)
-            self.control_avoid_max.setChecked(knob.avoid_max)
+            self.control_avoid_min.setChecked(knob.avoid_below is not None)
+            self.control_avoid_max.setChecked(knob.avoid_above is not None)
+            self.control_below.setValue(knob.min if knob.avoid_below is None else knob.avoid_below)
+            self.control_above.setValue(knob.max if knob.avoid_above is None else knob.avoid_above)
             self.control_clean_volume.setEnabled(not knob.is_gain)
             self._control_volume_changed(knob.clean_volume, reset=False)
         finally:
@@ -2458,6 +2539,8 @@ class WizardWindow(
             if checked and reset:
                 field.setChecked(False)
             field.setEnabled(not checked)
+        self.control_below.setEnabled(not checked and self.control_avoid_min.isChecked())
+        self.control_above.setEnabled(not checked and self.control_avoid_max.isChecked())
         self.control_bias.setEnabled(not checked)
 
     def _switch_items(self):
@@ -2565,9 +2648,9 @@ class WizardWindow(
                     self.control_max.value(),
                     self.control_step.value(),
                     self.control_default.value(),
-                    self.control_avoid_min.isChecked(),
-                    self.control_gain.isChecked(),
-                    avoid_max=self.control_avoid_max.isChecked(),
+                    is_gain=self.control_gain.isChecked(),
+                    avoid_below=self.control_below.value() if self.control_avoid_min.isChecked() else None,
+                    avoid_above=self.control_above.value() if self.control_avoid_max.isChecked() else None,
                     sampling_bias=self.control_bias.currentData(),
                     clean_volume=self.control_clean_volume.isChecked(),
                 )
@@ -2592,6 +2675,7 @@ class WizardWindow(
         self.control_strip.set_controls(
             [control_from_dict(data) for data in self.workspace.draft_controls], index
         )
+        self._refresh_plan_rules()
         if isinstance(control, SwitchSpec) and control.option_indices is None:
             # Updating QListWidgetItem metadata emits itemChanged. Suppress
             # reentrant partial saves while rebasing original neural indices
@@ -2615,7 +2699,11 @@ class WizardWindow(
         if index is None:
             index = getattr(self, "selected_control_index", -1)
         if self.workspace and index >= 0 and not self.busy():
-            self.workspace.draft_controls.pop(index)
+            removed = self.workspace.draft_controls.pop(index)["name"]
+            self.workspace.preferences["draft_plan_rules"] = [
+                rule.model_dump(mode="json") for rule in self.workspace.plan_rules()
+                if removed not in rule.controls
+            ]
             self.selected_control_index = min(index, len(self.workspace.draft_controls) - 1)
             self.refresh_controls(refresh_recommendation=False)
             self.refresh_recommendation(True)
@@ -2641,7 +2729,20 @@ class WizardWindow(
             requested_train = self.n_train.value()
             requested_validation = self.n_validation.value()
 
+            rules = self.workspace.plan_rules()
+
             def limits():
+                if rules:
+                    combinations, train_cap, _ = rule_capture_limits(controls, rules)
+                    if all(isinstance(c, SwitchSpec) for c in controls):
+                        return combinations, combinations, combinations, combinations, combinations, True
+                    train = min(max(combinations, requested_train), train_cap)
+                    _, _, val_cap = rule_capture_limits(controls, rules, train)
+                    validation = min(requested_validation, val_cap)
+                    if validation < combinations:
+                        validation = 0
+                    _, train_cap, val_cap = rule_capture_limits(controls, rules, train, validation)
+                    return combinations, train_cap, val_cap, train, validation, False
                 capacity, _, combinations = capture_grid_limits(controls)
                 if all(isinstance(c, SwitchSpec) for c in controls):
                     # Separate validation audio repeats every categorical state.
@@ -2695,10 +2796,24 @@ class WizardWindow(
         if not controls:
             self.recommendation.setText("Add at least one control to build a plan.")
             return
-        def recommendations():
-            return capture_recommendations(controls), corner_capture_count(controls)
+        rules = self.workspace.plan_rules()
 
-        (train, val, combinations), count = run_calculation(self, recommendations)
+        def recommendations():
+            recommendation = capture_recommendations(controls)
+            if rules:
+                combinations, capacity, _ = rule_capture_limits(controls, rules)
+                train, val, old_combinations = recommendation
+                train = min(capacity, max(combinations, train // old_combinations * combinations))
+                _, _, val_cap = rule_capture_limits(controls, rules, train)
+                val = min(val_cap, val // old_combinations * combinations)
+                recommendation = train, val if val >= combinations else 0, combinations
+            return recommendation, corner_capture_count(controls, rules=rules)
+
+        try:
+            (train, val, combinations), count = run_calculation(self, recommendations)
+        except ValueError as error:
+            self.recommendation.setText(str(error))
+            return
         if all(isinstance(c, SwitchSpec) for c in controls) and val == 0:
             val = train
         note = (
@@ -2890,7 +3005,7 @@ class WizardWindow(
                     answer = QMessageBox.question(
                         self,
                         "Update the capture plan?",
-                        "The controls, input signal, capture level, calibration or plan settings changed. Existing captures will be preserved in History, and a new plan will start. Continue?",
+                        "The plan or capture setup changed. Matching recordings are reused. Other takes stay on disk and are skipped. Continue?",
                     )
                     if answer != QMessageBox.StandardButton.Yes:
                         for key, value in original_capture_settings.items():
@@ -3192,16 +3307,53 @@ class WizardWindow(
                 (i for i, e in enumerate(entries) if e.status != "captured"),
                 len(entries) - 1,
             )
+            confirmed = self._confirmed_capture
+            if confirmed is not None:
+                row = next(
+                    (i for i, entry in enumerate(entries)
+                     if (entry.y_path, entry.params) == confirmed),
+                    row,
+                )
             self.capture_table.blockSignals(True)
             self.capture_table.selectRow(row)
             self.capture_table.blockSignals(False)
-            self.select_capture(automatic=True)
-        self.rig_ready.setChecked(False)
+            self.select_capture()
+        else:
+            self.rig_ready.setChecked(False)
+            self.scene.stop_blink()
         self.update_enabled()
 
-    def select_capture(self, automatic=False):
-        if not automatic:
+    def _update_capture_blink(self, *_):
+        row = self.capture_table.currentRow()
+        if not self.workspace or not 0 <= row < len(self._capture_entries):
             self.scene.stop_blink()
+            return
+        entry = self._capture_entries[row]
+        if self.rig_ready.isChecked():
+            self._confirmed_capture = (entry.y_path, dict(entry.params))
+            self.scene.stop_blink()
+            return
+        self._confirmed_capture = None
+        previous = self._last_recorded_params
+        if previous is None:
+            project = self.workspace.project
+            recorded = project.captured_entries() + [
+                record["entry"] for record in project.unused_recordings.values()
+            ]
+            def capture_time(take):
+                return (take.get("captured_at") if isinstance(take, dict) else take.captured_at) or ""
+
+            if recorded:
+                latest = max(recorded, key=capture_time)
+                previous = latest["params"] if isinstance(latest, dict) else latest.params
+        if previous is None or not entry.params:
+            self.scene.stop_blink()
+        else:
+            self.scene.start_blink(
+                name for name, value in entry.params.items() if previous.get(name) != value
+            )
+
+    def select_capture(self):
         if self.workspace and 0 <= self.capture_table.currentRow() < len(
             self._capture_entries
         ):
@@ -3214,7 +3366,9 @@ class WizardWindow(
                 self.scene.set_controls(
                     self.workspace.project.control_specs(), entry.params
                 )
-            self.rig_ready.setChecked(False)
+            if self._confirmed_capture != (entry.y_path, entry.params):
+                self.rig_ready.setChecked(False)
+            self._update_capture_blink()
             if self.workspace.project.capture_type == "static":
                 self.record_button.setText("Record")
                 return
@@ -3394,6 +3548,8 @@ class WizardWindow(
                     )
                     self.notify_error(str(error))
                 save_project(self.workspace.project, self.workspace.directory)
+        self._last_recorded_params = dict(self._recorded_control_values)
+        self.rig_ready.setChecked(False)
         reports = qa if isinstance(qa, list) else [qa]
         self.capture_progress.setValue(100)
         self.capture_status.setText(f"Saved {len(reports)} signal recording(s)")
@@ -3405,12 +3561,6 @@ class WizardWindow(
                 self, "_recorded_capture_path", following.y_path
             ):
                 self.capture_progress.setValue(0)
-                previous = getattr(self, "_recorded_control_values", {})
-                self.scene.start_blink(
-                    name
-                    for name, value in following.params.items()
-                    if previous.get(name) != value
-                )
         messages = [message for report in reports for message in report.messages]
         if messages:
             QMessageBox.warning(self, "Capture quality check", "\n".join(messages))

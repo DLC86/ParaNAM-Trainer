@@ -19,7 +19,7 @@ def test_exact_offline_assets_are_in_project_and_manifest(workspace):
     ).read_bytes()
 
 
-def test_plan_changes_archive_recordings_without_deleting_them(workspace):
+def test_plan_changes_skip_incompatible_recordings_without_moving_them(workspace):
     entry = workspace.project.entries[0]
     output = workspace.directory / entry.y_path
     output.parent.mkdir(exist_ok=True)
@@ -30,8 +30,9 @@ def test_plan_changes_archive_recordings_without_deleting_them(workspace):
     workspace.preferences.update(n_train=4, n_validation=2)
     assert workspace.plan_changed()
     workspace.generate_plan()
-    archived = list((workspace.directory / "history").glob("*/" + entry.y_path))
-    assert len(archived) == 1 and archived[0].read_bytes() == b"original recording"
+    assert output.read_bytes() == b"original recording"
+    assert entry.y_path in workspace.project.unused_recordings
+    assert all(e.y_path != entry.y_path for e in workspace.project.entries)
     assert all(e.status == "pending" for e in workspace.project.entries)
     assert {e.params["Mode"] for e in workspace.project.entries} == {"Clean", "Lead"}
     assert not workspace.plan_changed()

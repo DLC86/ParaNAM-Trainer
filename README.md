@@ -59,8 +59,8 @@ system libraries.
 
 The sidebar contains **Projects → Plan → Capture → Train → Queue → Compare**.
 **Settings** stays at the bottom of the sidebar. You can return to earlier pages
-to edit the setup; changes that require new captures preserve the old recordings
-in the project's History.
+to edit the setup. When the capture plan changes, matching recordings are reused
+and other takes stay on disk outside the active plan.
 
 The screenshots below show the current interface with a demonstration project
 and example audio-interface labels. The Queue chart uses illustrative history,

@@ -250,9 +250,20 @@ def test_capture_auto_advance_resets_progress_and_blinks_only_changes(
     assert window.scene.blink_names == changed
     window.rig_ready.setChecked(True)
     assert not window.scene.blink_names and not window.scene.blink_timer.isActive()
-    window.scene.start_blink(changed)
     window.select_capture()
+    assert window.rig_ready.isChecked()
     assert not window.scene.blink_names
+    window.capture_table.selectRow(0)
+    selected = window._capture_entries[0]
+    assert not window.rig_ready.isChecked()
+    assert window.scene.blink_names == {
+        name for name in selected.params if selected.params[name] != first.params[name]
+    }
+    window.capture_table.selectRow(window._capture_entries.index(following))
+    assert window.scene.blink_names == changed
+    window.navigate(1)
+    window.navigate(2)
+    assert window.scene.blink_names == changed
 
 
 def test_all_queue_states_can_be_reordered_without_changing_active_job(

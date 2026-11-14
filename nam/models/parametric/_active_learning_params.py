@@ -293,5 +293,27 @@ def quantize_to_capture_grid(
             snapped = _torch.where(
                 snapped >= spec.max - 1e-10, _torch.full_like(snapped, last), snapped
             )
+        below, above = spec.avoid_below, spec.avoid_above
+        if below is not None or above is not None:
+            low, high = spec.min, spec.max
+            if below is not None and below > round(low, 6):
+                low = _math.ceil(below / step - 1e-10) * step
+                if round(low, 6) < below:
+                    low += step
+                low = min(low, spec.max)
+            if above is not None and above < round(high, 6):
+                high = _math.floor(above / step + 1e-10) * step
+                if round(high, 6) > above:
+                    high -= step
+                high = max(high, spec.min)
+            if avoid_min and low <= spec.min:
+                low = first
+            if avoid_max and high >= spec.max:
+                high = last
+            if (low > high + 1e-10 or
+                (below is not None and round(low, 6) < below) or
+                (above is not None and round(high, 6) > above)):
+                raise ValueError(f"No usable capture positions for {spec.name!r}")
+            snapped = _torch.clamp(snapped, low, high)
         quantized[..., i] = snapped
     return quantized
