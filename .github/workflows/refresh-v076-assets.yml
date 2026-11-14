@@ -1,10 +1,18 @@
-name: Refresh draft 0.7.6 — verified native installers
+name: Refresh release 0.7.6 — verified native installers
 
 on:
   workflow_dispatch:
+    inputs:
+      replace_published:
+        description: Replace assets on the published v0.7.6 release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+env:
+  REPLACE_PUBLISHED: ${{ inputs.replace_published }}
 
 concurrency:
   group: refresh-v076-verified-assets
@@ -55,7 +63,7 @@ jobs:
       - name: Prefer pinned Eigen GitHub mirror
         shell: bash
         run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
-      - name: Verify exact draft and source version
+      - name: Verify release and source version
         shell: bash
         run: |
           python - <<'PY'
@@ -63,8 +71,12 @@ jobs:
           from pathlib import Path
           release = json.loads(subprocess.check_output(
               ['gh','api','repos/'+os.environ['GH_REPO']+'/releases/445307342']))
-          assert release['draft'] and release['prerelease'], 'Draft must remain unpublished'
-          assert release['tag_name'] == 'v0.7.6' or release['tag_name'].startswith('untagged-')
+          if release['draft']:
+              assert release['prerelease']
+              assert release['tag_name'] == 'v0.7.6' or release['tag_name'].startswith('untagged-')
+          else:
+              assert os.environ['REPLACE_PUBLISHED'] == 'true', 'Published replacement must be selected'
+              assert release['tag_name'] == 'v0.7.6' and not release['immutable']
           assert release['name'] == 'ParaNAM Trainer 0.7.6'
           # Existing draft assets can point to an earlier main commit. Accept
           # descendants, but never switch to an unrelated release source.
@@ -121,7 +133,7 @@ jobs:
           else
             python packaging/validate_bundle.py "dist/ParaNAM Trainer/ParaNAM Trainer" build
           fi
-      - name: Stage tested packages on existing 0.7.6 draft (originals untouched)
+      - name: Stage tested packages on existing 0.7.6 release
         shell: bash
         run: |
           set -euo pipefail
@@ -157,7 +169,7 @@ jobs:
       SOURCE_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify all five installers and safely update the unpublished draft
+      - name: Verify and replace all five installers
         shell: bash
         run: |
           set -euo pipefail
@@ -193,10 +205,14 @@ jobs:
                   return None if response.status == 204 else json.load(response)
 
           release = api('GET', '/releases/' + str(release_id))
-          assert release['draft'] and release['prerelease'], 'Never modify a published release'
-          assert release['name'] == 'ParaNAM Trainer 0.7.6', 'Unexpected draft release'
-          assert (release['tag_name'] == 'v0.7.6'
-                  or release['tag_name'].startswith('untagged-')), 'Unexpected release tag'
+          draft = release['draft']
+          assert release['name'] == 'ParaNAM Trainer 0.7.6', 'Unexpected release'
+          if draft:
+              assert release['prerelease']
+              assert release['tag_name'] == 'v0.7.6' or release['tag_name'].startswith('untagged-')
+          else:
+              assert os.environ['REPLACE_PUBLISHED'] == 'true', 'Published replacement must be selected'
+              assert release['tag_name'] == 'v0.7.6' and not release['immutable']
           old = release['target_commitish']
           if old not in ('main', sha):
               comparison = api('GET', '/compare/' + old + '...' + sha)
@@ -250,7 +266,7 @@ jobs:
               print('Removed old partial staging asset:', name, flush=True)
 
           verified = api('GET', '/releases/' + str(release_id))
-          assert verified['draft'] and verified['prerelease']
+          assert verified['draft'] == draft and verified['prerelease'] == release['prerelease']
           result_assets = {a['name']: a for a in verified['assets']}
           assert set(result_assets) == names
           for name in names:
@@ -261,10 +277,11 @@ jobs:
               assert actual['state'] == 'uploaded'
               if expected.get('digest'):
                   assert actual['digest'] == expected['digest']
-          with open('docs/release-0.7.6.md', encoding='utf-8') as notes_file:
-              notes = notes_file.read()
-          result = api('PATCH', '/releases/' + str(release_id),
-                       {'body': notes, 'target_commitish': sha})
-          assert result['draft'] and result['target_commitish'] == sha
-          print('SUCCESS: all five 0.7.6 installers verified and replaced in draft (unpublished)')
+          if draft:
+              with open('docs/release-0.7.6.md', encoding='utf-8') as notes_file:
+                  notes = notes_file.read()
+              result = api('PATCH', '/releases/' + str(release_id),
+                           {'body': notes, 'target_commitish': sha})
+              assert result['draft'] and result['target_commitish'] == sha
+          print(f'SUCCESS: all five 0.7.6 installers built from {sha}, verified and replaced')
           PY
