@@ -191,6 +191,7 @@ class WizardWindow(
         self._capture_entries = []
         self._static_edit_id = None
         self._capture_table_kind = None
+        self._queue_columns_autosized = False
         self._build()
         self.queue_controller.changed.connect(self.refresh_training)
         self.queue_controller.failed.connect(self.notify_error)
@@ -1643,6 +1644,13 @@ class WizardWindow(
         if index != 2 and self.session and self.worker is None:
             self.close_audio()
         self.pages.setCurrentIndex(index)
+        if index == 4 and not self._queue_columns_autosized:
+            # Queue is populated even when its polling timer has not fired yet.
+            # Fit contents once on first opening; keep columns interactive from
+            # then on, so selection and the 600-ms refresh never resize them.
+            self._queue_columns_autosized = True
+            self.refresh_queue()
+            self.queue_table.resizeColumnsToContents()
         if index == 6:
             self._sync_settings_audio(retry=True)
         self.project_label.setVisible(index != 6)

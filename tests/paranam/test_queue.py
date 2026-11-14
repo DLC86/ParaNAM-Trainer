@@ -360,8 +360,22 @@ def test_queue_idle_refresh_keeps_interactive_column_widths(window):
         header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
         for column in range(table.columnCount())
     )
+    # The initial visit auto-fits after the rows are populated, exactly once.
     window.navigate(4)
+    assert window._queue_columns_autosized
     table.setColumnWidth(0, 237)
     for _ in range(5):
         window.refresh_training()
     assert table.columnWidth(0) == 237
+
+    # Revisiting Queue cannot undo a manually chosen width.
+    window.navigate(0)
+    window.navigate(4)
+    assert table.columnWidth(0) == 237
+
+    # Refreshing again, including another navigation cycle, never auto-fits.
+    table.setColumnWidth(1, 181)
+    window.refresh_training()
+    window.navigate(0)
+    window.navigate(4)
+    assert table.columnWidth(1) == 181
