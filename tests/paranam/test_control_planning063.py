@@ -1,4 +1,5 @@
 from collections import Counter
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -100,6 +101,25 @@ def test_plan_control_scene_reflows_cards_while_dragging(qapp):
     assert scene._card_border(1).name() == "#d24a4a"
     scene._hover_index = len(scene.controls)
     assert scene._hover_index == 2  # The add card participates in hover tracking.
+
+
+def test_selecting_plan_control_does_not_recalculate_recommendations():
+    from paranam.wizard import WizardWindow
+
+    refreshes = []
+
+    class Window:
+        workspace = SimpleNamespace(draft_controls=[{}, {}])
+        selected_control_index = 0
+
+        def refresh_controls(self, **kwargs):
+            refreshes.append(kwargs)
+
+    window = Window()
+    WizardWindow.select_control(window, 1)
+
+    assert window.selected_control_index == 1
+    assert refreshes == [{"refresh_recommendation": False}]
 
 
 def test_renaming_and_reordering_controls_preserves_plan(workspace):

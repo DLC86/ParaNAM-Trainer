@@ -2269,7 +2269,7 @@ class WizardWindow(
             text = f"{20 * math.log10(value):.1f} dBFS" if value > 1e-6 else "−∞ dBFS"
             getattr(self, f"route_{name}_peak").setText(text)
 
-    def refresh_controls(self):
+    def refresh_controls(self, *, refresh_recommendation=True):
         if not self.workspace:
             return
         controls = [control_from_dict(data) for data in self.workspace.draft_controls]
@@ -2282,7 +2282,8 @@ class WizardWindow(
         self.control_error.hide()
         if current >= 0:
             self._load_control_editor(controls[current])
-        self.refresh_recommendation()
+        if refresh_recommendation:
+            self.refresh_recommendation()
 
     def add_control(self):
         if not self.workspace or self.busy():
@@ -2296,7 +2297,7 @@ class WizardWindow(
         )
         self.selected_control_index = len(self.workspace.draft_controls) - 1
         self.workspace.save()
-        self.refresh_controls()
+        self.refresh_controls(refresh_recommendation=False)
         self.refresh_recommendation(True)
 
     def select_control(self, index):
@@ -2304,14 +2305,16 @@ class WizardWindow(
             if index == getattr(self, "selected_control_index", -1):
                 return
             self.selected_control_index = index
-            self.refresh_controls()
+            # Selecting a card only changes the editor and its visual state;
+            # capture recommendations depend on the controls, not selection.
+            self.refresh_controls(refresh_recommendation=False)
 
     def reorder_controls(self, source, target):
         if not self.workspace or self.busy() or source == target:
             return
         self.workspace.move_control(source, target)
         self.selected_control_index = target
-        self.refresh_controls()
+        self.refresh_controls(refresh_recommendation=False)
 
     def _load_control_editor(self, control):
         from PySide6.QtCore import QSignalBlocker
@@ -2533,7 +2536,7 @@ class WizardWindow(
         if self.workspace and index >= 0 and not self.busy():
             self.workspace.draft_controls.pop(index)
             self.selected_control_index = min(index, len(self.workspace.draft_controls) - 1)
-            self.refresh_controls()
+            self.refresh_controls(refresh_recommendation=False)
             self.refresh_recommendation(True)
             self.workspace.save()
 

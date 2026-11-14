@@ -261,13 +261,17 @@ class ControlScene(QWidget):
         self._height()
         super().resizeEvent(event)
 
-    def paintEvent(self, _event):
+    def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         columns = self._columns()
         width = self.width() / columns
         for index, control in enumerate(self.controls):
             bounds = self._paint_bounds(index)
+            # Selecting or hovering one card must not rebuild the expensive
+            # knob paths for every off-screen/unaffected control.
+            if not event.region().intersects(bounds.toAlignedRect()):
+                continue
             x, y = bounds.x() - 7, bounds.y() - 6
             width = bounds.width() + 14
             shade = 35
@@ -411,7 +415,15 @@ class PlanControlScene(ControlScene):
         self.setMouseTracking(True)
 
     def set_controls(self, controls, current=-1):
-        self.controls = list(controls)
+        controls = list(controls)
+        previous_current = self.current
+        if controls == self.controls and current != previous_current:
+            self.current = current
+            for index in (previous_current, current):
+                if 0 <= index < len(self.controls):
+                    self.update(self._paint_bounds(index).toAlignedRect())
+            return
+        self.controls = controls
         self.current = current
         if self._drag_index is None:
             self._card_positions.clear()
@@ -514,14 +526,23 @@ class PlanControlScene(ControlScene):
         else:
             hover = self._tile_index(event.position())
             if hover != self._hover_index:
+                previous = self._hover_index
                 self._hover_index = hover
-                self.update()
+                for index in (previous, hover):
+                    if 0 <= index < len(self.controls):
+                        self.update(self._paint_bounds(index).toAlignedRect())
+                    elif index == len(self.controls):
+                        self.update(self._add_bounds().toAlignedRect())
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
         if self._drag_index is None and self._hover_index != -1:
+            previous = self._hover_index
             self._hover_index = -1
-            self.update()
+            if 0 <= previous < len(self.controls):
+                self.update(self._paint_bounds(previous).toAlignedRect())
+            elif previous == len(self.controls):
+                self.update(self._add_bounds().toAlignedRect())
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event):
