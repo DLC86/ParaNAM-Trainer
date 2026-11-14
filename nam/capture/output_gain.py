@@ -93,7 +93,19 @@ def initialize_calibration(project):
     grid = sorted({v for v in grid if round(control.min, 6) < v < round(control.max, 6)}
                   | {control.min, control.max})
     high = _context(project)
-    contexts = [high, *(e.params for e in project.entries if e.split == "train")]
+    blocked_rules = [
+        rule for rule in project.plan_rules
+        if any(rule.excludes({**high, control.name: v}) for v in grid)
+    ]
+    affected = tuple(dict.fromkeys(
+        name for rule in blocked_rules for name in rule.controls if name != control.name
+    ))
+    contexts = [high]
+    if affected:
+        contexts.extend(
+            {**high, **{name: entry.params[name] for name in affected}}
+            for entry in project.entries if entry.split == "train"
+        )
     context = None
     positions = []
     seen = set()
@@ -103,10 +115,16 @@ def initialize_calibration(project):
             continue
         seen.add(key)
         allowed = [v for v in grid if allows(project.plan_rules, {**candidate, control.name: v})]
-        if control.max in allowed and len(allowed) > len(positions):
-            context, positions = candidate, allowed
-            if len(positions) == len(grid):
-                break
+        if control.max not in allowed or len(allowed) <= len(positions):
+            continue
+        # Restore each control whose maximum still allows the whole sweep.
+        for name in affected:
+            restored = {**candidate, name: high[name]}
+            if all(allows(project.plan_rules, {**restored, control.name: v}) for v in allowed):
+                candidate = restored
+        context, positions = candidate, allowed
+        if len(positions) == len(grid):
+            break
     if len(positions) < 2:
         raise ValueError(
             "Linear Volume needs an allowed maximum and at least one lower position "

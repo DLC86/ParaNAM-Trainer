@@ -37,6 +37,24 @@ def test_plan_rules_filter_both_splits_corners_and_volume_calibration():
         initialize_calibration(project)
 
 
+def test_volume_calibration_keeps_unrelated_controls_at_their_maximum():
+    knobs = [
+        KnobSpec("Gain", 0, 10, 1, 5),
+        KnobSpec("Bass", 0, 10, 1, 5),
+        KnobSpec("Treble", 0, 10, 1, 5, avoid_above=8),
+        KnobSpec("Volume", 0, 10, 1, 5, clean_volume=True),
+    ]
+    rule = PlanRule(controls=("Gain", "Volume"), operator=">", value=7)
+    project = new_project(knobs, n_train=1, n_validation=0, plan_rules=[rule])
+    initialize_calibration(project)
+    gain = project.entries_for_split("gain")
+    assert len(gain) == 11
+    assert all(
+        e.params["Bass"] == 10 and e.params["Treble"] == 8
+        and not rule.excludes(e.params) for e in gain
+    )
+
+
 def test_switch_rule_excludes_position_by_label():
     switches = [SwitchSpec("Channel", ("Clean", "1", "Lead"))]
     rule = PlanRule(controls=("Channel",), operator="=", value="1")
