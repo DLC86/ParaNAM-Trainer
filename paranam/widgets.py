@@ -6,7 +6,7 @@ from PySide6 import QtSvg  # Include SVG image support in frozen installers.
 
 from .numeric import DecimalSpinBox as QDoubleSpinBox
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer, QObject, QEvent
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QWidget,
@@ -59,6 +59,20 @@ def load_font():
 ACCENT = "#bf0000"
 TEXT = "#f0f0f0"
 MUTED = "#969696"
+
+
+class ComboBoxWheelGuard(QObject):
+    """Keep page scrolling from changing a focused selector by accident."""
+
+    def eventFilter(self, watched, event):
+        if (
+            isinstance(watched, QComboBox)
+            and event.type() == QEvent.Type.Wheel
+            and not watched.view().isVisible()
+        ):
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
 
 THEME = """
 QWidget { background: #121212; color: #f0f0f0; font-family: 'Inter'; font-size: 13px; }
@@ -254,6 +268,9 @@ class ControlScene(QWidget):
     def _card_border(self, index):
         return QColor(ACCENT if index == getattr(self, "current", -1) else "#3b3b3b")
 
+    def _paint_order(self):
+        return range(len(self.controls))
+
     def _height(self):
         self.setMinimumHeight(max(180, math.ceil(self._tile_count() / self._columns()) * 185))
 
@@ -266,7 +283,8 @@ class ControlScene(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         columns = self._columns()
         width = self.width() / columns
-        for index, control in enumerate(self.controls):
+        for index in self._paint_order():
+            control = self.controls[index]
             bounds = self._paint_bounds(index)
             # Selecting or hovering one card must not rebuild the expensive
             # knob paths for every off-screen/unaffected control.
@@ -417,11 +435,12 @@ class PlanControlScene(ControlScene):
     def set_controls(self, controls, current=-1):
         controls = list(controls)
         previous_current = self.current
-        if controls == self.controls and current != previous_current:
-            self.current = current
-            for index in (previous_current, current):
-                if 0 <= index < len(self.controls):
-                    self.update(self._paint_bounds(index).toAlignedRect())
+        if controls == self.controls:
+            if current != previous_current:
+                self.current = current
+                for index in (previous_current, current):
+                    if 0 <= index < len(self.controls):
+                        self.update(self._paint_bounds(index).toAlignedRect())
             return
         self.controls = controls
         self.current = current
@@ -460,6 +479,13 @@ class PlanControlScene(ControlScene):
         if index == self._drag_index or index == self._hover_index:
             return QColor("#d24a4a")
         return super()._card_border(index)
+
+    def _paint_order(self):
+        if self._drag_index is None:
+            return super()._paint_order()
+        return [
+            index for index in range(len(self.controls)) if index != self._drag_index
+        ] + [self._drag_index]
 
     def _set_drop_target(self, point):
         target = self._tile_index(point)
@@ -504,6 +530,7 @@ class PlanControlScene(ControlScene):
                 if self._remove_bounds(index).contains(event.position()):
                     self.remove_requested.emit(index)
                     return
+                previous_current = self.current
                 self._drag_index = index
                 self._drag_target = index
                 self._drag_position = event.position()
@@ -515,7 +542,9 @@ class PlanControlScene(ControlScene):
                 }
                 self.current = index
                 self.selected.emit(index)
-                self.update()
+                for changed in (previous_current, index):
+                    if 0 <= changed < len(self.controls):
+                        self.update(self._paint_bounds(changed).toAlignedRect())
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -555,9 +584,13 @@ class PlanControlScene(ControlScene):
             self._drag_target = None
             self._card_positions.clear()
             self._animation_timer.stop()
+            self._hover_index = self._tile_index(event.position())
             if 0 <= target < len(self.controls) and target != source:
                 self.reordered.emit(source, target)
-            self.update()
+            else:
+                # The dragged card may have crossed several old paint regions.
+                # Clear them all when a drag is cancelled or returns home.
+                self.update()
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):

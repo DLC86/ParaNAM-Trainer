@@ -266,7 +266,7 @@ def capture_grid_limits(controls: _Sequence[ControlSpec]) -> tuple[int, int, int
     reserved = {
         tuple(point[s.name] for s in specs)
         for point in corner_settings(
-            specs, gain_index=gain_knob_index(per_state),
+            specs, gain_index=gain_knob_indices(per_state),
             default_step=DEFAULT_KNOB_STEP,
         )
     }

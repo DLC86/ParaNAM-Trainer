@@ -75,6 +75,7 @@ from .widgets import (
     ControlScene,
     PlanControlScene,
     MetadataEditor,
+    ComboBoxWheelGuard,
     load_font,
 )
 from . import training
@@ -147,6 +148,8 @@ class WizardWindow(
 
     def __init__(self):
         super().__init__()
+        self._combo_wheel_guard = ComboBoxWheelGuard(self)
+        QApplication.instance().installEventFilter(self._combo_wheel_guard)
         load_font()
         self.setWindowTitle("ParaNAM Trainer")
         self.setStyleSheet(
@@ -191,6 +194,10 @@ class WizardWindow(
         self._capture_entries = []
         self._static_edit_id = None
         self._capture_table_kind = None
+        self._capture_row_keys = ()
+        self._queue_row_ids = ()
+        self._queue_json_cache = {}
+        self._play_model_options_loaded = False
         self._queue_columns_autosized = False
         self._build()
         self.queue_controller.changed.connect(self.refresh_training)
@@ -1744,6 +1751,7 @@ class WizardWindow(
 
     def _attach(self, workspace, use_last_setup=False):
         self.close_audio()
+        self._play_model_options_loaded = False
         self.scene.stop_blink()
         self.initialize_global_setup(workspace)
         self.workspace = workspace
@@ -3008,7 +3016,13 @@ class WizardWindow(
                 header.restoreState(saved)
             header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.blockSignals(False)
-        self.capture_table.setRowCount(len(entries))
+        row_keys = tuple(
+            entry.capture_id if static else entry.y_path for entry in entries
+        )
+        if changed_kind or row_keys != self._capture_row_keys:
+            self.capture_table.clearContents()
+            self.capture_table.setRowCount(len(entries))
+            self._capture_row_keys = row_keys
         for row, entry in enumerate(entries):
             if static:
                 group = groups[row]
@@ -3045,18 +3059,26 @@ class WizardWindow(
                     "Volume" if entry.split == "gain" else entry.split.title(),
                     params,
                     entry.status.title(),
-                    *self._capture_metrics(entry),
+                    *(metrics := self._capture_metrics(entry)),
                 ]
+            has_warning = (
+                any(values[2] not in ("—", "") for _, values in metrics)
+                if static
+                else metrics[2] not in ("—", "")
+            )
             for col, text in enumerate(columns):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
+                item = self.capture_table.item(row, col)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self.capture_table.setItem(row, col, item)
+                if item.text() != text:
+                    item.setText(text)
+                if item.toolTip() != text:
+                    item.setToolTip(text)
                 running = (
                     self.worker is not None
                     and entry.y_path == getattr(self, "_recorded_capture_path", None)
                     and entry.status != "captured"
-                )
-                has_warning = bool(
-                    self._capture_metrics(entry)[2] not in ("—", "")
                 )
                 # Running overrides warnings and paints every column, even when selected.
                 color = (
@@ -3072,7 +3094,6 @@ class WizardWindow(
                 status_col = 1 if static else 2
                 if col == status_col and running:
                     item.setText("Running")
-                self.capture_table.setItem(row, col, item)
         self.capture_table.blockSignals(False)
         counted = self.workspace.training_capture_entries() if static else project.entries
         completed = sum(e.status == "captured" for e in counted)
@@ -3422,6 +3443,7 @@ class WizardWindow(
     def _saved_export_finished(self):
         self.export_worker.deleteLater()
         self.export_worker = None
+        self._play_model_options_loaded = False
         self.refresh_training()
 
     def _tick_queue_seconds(self):

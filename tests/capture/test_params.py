@@ -2,6 +2,7 @@ import pytest as _pytest
 
 from nam.capture.params import gain_knob_index as _gain_knob_index
 from nam.capture.params import KnobSpec as _KnobSpec
+from nam.capture.params import capture_recommendations as _capture_recommendations
 from nam.capture.params import validate_knobs as _validate_knobs
 
 
@@ -103,3 +104,12 @@ def test_validate_knobs_accepts_two_but_rejects_three_gain_knobs():
     knobs.append(_KnobSpec(name="Boost", min=0.0, max=10.0, is_gain=True))
     with _pytest.raises(ValueError):
         _validate_knobs(knobs)
+
+
+def test_two_gain_knobs_are_equal_in_capture_recommendations():
+    gain = _KnobSpec(name="Gain", min=0.0, max=10.0, step=1.0, is_gain=True)
+    drive = _KnobSpec(name="Drive", min=0.0, max=8.0, step=1.0, is_gain=True)
+    tone = _KnobSpec(name="Tone", min=0.0, max=10.0, step=1.0)
+    assert _capture_recommendations([gain, drive, tone]) == _capture_recommendations(
+        [drive, gain, tone]
+    )

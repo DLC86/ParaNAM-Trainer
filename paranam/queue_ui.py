@@ -118,24 +118,33 @@ class QueueActions:
 
     def refresh_queue(self):
         entries = self.queue_controller.store.entries()
+        live_jobs = {str(Path(entry["job"])) for entry in entries}
+        self._queue_json_cache = {
+            key: value
+            for key, value in self._queue_json_cache.items()
+            if str(Path(key).parent) in live_jobs
+        }
         if not any(e["id"] == self.selected_job_id for e in entries):
             self.selected_job_id = self.queue_controller.active_id or (
                 entries[-1]["id"] if entries else None
             )
         table = self.queue_table
         table.blockSignals(True)
-        table.setRowCount(len(entries))
+        row_ids = tuple(entry["id"] for entry in entries)
+        rebuild = row_ids != getattr(self, "_queue_row_ids", ())
+        if rebuild:
+            table.clearContents()
+            table.setRowCount(len(entries))
+            self._queue_row_ids = row_ids
         pending = 0
         selected = None
         for row, entry in enumerate(entries):
-            progress = training.job_progress(entry["job"])
+            progress = self._cached_job_json(entry["job"], "progress.json")
             state = entry["state"]
             if state == "queued":
                 pending += 1
             esr = progress.get("best_esr")
-            spec = read_json(
-                Path(entry["job"]) / "spec.json", {}, tolerate_corrupt=True
-            )
+            spec = self._cached_job_json(entry["job"], "spec.json")
             captures = spec.get("static_captures") or []
             model_name = (
                 captures[0].get("name", "")
@@ -152,9 +161,16 @@ class QueueActions:
                 "—" if esr is None else f"{esr:.5f}",
             )
             for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
+                item = table.item(row, column)
+                if item is None:
+                    item = QTableWidgetItem()
+                    table.setItem(row, column, item)
+                if item.text() != value:
+                    item.setText(value)
                 item.setData(Qt.ItemDataRole.UserRole, entry["id"])
-                item.setToolTip(f"{entry['project']}\n{entry['job']}")
+                tooltip = f"{entry['project']}\n{entry['job']}"
+                if item.toolTip() != tooltip:
+                    item.setToolTip(tooltip)
                 colors = {
                     "running": "#00ff00",
                     "completed": "#00ffff",
@@ -164,10 +180,10 @@ class QueueActions:
                     "pending": "#f0f0f0",
                 }
                 item.setForeground(QColor(colors.get(state, "#f0f0f0")))
-                table.setItem(row, column, item)
             if entry["id"] == self.selected_job_id:
                 selected = entry
-                table.selectRow(row)
+                if table.currentRow() != row:
+                    table.selectRow(row)
         table.blockSignals(False)
         # Do not auto-fit columns on polling or selection: even for idle queues
         # it forces synchronous O(rows * columns) measurements every 600 ms.
@@ -178,7 +194,7 @@ class QueueActions:
             else None
         )
         if selected and getattr(self, "_resume_entry_id", None) != selected["id"]:
-            spec = read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
+            spec = self._cached_job_json(self.job, "spec.json")
             self.resume_batch_size.setValue(
                 spec.get("preferences", {}).get("batch_size", 16)
             )
@@ -192,6 +208,24 @@ class QueueActions:
             )
             self._resume_entry_id = selected["id"]
         return selected
+
+    def _cached_job_json(self, job, filename):
+        """Avoid reopening immutable specs and unchanged progress on each poll."""
+        path = Path(job) / filename
+        try:
+            info = path.stat()
+            stamp = (info.st_ino, info.st_ctime_ns, info.st_mtime_ns, info.st_size)
+        except OSError:
+            # read_json can recover a just-created backup file. Do not cache
+            # absence, or polling could hide that recovery from the user.
+            return read_json(path, {}, tolerate_corrupt=True)
+        key = str(path)
+        cached = self._queue_json_cache.get(key)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        data = read_json(path, {}, tolerate_corrupt=True)
+        self._queue_json_cache[key] = (stamp, data)
+        return data
 
     def refresh_training(self):
         if not hasattr(self, "queue_table"):

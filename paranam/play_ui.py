@@ -372,7 +372,9 @@ class PlayActions:
         row.addWidget(self.play_open)
         refresh = QPushButton("Refresh")
         self.play_refresh = refresh
-        refresh.clicked.connect(self.refresh_play_models)
+        refresh.clicked.connect(
+            lambda _checked=False: self.refresh_play_models(force=True)
+        )
         row.addWidget(refresh)
         self.play_size = QComboBox()
         self.play_size.addItem("Full", False)
@@ -674,7 +676,7 @@ class PlayActions:
             self, "play_worker", None
         ):
             self.stop_playback()
-        self.refresh_play_models()
+        self.refresh_play_models(force=True)
         self.play_model_list.sync()
         self.update_asset_remove_buttons()
 
@@ -785,10 +787,14 @@ class PlayActions:
             self.settings.setValue(
                 "play_models", [path] + [p for p in recent if p != path][:29]
             )
-            self.refresh_play_models(path)
+            self.refresh_play_models(path, force=True)
 
-    def refresh_play_models(self, selected=None):
+    def refresh_play_models(self, selected=None, *, force=False):
         if self.play_loader:
+            return
+        if self._play_model_options_loaded and not force and selected is None:
+            self._refresh_play_calibration()
+            self.update_asset_remove_buttons()
             return
         previous = (
             selected if isinstance(selected, str) else self.play_model.currentData()
@@ -832,11 +838,14 @@ class PlayActions:
             )
         self.play_model.setCurrentIndex(max(0, self.play_model.findData(previous)))
         self.play_model.blockSignals(False)
+        self._play_model_options_loaded = True
         if self.play_model.currentData() is None:
             self._play_ready = False
             self.play_start.setEnabled(False)
             self.clear_play_controls()
         elif previous and (
+            force
+            or
             isinstance(selected, (str, bool))
             or previous != getattr(self, "_loaded_play_path", None)
             or not self._play_ready
