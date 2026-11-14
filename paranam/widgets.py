@@ -243,6 +243,17 @@ class ControlScene(QWidget):
         width = self.width() / columns
         return QRectF((index % columns) * width + 7, (index // columns) * 185 + 6, width - 14, 170)
 
+    def _paint_bounds(self, index):
+        """Return the bounds used to paint a card.
+
+        Subclasses can animate cards without changing the stable layout used for
+        hit testing and the surrounding scroll area.
+        """
+        return self._bounds(index)
+
+    def _card_border(self, index):
+        return QColor(ACCENT if index == getattr(self, "current", -1) else "#3b3b3b")
+
     def _height(self):
         self.setMinimumHeight(max(180, math.ceil(self._tile_count() / self._columns()) * 185))
 
@@ -256,8 +267,9 @@ class ControlScene(QWidget):
         columns = self._columns()
         width = self.width() / columns
         for index, control in enumerate(self.controls):
-            x, y = (index % columns) * width, (index // columns) * 185
-            bounds = self._bounds(index)
+            bounds = self._paint_bounds(index)
+            x, y = bounds.x() - 7, bounds.y() - 6
+            width = bounds.width() + 14
             shade = 35
             if control.name in self.blink_names:
                 pulse = (
@@ -268,7 +280,7 @@ class ControlScene(QWidget):
                 ) / 2
                 shade += round(45 * pulse)
             painter.setBrush(QColor(shade, shade, shade))
-            painter.setPen(QPen(QColor(ACCENT if index == getattr(self, "current", -1) else "#3b3b3b"), 1))
+            painter.setPen(QPen(self._card_border(index), 1))
             painter.drawRoundedRect(bounds, 12, 12)
             painter.setPen(QColor(TEXT))
             painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
@@ -388,10 +400,21 @@ class PlanControlScene(ControlScene):
         self.controls = []
         self.current = -1
         self._drag_index = None
+        self._drag_target = None
+        self._drag_position = QPointF()
+        self._drag_offset = QPointF()
+        self._card_positions = {}
+        self._hover_index = -1
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(16)
+        self._animation_timer.timeout.connect(self._advance_card_animation)
+        self.setMouseTracking(True)
 
     def set_controls(self, controls, current=-1):
         self.controls = list(controls)
         self.current = current
+        if self._drag_index is None:
+            self._card_positions.clear()
         self._height()
         self.update()
 
@@ -413,6 +436,53 @@ class PlanControlScene(ControlScene):
         bounds = self._bounds(index)
         return QRectF(bounds.right() - 24, bounds.top() + 4, 20, 20)
 
+    def _paint_bounds(self, index):
+        """Use animated locations while retaining fixed bounds for hit tests."""
+        if index == self._drag_index:
+            base = self._bounds(index)
+            return base.translated(self._drag_position - self._drag_offset - base.topLeft())
+        position = self._card_positions.get(index)
+        return self._bounds(index).translated(position - self._bounds(index).topLeft()) if position else self._bounds(index)
+
+    def _card_border(self, index):
+        if index == self._drag_index or index == self._hover_index:
+            return QColor("#d24a4a")
+        return super()._card_border(index)
+
+    def _set_drop_target(self, point):
+        target = self._tile_index(point)
+        if not 0 <= target < len(self.controls):
+            target = self._drag_index
+        if target != self._drag_target:
+            self._drag_target = target
+            self._animation_timer.start()
+
+    def _target_positions(self):
+        if self._drag_index is None:
+            return {}
+        order = [index for index in range(len(self.controls)) if index != self._drag_index]
+        order.insert(self._drag_target, self._drag_index)
+        return {
+            index: self._bounds(slot).topLeft()
+            for slot, index in enumerate(order)
+            if index != self._drag_index
+        }
+
+    def _advance_card_animation(self):
+        targets = self._target_positions()
+        moving = False
+        for index, target in targets.items():
+            current = self._card_positions.get(index, self._bounds(index).topLeft())
+            delta = target - current
+            if abs(delta.x()) < 0.5 and abs(delta.y()) < 0.5:
+                self._card_positions[index] = target
+            else:
+                self._card_positions[index] = current + delta * 0.28
+                moving = True
+        self.update()
+        if not moving:
+            self._animation_timer.stop()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             index = self._tile_index(event.position())
@@ -423,18 +493,50 @@ class PlanControlScene(ControlScene):
                     self.remove_requested.emit(index)
                     return
                 self._drag_index = index
+                self._drag_target = index
+                self._drag_position = event.position()
+                self._drag_offset = event.position() - self._bounds(index).topLeft()
+                self._card_positions = {
+                    card_index: self._bounds(card_index).topLeft()
+                    for card_index in range(len(self.controls))
+                    if card_index != index
+                }
                 self.current = index
                 self.selected.emit(index)
                 self.update()
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if self._drag_index is not None:
+            self._drag_position = event.position()
+            self._set_drop_target(event.position())
+            self.update()
+        else:
+            hover = self._tile_index(event.position())
+            if hover != self._hover_index:
+                self._hover_index = hover
+                self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        if self._drag_index is None and self._hover_index != -1:
+            self._hover_index = -1
+            self.update()
+        super().leaveEvent(event)
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._drag_index is not None:
-            target = self._tile_index(event.position())
+            self._drag_position = event.position()
+            self._set_drop_target(event.position())
             source = self._drag_index
+            target = self._drag_target
             self._drag_index = None
+            self._drag_target = None
+            self._card_positions.clear()
+            self._animation_timer.stop()
             if 0 <= target < len(self.controls) and target != source:
                 self.reordered.emit(source, target)
+            self.update()
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
@@ -444,12 +546,17 @@ class PlanControlScene(ControlScene):
         painter.setPen(QColor(ACCENT))
         painter.setFont(QFont("Inter", 12, QFont.Weight.Bold))
         for index in range(len(self.controls)):
-            painter.drawText(self._remove_bounds(index), Qt.AlignmentFlag.AlignCenter, "×")
+            if index != self._drag_index:
+                bounds = self._paint_bounds(index)
+                remove = QRectF(bounds.right() - 24, bounds.top() + 4, 20, 20)
+                painter.drawText(remove, Qt.AlignmentFlag.AlignCenter, "×")
         bounds = self._add_bounds()
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(MUTED), 2, Qt.PenStyle.DashLine))
+        add_hovered = self._hover_index == len(self.controls)
+        add_color = QColor(ACCENT if add_hovered else MUTED)
+        painter.setPen(QPen(add_color, 2, Qt.PenStyle.DashLine))
         painter.drawRoundedRect(bounds, 12, 12)
-        painter.setPen(QPen(QColor(MUTED), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(add_color, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         center = bounds.center()
         painter.drawLine(center - QPointF(15, 0), center + QPointF(15, 0))
         painter.drawLine(center - QPointF(0, 15), center + QPointF(0, 15))

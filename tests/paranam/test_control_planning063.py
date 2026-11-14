@@ -77,6 +77,31 @@ def test_clean_volume_defaults_step_to_one_but_keeps_it_editable(qapp):
     assert not existing.avoid_max.isEnabled()
 
 
+def test_plan_control_scene_reflows_cards_while_dragging(qapp):
+    """Dragging previews the resulting order before the model is changed."""
+    from paranam.widgets import PlanControlScene
+
+    scene = PlanControlScene()
+    scene.resize(400, 400)
+    scene.set_controls(
+        [KnobSpec("Gain", 0, 10), KnobSpec("Tone", 0, 10)], current=0
+    )
+    scene._drag_index = scene._drag_target = 0
+    scene._drag_position = scene._bounds(0).center()
+    scene._drag_offset = scene._drag_position - scene._bounds(0).topLeft()
+    scene._card_positions = {1: scene._bounds(1).topLeft()}
+    scene._set_drop_target(scene._bounds(1).center())
+    for _ in range(30):
+        scene._advance_card_animation()
+
+    assert scene._paint_bounds(1).topLeft() == scene._bounds(0).topLeft()
+    assert scene._card_border(1).name() == "#3b3b3b"
+    scene._hover_index = 1
+    assert scene._card_border(1).name() == "#d24a4a"
+    scene._hover_index = len(scene.controls)
+    assert scene._hover_index == 2  # The add card participates in hover tracking.
+
+
 def test_renaming_and_reordering_controls_preserves_plan(workspace):
     from paranam.workspace import read_json
     from nam.capture.export import (
