@@ -1,6 +1,7 @@
 name: Refresh draft 0.7.5 — verified native installers
 
-# Rebuild 0.7.5 with the exact, unmodified 256px logo and edge-to-edge dividers.
+# Rebuild the 0.7.5 draft with the first-visit-only Queue column auto-fit fix.
+# Keep the exact, unmodified 256px logo and edge-to-edge dividers.
 on:
   push:
     branches: [main]
