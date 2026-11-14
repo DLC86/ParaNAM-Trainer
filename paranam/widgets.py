@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QComboBox,
+    QAbstractSlider,
+    QAbstractSpinBox,
+    QScrollBar,
     QSpinBox,
     QCheckBox,
     QTableWidget,
@@ -61,18 +64,36 @@ TEXT = "#f0f0f0"
 MUTED = "#969696"
 
 
-class ComboBoxWheelGuard(QObject):
-    """Keep page scrolling from changing a focused selector by accident."""
+class ValueWheelGuard(QObject):
+    """Prevent mouse wheel changes to form values while allowing page scrolling."""
 
     def eventFilter(self, watched, event):
-        if (
-            isinstance(watched, QComboBox)
-            and event.type() == QEvent.Type.Wheel
-            and not watched.view().isVisible()
+        if event.type() != QEvent.Type.Wheel:
+            return super().eventFilter(watched, event)
+
+        # Spin box editors can receive the event before their parent field.
+        field = watched
+        if isinstance(watched, QLineEdit) and isinstance(
+            watched.parentWidget(), QAbstractSpinBox
         ):
-            event.ignore()
-            return True
-        return super().eventFilter(watched, event)
+            field = watched.parentWidget()
+
+        if isinstance(field, QComboBox):
+            # Scrolling the actual open dropdown must continue to work.
+            if field.view().isVisible():
+                return super().eventFilter(watched, event)
+        elif not (
+            isinstance(field, QAbstractSpinBox)
+            or (
+                isinstance(field, QAbstractSlider)
+                and not isinstance(field, QScrollBar)
+            )
+        ):
+            # Real scrollbars and scrollable content remain usable.
+            return super().eventFilter(watched, event)
+
+        event.ignore()
+        return True
 
 THEME = """
 QWidget { background: #121212; color: #f0f0f0; font-family: 'Inter'; font-size: 13px; }

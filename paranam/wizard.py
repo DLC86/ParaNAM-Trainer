@@ -75,7 +75,7 @@ from .widgets import (
     ControlScene,
     PlanControlScene,
     MetadataEditor,
-    ComboBoxWheelGuard,
+    ValueWheelGuard,
     load_font,
 )
 from . import training
@@ -148,8 +148,8 @@ class WizardWindow(
 
     def __init__(self):
         super().__init__()
-        self._combo_wheel_guard = ComboBoxWheelGuard(self)
-        QApplication.instance().installEventFilter(self._combo_wheel_guard)
+        self._value_wheel_guard = ValueWheelGuard(self)
+        QApplication.instance().installEventFilter(self._value_wheel_guard)
         load_font()
         self.setWindowTitle("ParaNAM Trainer")
         self.setStyleSheet(
@@ -319,9 +319,10 @@ class WizardWindow(
         root.addWidget(sidebar)
         right = QWidget()
         content = QVBoxLayout(right)
-        # Keep page controls inset, but let header/footer rules meet both edges.
+        # Keep the header/footer rules flush with their panels. The page body
+        # supplies its own padding so no layout gap offsets either rule.
         content.setContentsMargins(0, 24, 0, 22)
-        content.setSpacing(18)
+        content.setSpacing(0)
         self.project_label = label("No project open", "muted")
         self.project_label.setTextFormat(Qt.TextFormat.RichText)
         # Group each separator with its bar. Without this grouping, the
@@ -337,11 +338,11 @@ class WizardWindow(
         self.header_divider = QFrame()
         self.header_divider.setObjectName("contentDivider")
         self.header_divider.setFixedHeight(1)
-        self.header_divider.setStyleSheet("border: none; background-color: #515151;")
+        self.header_divider.setStyleSheet("border: none; background-color: #333333;")
         self.header_bar.addWidget(self.header_divider)
         content.addLayout(self.header_bar)
         self.build_recovery_notice(content)
-        self.recovery_notice.layout().setContentsMargins(30, 0, 30, 0)
+        self.recovery_notice.layout().setContentsMargins(30, 18, 30, 0)
         self.pages = QStackedWidget()
         self.page_contents = []
         for index, builder in enumerate(
@@ -377,7 +378,7 @@ class WizardWindow(
             self.pages.addWidget(scroll)
             self.page_contents.append(page)
         self.page_body = QHBoxLayout()
-        self.page_body.setContentsMargins(30, 0, 30, 0)
+        self.page_body.setContentsMargins(30, 18, 30, 18)
         self.page_body.addWidget(self.pages)
         content.addLayout(self.page_body, 1)
         self.footer_bar = QVBoxLayout()
@@ -386,7 +387,7 @@ class WizardWindow(
         self.footer_divider = QFrame()
         self.footer_divider.setObjectName("contentDivider")
         self.footer_divider.setFixedHeight(1)
-        self.footer_divider.setStyleSheet("border: none; background-color: #515151;")
+        self.footer_divider.setStyleSheet("border: none; background-color: #333333;")
         self.footer_bar.addWidget(self.footer_divider)
         footer = QHBoxLayout()
         footer.setContentsMargins(30, 0, 30, 0)

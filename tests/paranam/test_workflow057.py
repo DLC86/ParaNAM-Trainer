@@ -59,8 +59,8 @@ def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
     assert "Saved locally" not in header
     assert window.header_divider.height() == 1
     assert window.footer_divider.height() == 1
-    assert "#515151" in window.header_divider.styleSheet()
-    assert "#515151" in window.footer_divider.styleSheet()
+    assert "#333333" in window.header_divider.styleSheet()
+    assert "#333333" in window.footer_divider.styleSheet()
     content = window.pages.parentWidget().layout()
     assert content.itemAt(0).layout() is window.header_bar
     assert window.header_bar.itemAt(0).layout() is window.header_label_row
@@ -71,6 +71,14 @@ def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
     assert window.footer_bar.indexOf(window.footer_divider) == 0
     assert window.footer_bar.itemAt(1).layout() is not None
     assert window.header_bar.spacing() == window.footer_bar.spacing() == 6
+    # No spacing after the header panel or before the footer panel: the
+    # dividers are on their exact edges, with page padding inside the body.
+    assert content.spacing() == 0
+    assert window.page_body.contentsMargins().top() == 18
+    assert window.page_body.contentsMargins().bottom() == 18
+    assert window.recovery_notice.layout().contentsMargins().top() == 18
+    assert window.header_divider.geometry().bottom() == window.header_bar.geometry().bottom()
+    assert window.footer_divider.geometry().top() == window.footer_bar.geometry().top()
 
     # Neither rule should stop at the 30px inset of the text, pages or buttons.
     sidebar = window.findChild(type(window.header_divider), "sidebar")
@@ -86,6 +94,54 @@ def test_project_header_name_and_action_bar_dividers(window, workspace, qapp):
     qapp.processEvents()
     for rule in (window.header_divider, window.footer_divider):
         assert rule.width() == central.width() - sidebar.width()
+
+
+def test_mouse_wheel_cannot_change_form_values(window, qapp):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QComboBox, QDial, QDoubleSpinBox, QScrollBar, QSlider, QSpinBox
+
+    dropdown = QComboBox(window)
+    dropdown.addItems(["A", "B", "C"])
+    dropdown.setCurrentIndex(1)
+    spin = QSpinBox(window)
+    decimal = QDoubleSpinBox(window)
+    dial = QDial(window)
+    slider = QSlider(Qt.Orientation.Horizontal, window)
+    for field in (spin, decimal, dial, slider):
+        field.setRange(0, 10)
+        field.setValue(5)
+
+    def wheel_event(field):
+        point = field.rect().center()
+        return QWheelEvent(
+            QPointF(point),
+            QPointF(field.mapToGlobal(point)),
+            QPoint(0, 0),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate,
+            False,
+        )
+
+    for field, read_value, expected in (
+        (dropdown, dropdown.currentIndex, 1),
+        (spin, spin.value, 5),
+        (decimal, decimal.value, 5),
+        (dial, dial.value, 5),
+        (slider, slider.value, 5),
+    ):
+        qapp.sendEvent(field, wheel_event(field))
+        assert read_value() == expected
+
+    # Events arriving at the spin box's embedded editor are blocked too.
+    qapp.sendEvent(spin.lineEdit(), wheel_event(spin.lineEdit()))
+    assert spin.value() == 5
+
+    # Scrollbar motion must not be swallowed by the general-purpose filter.
+    scrollbar = QScrollBar(window)
+    assert not window._value_wheel_guard.eventFilter(scrollbar, wheel_event(scrollbar))
 
 
 def test_tts_logo_uses_exact_unmodified_256px_artwork():
