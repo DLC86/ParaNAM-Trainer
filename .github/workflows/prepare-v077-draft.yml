@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/prepare-v077-draft.yml'
+      - '.github/workflows/paranam-installers.yml'
+      - 'packaging/pytest_windows_runner.py'
       - 'tests/paranam/test_plan_rules.py'
 permissions:
   contents: write
