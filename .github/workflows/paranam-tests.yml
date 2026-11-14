@@ -19,7 +19,8 @@ jobs:
           python-version: '3.11'
       - run: sudo apt-get update && sudo apt-get install -y clang libportaudio2 libegl1 libopengl0
       - run: python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pip install -e '.[test]'
+      # Use the same Qt runtime as the native installers.
+      - run: python -m pip install 'PySide6==6.8.3' -e '.[test]'
       - name: Use verified Eigen GitHub mirror instead of overloaded GitLab
         run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - name: Validate switch schema and parametric model exports
@@ -32,5 +33,5 @@ jobs:
             sleep 15
           done
           exit 1
-      - run: python -m pytest tests/paranam tests/capture tests/test_nam/test_data.py tests/parametric/test_dataset.py tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - run: python -m pytest tests/paranam tests/capture tests/test_nam/test_data.py tests/parametric/test_dataset.py tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2.py tests/parametric/test_hyper_a2_packed.py -v -o addopts= --basetemp .test-temp
 
