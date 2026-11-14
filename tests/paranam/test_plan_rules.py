@@ -8,7 +8,7 @@ from nam.capture.project import add_corner_captures, new_project
 from paranam.workspace import Workspace, migrate_knob_limits
 
 
-def test_plan_rules_filter_both_splits_and_corners_except_volume_calibration():
+def test_plan_rules_filter_both_splits_corners_and_volume_calibration():
     knobs = [
         KnobSpec("Bass", 0, 3, 1, 1, avoid_above=2),
         KnobSpec("Treble", 0, 3, 1, 1),
@@ -23,7 +23,18 @@ def test_plan_rules_filter_both_splits_and_corners_except_volume_calibration():
     assert all(e.params["Bass"] <= 2 and not rule.excludes(e.params) for e in project.entries)
     initialize_calibration(project)
     gain = [e for e in project.entries if e.split == "gain"]
-    assert gain and all(e.params["Bass"] == e.params["Treble"] == 3 for e in gain)
+    assert len(gain) == 3
+    assert all(e.params["Bass"] <= 2 and not rule.excludes(e.params) for e in gain)
+    assert len({(e.params["Bass"], e.params["Treble"]) for e in gain}) == 1
+    assert gain[0].params["Volume"] == 2
+
+    project.plan_rules.append(PlanRule(controls=("Volume",), operator="<", value=1))
+    initialize_calibration(project)
+    assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {1, 2}
+
+    project.plan_rules.append(PlanRule(controls=("Volume",), operator="=", value=1))
+    with pytest.raises(ValueError, match="at least one lower position"):
+        initialize_calibration(project)
 
 
 def test_switch_rule_excludes_position_by_label():

@@ -5,7 +5,22 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMainWindow, QPushButton
 
-from paranam.busy_overlay import _Overlay, run_calculation
+from paranam.busy_overlay import _Overlay, foreground_operation, run_calculation
+
+
+def test_immediate_operation_shows_overlay_before_loading(qapp):
+    window = QMainWindow()
+    window.setCentralWidget(QPushButton())
+    window.show()
+    with foreground_operation(window, immediate=True):
+        overlay = window.findChild(_Overlay)
+        assert overlay.isVisible()
+        assert run_calculation(window, lambda: 42) == 42
+        assert overlay.isVisible()
+    assert overlay.isVisible()
+    QTest.qWait(350)
+    assert not overlay.isVisible()
+    window.close()
 
 
 def test_calculation_animates_and_blocks_clicks(qapp):

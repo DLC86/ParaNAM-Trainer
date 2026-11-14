@@ -7,6 +7,7 @@ import math
 import numpy as np
 
 from .params import SwitchSpec
+from .plan_rules import allows
 from .project import CaptureEntryModel
 from .planner import _planned_from_params, _quantize_to_capture_grid
 
@@ -19,30 +20,17 @@ def volume_control(project):
     )
 
 
-def _snap(control, value):
-    spec = replace(control.to_param_spec(), avoid_zero=False, avoid_max=False)
-    return float(
-        _quantize_to_capture_grid(
-            np.array([value]), (spec,), default_step=control.step
-        )[0]
-    )
-
-
-def _context(project, defaults=False):
+def _context(project):
     result = {}
     for c in project.control_specs():
         if isinstance(c, SwitchSpec):
-            result[c.name] = c.enum_names[c.default if defaults else -1]
+            result[c.name] = c.enum_names[-1]
         else:
-            value = c.default if defaults else c.max
-            result[c.name] = float(
+            result[c.name] = round(float(
                 _quantize_to_capture_grid(
-                    np.array([value]),
-                    (replace(c.to_param_spec(), avoid_zero=False, avoid_max=False,
-                             avoid_below=None, avoid_above=None),),
-                    default_step=c.step
+                    np.array([c.max]), (c.to_param_spec(),), default_step=c.step
                 )[0]
-            )
+            ), 6)
     return result
 
 
@@ -90,26 +78,51 @@ def _append(project, positions, context, phase):
 
 
 def initialize_calibration(project):
-    """Capture only the fixed volume grid with every other control at maximum."""
+    """Choose one allowed rig setting and measure its volume sweep."""
     from .planner import _capture_grid_values
 
     control = volume_control(project)
     if control is None:
         return
-    # Older plans included redundant calibration captures with other controls at
-    # defaults. Keep their WAVs on disk, but remove them from the active plan.
-    project.entries = [
-        entry
-        for entry in project.entries
-        if entry.split != "gain"
-        or entry.user_metadata.get("output_gain", {}).get("context") != "check"
-    ]
     grid = _capture_grid_values(
         replace(control.to_param_spec(), avoid_zero=False, avoid_max=False),
         control.step,
     )
+    # Keep the training reference at volume maximum. Measure the rest of
+    # the curve with the same tone/switch settings so levels are comparable.
+    grid = sorted({v for v in grid if round(control.min, 6) < v < round(control.max, 6)}
+                  | {control.min, control.max})
     high = _context(project)
-    _append(project, grid, high, "grid")
+    contexts = [high, *(e.params for e in project.entries if e.split == "train")]
+    context = None
+    positions = []
+    seen = set()
+    for candidate in contexts:
+        key = tuple(candidate[c.name] for c in project.control_specs() if c.name != control.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        allowed = [v for v in grid if allows(project.plan_rules, {**candidate, control.name: v})]
+        if control.max in allowed and len(allowed) > len(positions):
+            context, positions = candidate, allowed
+            if len(positions) == len(grid):
+                break
+    if len(positions) < 2:
+        raise ValueError(
+            "Linear Volume needs an allowed maximum and at least one lower position "
+            "with the same rig settings. Adjust the plan rules."
+        )
+    project.entries = [
+        entry for entry in project.entries
+        if entry.split != "gain"
+        or (
+            entry.user_metadata.get("output_gain", {}).get("context") == "max"
+            and entry.params.get(control.name) in positions
+            and all(entry.params.get(name) == value for name, value in context.items()
+                    if name != control.name)
+        )
+    ]
+    _append(project, positions, context, "grid")
     gain_entries = sorted(
         (entry for entry in project.entries if entry.split == "gain"),
         key=lambda entry: float(entry.params[control.name]),
@@ -224,7 +237,9 @@ def advance_calibration(project, root):
         for e in entries
         if e.user_metadata.get("output_gain", {}).get("context") == "max"
     ]
-    reference_entry = next(e for e in main if e.params[control.name] == control.max)
+    reference_entry = next((e for e in main if e.params[control.name] == control.max), None)
+    if reference_entry is None or len(main) < 2:
+        raise ValueError("Linear Volume requires its maximum and at least one lower measurement")
     if reference_entry.status != "captured":
         return 0
     reference = _signal(project, root, reference_entry)

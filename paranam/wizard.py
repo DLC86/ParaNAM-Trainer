@@ -1837,11 +1837,11 @@ class WizardWindow(
         if self.busy():
             return
         try:
-            with foreground_operation(self):
+            with foreground_operation(self, immediate=True):
                 workspace = run_calculation(self, lambda: Workspace(directory))
                 self._attach(workspace, use_last_setup=True)
                 self.navigate(1)
-            self.refresh_training()
+                self.refresh_training()
         except Exception as error:
             self.notify_error(error)
 

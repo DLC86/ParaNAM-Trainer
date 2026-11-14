@@ -104,7 +104,7 @@ class _Feedback(QObject):
 
 
 @contextmanager
-def foreground_operation(window):
+def foreground_operation(window, *, immediate=False):
     feedback = getattr(window, "_calculation_feedback", None)
     if feedback is None:
         feedback = window._calculation_feedback = _Feedback(window)
@@ -113,10 +113,14 @@ def foreground_operation(window):
         QApplication.instance().installEventFilter(feedback.guard)
         window._foreground_calculation = True
         feedback.overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        if feedback.overlay.isHidden():
+        if feedback.overlay.isHidden() and not immediate:
             feedback.reveal.start()
     feedback.depth += 1
     try:
+        if immediate and feedback.overlay.isHidden():
+            feedback.reveal.stop()
+            feedback.show()
+            feedback.overlay.repaint()
         yield
     finally:
         feedback.depth -= 1
