@@ -71,7 +71,8 @@ from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
-from .busy_overlay import run_calculation
+from .busy_overlay import foreground_operation, run_calculation
+from .project_files import change_project
 from .widgets import (
     THEME,
     ControlScene,
@@ -429,6 +430,11 @@ class WizardWindow(
         )
         self.open_project_folder_button.setEnabled(False)
         row.addWidget(self.open_project_folder_button)
+        self.rename_project_button = button("Rename", self.rename_selected_project)
+        self.duplicate_project_button = button("Duplicate", self.duplicate_selected_project)
+        for action in (self.rename_project_button, self.duplicate_project_button):
+            action.setEnabled(False)
+            row.addWidget(action)
         self.delete_project_button = button("Delete", self.delete_selected_project)
         self.delete_project_button.setEnabled(False)
         row.addWidget(self.delete_project_button)
@@ -447,6 +453,64 @@ class WizardWindow(
         selected = self.recent.currentItem() is not None
         self.open_project_folder_button.setEnabled(selected)
         self.delete_project_button.setEnabled(selected)
+        self.rename_project_button.setEnabled(selected)
+        self.duplicate_project_button.setEnabled(selected)
+
+    def rename_selected_project(self):
+        self._change_selected_project(duplicate=False)
+
+    def duplicate_selected_project(self):
+        self._change_selected_project(duplicate=True)
+
+    def _change_selected_project(self, *, duplicate):
+        item = self.recent.currentItem()
+        if item is None or self.busy():
+            return
+        path = Path(item.data(Qt.ItemDataRole.UserRole))
+        name = item.text().splitlines()[0]
+        if not duplicate:
+            name, accepted = QInputDialog.getText(
+                self, "Rename project", "Project and folder name:", text=name
+            )
+            if not accepted:
+                return
+            name = name.strip()
+        if self.busy():
+            return
+        source = path.resolve()
+        if self.queue_controller.preparing or any(
+            entry["state"] in {"starting", "running", "scoring", "pausing", "stopping"}
+            and (Path(entry["project"]).resolve() == source
+                 or Path(entry["job"]).resolve().is_relative_to(source))
+            for entry in self.queue_controller.store.entries()
+        ):
+            self.notify_error("Wait for active training or preparation before changing this project.")
+            return
+        if getattr(self, "export_worker", None) is not None:
+            self.notify_error("Wait for the current model export to finish.")
+            return
+        try:
+            with foreground_operation(self):
+                current = self.workspace and self.workspace.directory == source
+                if current and not duplicate:
+                    self.close_audio()
+                store = self.queue_controller.store
+                target = run_calculation(
+                    self, lambda: change_project(path, name, duplicate=duplicate, queue_store=store)
+                )
+                paths = self.settings.value("recent", []) or []
+                paths = [paths] if isinstance(paths, str) else paths
+                if not duplicate:
+                    paths = [p for p in paths if Path(p).resolve() != source]
+                self.settings.setValue("recent", [str(target), *paths][:12])
+                if current and not duplicate:
+                    self._attach(run_calculation(self, lambda: Workspace(target)))
+                else:
+                    self._refresh_recent()
+                self.recent.setCurrentRow(0)
+            self.refresh_training()
+        except Exception as error:
+            self.notify_error(error)
 
     def delete_selected_project(self):
         item = self.recent.currentItem()
@@ -1745,8 +1809,11 @@ class WizardWindow(
         if self.busy():
             return
         try:
-            self._attach(Workspace(directory), use_last_setup=True)
-            self.navigate(1)
+            with foreground_operation(self):
+                workspace = run_calculation(self, lambda: Workspace(directory))
+                self._attach(workspace, use_last_setup=True)
+                self.navigate(1)
+            self.refresh_training()
         except Exception as error:
             self.notify_error(error)
 

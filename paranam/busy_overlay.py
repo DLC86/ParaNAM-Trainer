@@ -1,5 +1,7 @@
 """Animated feedback for foreground calculations."""
 
+from contextlib import contextmanager
+
 from PySide6.QtCore import QEvent, QEventLoop, QObject, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
@@ -59,7 +61,7 @@ class _InputGuard(QObject):
         kind = event.type()
         if watched is self.overlay.parentWidget() and kind == QEvent.Type.Resize:
             self.overlay.setGeometry(watched.rect())
-        if kind == QEvent.Type.Close and watched is self.window:
+        if kind == QEvent.Type.Close and watched is self.window and self.window._foreground_calculation:
             event.ignore()
             return True
         if kind in (
@@ -74,39 +76,67 @@ class _InputGuard(QObject):
         return False
 
 
+class _Feedback(QObject):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.overlay = _Overlay(window.centralWidget())
+        self.overlay.hide()
+        self.guard = _InputGuard(window, self.overlay)
+        self.depth = 0
+        self.reveal = QTimer(self, singleShot=True, interval=150)
+        self.reveal.timeout.connect(self.show)
+        self.dismiss = QTimer(self, singleShot=True, interval=250)
+        self.dismiss.timeout.connect(self.hide)
+
+    def show(self):
+        self.overlay.setGeometry(self.overlay.parentWidget().rect())
+        self.overlay.show()
+        self.overlay.raise_()
+        self.overlay.timer.start()
+
+    def hide(self):
+        self.overlay.hide()
+        self.overlay.timer.stop()
+        QApplication.instance().removeEventFilter(self.guard)
+
+
+@contextmanager
+def foreground_operation(window):
+    feedback = getattr(window, "_calculation_feedback", None)
+    if feedback is None:
+        feedback = window._calculation_feedback = _Feedback(window)
+    if feedback.depth == 0:
+        feedback.dismiss.stop()
+        QApplication.instance().installEventFilter(feedback.guard)
+        window._foreground_calculation = True
+        if feedback.overlay.isHidden():
+            feedback.reveal.start()
+    feedback.depth += 1
+    try:
+        yield
+    finally:
+        feedback.depth -= 1
+        if feedback.depth == 0:
+            window._foreground_calculation = False
+            feedback.reveal.stop()
+            if feedback.overlay.isHidden():
+                feedback.hide()
+            else:
+                feedback.dismiss.start()
+
+
 def run_calculation(window, calculate):
     """Run a widget-free calculation and let Qt paint while it completes."""
-    overlay = _Overlay(window.centralWidget())
-    overlay.setGeometry(overlay.parentWidget().rect())
     worker = _Calculation(calculate)
     loop = QEventLoop()
     worker.completed.connect(loop.quit, Qt.ConnectionType.QueuedConnection)
-    guard = _InputGuard(window, overlay)
-    app = QApplication.instance()
-    app.installEventFilter(guard)
-    was_calculating = getattr(window, "_foreground_calculation", False)
-    window._foreground_calculation = True
-    # Show feedback only if the operation outlasts a normal UI interaction.
-    reveal = QTimer(overlay, singleShot=True, interval=150)
-
-    def show():
-        overlay.show()
-        overlay.raise_()
-        overlay.timer.start()
-
-    reveal.timeout.connect(show)
-    reveal.start()
-    try:
+    with foreground_operation(window):
         worker.start()
-        loop.exec()
-    finally:
-        worker.wait()
-        reveal.stop()
-        overlay.timer.stop()
-        app.removeEventFilter(guard)
-        window._foreground_calculation = was_calculating
-        overlay.hide()
-        overlay.deleteLater()
+        try:
+            loop.exec()
+        finally:
+            worker.wait()
     if worker.error is not None:
         raise worker.error
     return worker.result
