@@ -113,7 +113,7 @@ def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_en
         SwitchSpec("Channel", ("A", "B", "C"), 0),
         KnobSpec("Volume", 0, 2, 1, 1, clean_volume=True),
     ]
-    project = new_project(controls, n_train=2, n_validation=0)
+    project = new_project(controls, n_train=3, n_validation=0)
     initialize_calibration(project)
     entries = project.entries_for_split("gain")
     assert len(entries) == 3
@@ -131,7 +131,7 @@ def test_mute_anchor_targets_ignore_switches_and_keep_both_endpoints():
     project = new_project([
         KnobSpec("Drive", 0, 10, mute_at_min=True, mute_at_max=True),
         SwitchSpec("Mode", ("A", "B")),
-    ], n_train=8, n_validation=1)
+    ], n_train=8, n_validation=2)
     model = build_hyper_a2_model_config(project)
     assert model["loss"]["mute_anchor"]["targets"] == [
         {"name": "Drive", "edge": "min"},
