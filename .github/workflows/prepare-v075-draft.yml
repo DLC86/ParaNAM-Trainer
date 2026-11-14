@@ -1,11 +1,7 @@
 name: Prepare ParaNAM Trainer 0.7.5 draft
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/prepare-v075-draft.yml'
-      - 'docs/release-0.7.5.md'
+  # Historical release preparation must not run on edits to its release notes.
   workflow_dispatch:
 
 permissions:
