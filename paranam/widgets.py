@@ -676,6 +676,8 @@ class ControlDialog(QDialog):
         self.sampling_bias.addItem("Most change heard in the upper half", "upper")
         self.gain = QCheckBox("Gain/Drive control")
         self.clean_volume = QCheckBox("Linear volume control")
+        self.mute_at_min = QCheckBox("Mute at minimum")
+        self.mute_at_max = QCheckBox("Mute at maximum")
         self.clean_volume.setToolTip(
             "Train at maximum volume and measure a separate short-signal attenuation curve. "
             "Use only for an output attenuator that does not change tone or distortion. "
@@ -692,6 +694,8 @@ class ControlDialog(QDialog):
             ("Capture density", self.sampling_bias),
             ("", self.gain),
             ("", self.clean_volume),
+            ("", self.mute_at_min),
+            ("", self.mute_at_max),
             ("", self.avoid_zero),
             ("", self.avoid_max),
         ):
@@ -737,6 +741,8 @@ class ControlDialog(QDialog):
                 self.sampling_bias.findData(control.sampling_bias)
             )
             self.clean_volume.setChecked(control.clean_volume)
+            self.mute_at_min.setChecked(control.mute_at_min)
+            self.mute_at_max.setChecked(control.mute_at_max)
         elif isinstance(control, SwitchSpec):
             self.kind.setCurrentIndex(1)
             self.count.setValue(len(control.enum_names))
@@ -762,7 +768,7 @@ class ControlDialog(QDialog):
     def _clean_volume_changed(self, checked, reset_step=True):
         if checked and reset_step:
             self.step.setValue(1.0)
-        for field in (self.avoid_zero, self.avoid_max, self.gain):
+        for field in (self.avoid_zero, self.avoid_max, self.gain, self.mute_at_min, self.mute_at_max):
             if checked:
                 field.setChecked(False)
             field.setEnabled(not checked)
@@ -815,6 +821,8 @@ class ControlDialog(QDialog):
                     avoid_max=self.avoid_max.isChecked(),
                     sampling_bias=self.sampling_bias.currentData(),
                     clean_volume=self.clean_volume.isChecked(),
+                    mute_at_min=self.mute_at_min.isChecked(),
+                    mute_at_max=self.mute_at_max.isChecked(),
                 )
         except ValueError as error:
             QMessageBox.warning(self, "Check control settings", str(error))

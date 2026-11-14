@@ -639,12 +639,45 @@ class _SilenceAnchorRampConfig(_SilenceAnchorConfig):
             )
 
 
+@_dataclass(frozen=True)
+class _MuteAnchorConfig:
+    """Training-only audio-in / knob-muted / silence-out constraint."""
+
+    targets: tuple[_Tuple[str, str], ...]
+    weight: float = 0.25
+    batch_size: int = 2
+    ny: int = 512
+
+    def __post_init__(self):
+        if not self.targets or any(
+            not isinstance(name, str) or not name or edge not in ("min", "max")
+            for name, edge in self.targets
+        ):
+            raise ValueError("Mute Anchor requires named min/max control targets")
+        if not _isfinite(self.weight) or self.weight <= 0:
+            raise ValueError("Mute Anchor weight must be positive and finite")
+        if self.batch_size < 1 or self.ny < 1:
+            raise ValueError("Mute Anchor batch_size and ny must be positive")
+
+    @classmethod
+    def from_config(cls, raw):
+        if raw is None:
+            return None
+        return cls(
+            targets=tuple((item["name"], item["edge"]) for item in raw["targets"]),
+            weight=float(raw.get("weight", 0.25)),
+            batch_size=int(raw.get("batch_size", 2)),
+            ny=int(raw.get("ny", 512)),
+        )
+
+
 @_dataclass
 class _ParametricLossConfig(_LossConfig):
     training_recipe: str = "legacy"
     mel_weight: _Optional[float] = None
     silence_anchor: _Optional[_SilenceAnchorConfig] = None
     silence_anchor_ramp: _Optional[_SilenceAnchorRampConfig] = None
+    mute_anchor: _Optional[_MuteAnchorConfig] = None
 
     @classmethod
     def parse_config(cls, config):
@@ -659,6 +692,7 @@ class _ParametricLossConfig(_LossConfig):
         parsed["silence_anchor_ramp"] = _SilenceAnchorRampConfig.from_config(
             config.get("silence_anchor_ramp")
         )
+        parsed["mute_anchor"] = _MuteAnchorConfig.from_config(config.get("mute_anchor"))
         return parsed
 
 
@@ -693,6 +727,12 @@ class _ParametricLightningModule(_LightningModule):
 
             net.export_model_dict_post_hooks.append(OutputGainExportHook(output_gain))
         self._hypernet_lr_scale = float(hypernet_lr_scale)
+        mute = self._loss_config.mute_anchor
+        if mute is not None:
+            specs = {spec.name: spec for spec in net.param_specs}
+            for name, edge in mute.targets:
+                if name not in specs or specs[name].type != "continuous":
+                    raise ValueError(f"Mute Anchor requires a continuous control: {name!r}")
         self._mel_mrstft = None
         # Fail here rather than on the first training step: a net that conditions on the
         # control vector as a whole has no meaning to give a control that moves within
@@ -704,6 +744,7 @@ class _ParametricLightningModule(_LightningModule):
         # to single-level pooling over the whole split instead of a wrong two-level split.
         self._train_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
+        self._mute_anchor_cursor = 0
 
     @classmethod
     def parse_config(cls, config):
@@ -961,6 +1002,36 @@ class _ParametricLightningModule(_LightningModule):
         else:
             yield None, self._shared_step(batch)
 
+    def _mute_anchor_losses(self, batch):
+        """Apply one muted endpoint to real input audio, alternating targets.
+
+        The same randomized non-muted controls are used throughout the mini-batch
+        to preserve HyperA2's packed uniform-parameter execution.
+        """
+        config = self._loss_config.mute_anchor
+        if config is None:
+            return None
+        net = _get_parametric_net(self)
+        x = batch[0]
+        ny = min(config.ny, x.shape[-1] - net.receptive_field + 1)
+        if ny < 1:
+            raise ValueError("Mute Anchor input is shorter than the receptive field")
+        count = min(config.batch_size, x.shape[0])
+        loudness = x[:, -ny:].abs().mean(dim=1)
+        indices = _torch.topk(loudness, k=count).indices
+        audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
+        name, edge = config.targets[self._mute_anchor_cursor % len(config.targets)]
+        self._mute_anchor_cursor += 1
+        setting = _sample_raw_params(net.param_specs, 1, device=x.device)
+        index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
+        spec = net.param_specs[index]
+        setting[0, index] = spec.min if edge == "min" else spec.max
+        setting = setting.expand(count, -1)
+        if isinstance(net, _HyperA2):
+            outputs = net.forward_sizes(audio, setting, pad_start=False)
+            return outputs.abs().mean(dim=(0, 2))
+        return net(audio, setting, pad_start=False).abs().mean().unsqueeze(0)
+
     def training_step(self, batch, batch_idx):
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
         losses = []
@@ -981,6 +1052,9 @@ class _ParametricLightningModule(_LightningModule):
                     preds, targets, means, capture_index
                 )
         stacked = _torch.stack(losses)
+        anchor_losses = self._mute_anchor_losses(batch)
+        if anchor_losses is not None:
+            stacked = stacked + self._loss_config.mute_anchor.weight * anchor_losses
         return (
             stacked.sum()
             if self._loss_config.training_recipe == "a2"

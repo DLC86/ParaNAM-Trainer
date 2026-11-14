@@ -789,6 +789,10 @@ class WizardWindow(
         self.control_bias.addItem("Upper-half density", "upper")
         self.control_gain = QCheckBox("Gain / Drive")
         self.control_clean_volume = QCheckBox("Linear volume")
+        self.control_mute_min = QCheckBox("Mute at minimum")
+        self.control_mute_max = QCheckBox("Mute at maximum")
+        for mute in (self.control_mute_min, self.control_mute_max):
+            mute.setToolTip("Teach the neural model to output silence at this endpoint without recording the muted position or changing the exported model format.")
         self.control_avoid_min = QCheckBox("Avoid <")
         self.control_avoid_max = QCheckBox("Avoid >")
         self.control_below = QDoubleSpinBox()
@@ -802,7 +806,7 @@ class WizardWindow(
             threshold.setAccessibleName(checkbox.text() + " threshold")
             checkbox.toggled.connect(threshold.setEnabled)
             threshold.editingFinished.connect(self.save_control)
-        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), (self.control_avoid_min, self.control_below), (self.control_avoid_max, self.control_above)):
+        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), ("", self.control_mute_min), ("", self.control_mute_max), (self.control_avoid_min, self.control_below), (self.control_avoid_max, self.control_above)):
             knob_form.addRow(caption, field)
         switch_page = QWidget()
         switch_layout = QVBoxLayout(switch_page)
@@ -849,7 +853,7 @@ class WizardWindow(
             field.editingFinished.connect(self.save_control)
         for field in (self.control_kind, self.control_bias, self.switch_mode, self.switch_default):
             field.currentIndexChanged.connect(self.save_control)
-        for field in (self.control_gain, self.control_clean_volume, self.control_avoid_min, self.control_avoid_max):
+        for field in (self.control_gain, self.control_clean_volume, self.control_mute_min, self.control_mute_max, self.control_avoid_min, self.control_avoid_max):
             field.clicked.connect(self.save_control)
         self.control_error = label("", "muted")
         editor.addWidget(self.control_error)
@@ -2481,6 +2485,8 @@ class WizardWindow(
             self.control_kind,
             self.control_gain,
             self.control_clean_volume,
+            self.control_mute_min,
+            self.control_mute_max,
             self.switch_positions,
             self.control_name,
             self.control_min,
@@ -2522,6 +2528,8 @@ class WizardWindow(
             self.control_bias.setCurrentIndex(self.control_bias.findData(knob.sampling_bias))
             self.control_gain.setChecked(knob.is_gain)
             self.control_clean_volume.setChecked(knob.clean_volume)
+            self.control_mute_min.setChecked(knob.mute_at_min)
+            self.control_mute_max.setChecked(knob.mute_at_max)
             self.control_avoid_min.setChecked(knob.avoid_below is not None)
             self.control_avoid_max.setChecked(knob.avoid_above is not None)
             self.control_below.setValue(knob.min if knob.avoid_below is None else knob.avoid_below)
@@ -2535,7 +2543,7 @@ class WizardWindow(
     def _control_volume_changed(self, checked, reset=True):
         if checked and reset:
             self.control_step.setValue(min(1.0, self.control_max.value() - self.control_min.value()))
-        for field in (self.control_gain, self.control_avoid_min, self.control_avoid_max):
+        for field in (self.control_gain, self.control_mute_min, self.control_mute_max, self.control_avoid_min, self.control_avoid_max):
             if checked and reset:
                 field.setChecked(False)
             field.setEnabled(not checked)
@@ -2653,6 +2661,8 @@ class WizardWindow(
                     avoid_above=self.control_above.value() if self.control_avoid_max.isChecked() else None,
                     sampling_bias=self.control_bias.currentData(),
                     clean_volume=self.control_clean_volume.isChecked(),
+                    mute_at_min=self.control_mute_min.isChecked(),
+                    mute_at_max=self.control_mute_max.isChecked(),
                 )
             after = control.to_dict()
             self.control_error.hide()

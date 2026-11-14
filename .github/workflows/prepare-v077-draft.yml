@@ -1,0 +1,44 @@
+name: Prepare and build ParaNAM Trainer 0.7.7 draft
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prepare-v077-draft.yml'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create verified draft and dispatch all native builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx '__version__ = "0.7.7"' paranam/__init__.py
+          grep -qx 'version = "0.7.7"' pyproject.toml
+          existing="$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.7.7" or .name == "ParaNAM Trainer 0.7.7") | .id' | head -n 1)"
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="v0.7.7" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="ParaNAM Trainer 0.7.7" \
+              -f body="$(cat docs/release-0.7.7.md)" \
+              -F draft=true -F prerelease=true > release.json
+          else
+            test "$(gh api "repos/$GH_REPO/releases/$existing" --jq .draft)" = true
+            gh api --method PATCH "repos/$GH_REPO/releases/$existing" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f body="$(cat docs/release-0.7.7.md)" \
+              -F draft=true -F prerelease=true > release.json
+          fi
+          jq -e --arg sha "$GITHUB_SHA" '.draft == true and .target_commitish == $sha' release.json
+          release_id="$(jq -r '.id' release.json)"
+          echo "Draft ID: $release_id"
+          gh workflow run paranam-installers.yml --ref main \
+            -f target=all -f keep_draft=true -f release_id="$release_id"
+          echo "Native installers dispatched for draft v0.7.7"

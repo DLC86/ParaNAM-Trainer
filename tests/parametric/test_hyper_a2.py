@@ -240,3 +240,52 @@ def test_training_main_writes_dual_size_checkpoints_and_final_exports(tmp_path, 
     restored = HyperA2.init_from_config(final["config"])
     restored.import_weights(final["weights"])
     assert restored.branch("full")._template._head_scale != pytest.approx(0.01)
+
+
+def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio():
+    from nam.train.parametric import _MuteAnchorConfig
+
+    model = make_model()
+    module = _ParametricLightningModule(
+        model,
+        loss_config=_ParametricLossConfig(
+            mute_anchor=_MuteAnchorConfig(
+                targets=(("Gain", "min"), ("Gain", "max")),
+                weight=0.25, batch_size=2, ny=32,
+            ),
+        ),
+    )
+    module.train()
+    module.on_train_epoch_start()
+    x = torch.randn(2, model.receptive_field + 63)
+    p = torch.full((2, 1), 5.0)
+    y = torch.randn(2, 64)
+    first = module._mute_anchor_losses((x, p, y))
+    assert first.shape == (2,) and torch.isfinite(first).all()
+    assert module._mute_anchor_cursor == 1
+    second = module._mute_anchor_losses((x, p, y))
+    assert second.shape == (2,) and torch.isfinite(second).all()
+    assert module._mute_anchor_cursor == 2
+    loss = module.training_step((x, p, y), 2)
+    assert torch.isfinite(loss)
+    loss.backward()
+    for branch in model._branches.values():
+        assert any(
+            v.grad is not None and v.grad.abs().sum() > 0
+            for v in branch._hypernet.parameters()
+        )
+    assert not any("mute" in spec.to_dict() for spec in model.param_specs)
+
+
+def test_mute_anchor_rejects_unknown_and_invalid_edges():
+    from nam.train.parametric import _MuteAnchorConfig
+
+    with pytest.raises(ValueError, match="continuous control"):
+        _ParametricLightningModule(
+            make_model(),
+            loss_config=_ParametricLossConfig(
+                mute_anchor=_MuteAnchorConfig(targets=(("Missing", "max"),))
+            ),
+        )
+    with pytest.raises(ValueError, match="named min/max"):
+        _MuteAnchorConfig(targets=(("Gain", "middle"),))

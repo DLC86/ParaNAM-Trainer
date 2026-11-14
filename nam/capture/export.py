@@ -453,10 +453,21 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     }
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
+    mute_targets = [
+        {"name": knob.name, "edge": edge}
+        for knob in project.knob_specs()
+        if not knob.clean_volume
+        for flag, edge in ((knob.mute_at_min, "min"), (knob.mute_at_max, "max"))
+        if flag
+    ]
+    loss = {"val_loss": "esr", "mrstft_weight": 0.0005}
+    if mute_targets:
+        # Training-only targets: never add player-facing model fields.
+        loss["mute_anchor"] = {"targets": mute_targets, "weight": 0.25, "batch_size": 2, "ny": 512}
     return {
         **_calibration_metadata(project),
         "net": {"name": "HyperWaveNet", "config": config},
-        "loss": {"val_loss": "esr", "mrstft_weight": 0.0005},
+        "loss": loss,
         "optimizer": {"lr": 0.002, "weight_decay": 3.17e-07},
         "lr_scheduler": {"class": "ExponentialLR", "kwargs": {"gamma": 0.994}},
     }

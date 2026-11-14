@@ -59,6 +59,8 @@ class KnobSpec:
     avoid_max: bool = False
     sampling_bias: str = "linear"
     clean_volume: bool = False
+    mute_at_min: bool = False
+    mute_at_max: bool = False
     avoid_below: _Optional[float] = None
     avoid_above: _Optional[float] = None
 
@@ -108,6 +110,8 @@ class KnobSpec:
             object.__setattr__(self, "default", default)
         object.__setattr__(self, "avoid_zero", bool(self.avoid_zero))
         object.__setattr__(self, "is_gain", bool(self.is_gain))
+        object.__setattr__(self, "mute_at_min", bool(self.mute_at_min))
+        object.__setattr__(self, "mute_at_max", bool(self.mute_at_max))
         for field in ("avoid_below", "avoid_above"):
             limit = getattr(self, field)
             if limit is not None:
@@ -120,7 +124,7 @@ class KnobSpec:
                 raise ValueError("Avoid < must be at or below Avoid >")
         if self.sampling_bias not in ("linear", "lower", "upper"):
             raise ValueError("Choose uniform, lower-half or upper-half sampling")
-        if self.clean_volume and (self.avoid_max or self.is_gain or self.avoid_above is not None or self.avoid_below is not None):
+        if self.clean_volume and (self.avoid_max or self.is_gain or self.avoid_above is not None or self.avoid_below is not None or self.mute_at_min or self.mute_at_max):
             raise ValueError(
                 "Linear volume cannot use Gain/Drive or capture thresholds"
             )
@@ -164,6 +168,8 @@ class KnobSpec:
                 else {}
             ),
             **({"clean_volume": True} if self.clean_volume else {}),
+            **({"mute_at_min": True} if self.mute_at_min else {}),
+            **({"mute_at_max": True} if self.mute_at_max else {}),
         }
 
     @classmethod
@@ -187,6 +193,8 @@ class KnobSpec:
             avoid_above=config.get("avoid_above"),
             sampling_bias=config.get("sampling_bias", "linear"),
             clean_volume=config.get("clean_volume", False),
+            mute_at_min=config.get("mute_at_min", False),
+            mute_at_max=config.get("mute_at_max", False),
         )
 
 

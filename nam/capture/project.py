@@ -199,6 +199,8 @@ class KnobModel(_BaseModel):
     avoid_max: bool = False
     sampling_bias: str = "linear"
     clean_volume: bool = False
+    mute_at_min: bool = False
+    mute_at_max: bool = False
     avoid_below: _Optional[float] = None
     avoid_above: _Optional[float] = None
 
@@ -216,6 +218,8 @@ class KnobModel(_BaseModel):
             avoid_above=self.avoid_above,
             sampling_bias=self.sampling_bias,
             clean_volume=self.clean_volume,
+            mute_at_min=self.mute_at_min,
+            mute_at_max=self.mute_at_max,
         )
 
     @classmethod
