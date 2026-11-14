@@ -1,9 +1,11 @@
 name: Prepare and build ParaNAM Trainer 0.7.7 draft
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/prepare-v077-draft.yml'
+      - 'tests/paranam/test_plan_rules.py'
 permissions:
   contents: write
   actions: write
