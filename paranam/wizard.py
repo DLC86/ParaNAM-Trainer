@@ -1299,12 +1299,17 @@ class WizardWindow(
         )
         self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.queue_table.setItemDelegate(PreserveSelectionTextDelegate(self.queue_table))
+        # ResizeToContents was introduced after 0.7.3 and makes each
+        # 600-ms queue refresh recalculate every item's width on the GUI thread.
+        # Fixed initial widths (still manually resizable) avoid the stall.
         self.queue_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
+            QHeaderView.ResizeMode.Interactive
         )
         self.queue_table.horizontalHeader().setStretchLastSection(False)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
+        for column, width in enumerate((140, 120, 110, 90, 100, 65, 85)):
+            self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         layout.addWidget(self.queue_table, 1)
         actions = QHBoxLayout()

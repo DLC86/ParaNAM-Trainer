@@ -348,3 +348,20 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     exported = read_json(Path(progress["export"]))
     assert exported["metadata"].get("modeled_by") != "Changed after enqueue"
     assert Path(progress["export"]).stem == exported["metadata"]["name"]
+
+
+def test_queue_idle_refresh_keeps_interactive_column_widths(window):
+    """Queue polling must not auto-size the entire table on the GUI thread."""
+    from PySide6.QtWidgets import QHeaderView
+
+    table = window.queue_table
+    header = table.horizontalHeader()
+    assert all(
+        header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+        for column in range(table.columnCount())
+    )
+    window.navigate(4)
+    table.setColumnWidth(0, 237)
+    for _ in range(5):
+        window.refresh_training()
+    assert table.columnWidth(0) == 237

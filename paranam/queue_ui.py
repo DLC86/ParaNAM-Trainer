@@ -169,7 +169,8 @@ class QueueActions:
                 selected = entry
                 table.selectRow(row)
         table.blockSignals(False)
-        table.resizeColumnsToContents()
+        # Do not auto-fit columns on polling or selection: even for idle queues
+        # it forces synchronous O(rows * columns) measurements every 600 ms.
         self.job = Path(selected["job"]) if selected else None
         self.process = (
             self.queue_controller.process
