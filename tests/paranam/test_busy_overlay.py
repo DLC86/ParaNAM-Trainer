@@ -35,10 +35,10 @@ def test_calculation_animates_and_blocks_clicks(qapp):
     assert window.findChild(_Overlay).isVisible()
     assert run_calculation(window, lambda: 7) == 7
     assert window.findChild(_Overlay).isVisible()
-    QTest.qWait(350)
-    assert not window.findChild(_Overlay).isVisible()
     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
     assert clicks == [True]
+    QTest.qWait(350)
+    assert not window.findChild(_Overlay).isVisible()
     window.close()
 
 

@@ -61,7 +61,9 @@ class _InputGuard(QObject):
         kind = event.type()
         if watched is self.overlay.parentWidget() and kind == QEvent.Type.Resize:
             self.overlay.setGeometry(watched.rect())
-        if kind == QEvent.Type.Close and watched is self.window and self.window._foreground_calculation:
+        if not self.window._foreground_calculation:
+            return False
+        if kind == QEvent.Type.Close and watched is self.window:
             event.ignore()
             return True
         if kind in (
@@ -110,6 +112,7 @@ def foreground_operation(window):
         feedback.dismiss.stop()
         QApplication.instance().installEventFilter(feedback.guard)
         window._foreground_calculation = True
+        feedback.overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         if feedback.overlay.isHidden():
             feedback.reveal.start()
     feedback.depth += 1
@@ -119,6 +122,7 @@ def foreground_operation(window):
         feedback.depth -= 1
         if feedback.depth == 0:
             window._foreground_calculation = False
+            feedback.overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             feedback.reveal.stop()
             if feedback.overlay.isHidden():
                 feedback.hide()
