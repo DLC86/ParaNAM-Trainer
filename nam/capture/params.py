@@ -122,7 +122,7 @@ class KnobSpec:
             raise ValueError("Choose uniform, lower-half or upper-half sampling")
         if self.clean_volume and (self.avoid_max or self.is_gain or self.avoid_above is not None or self.avoid_below is not None):
             raise ValueError(
-                "Linear volume cannot use Gain / Drive or capture thresholds"
+                "Linear volume cannot use Gain/Drive or capture thresholds"
             )
         if self.avoid_max and self.avoid_zero and not (
             (_math.floor(self.min / self.step + 1e-10) + 1) * self.step
