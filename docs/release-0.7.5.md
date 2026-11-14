@@ -12,6 +12,13 @@
 - **Project header:** the open project's name is displayed **larger and in white**, while the separator dot and the **Automatically saved** status keep their previous size and muted color.
 - **Full-width grey separators** now extend from the border of the left navigation panel to the right edge of the window. The project name, pages and Back/Next controls retain their 30px side padding, preserving the resizable Capture table.
 
+## Plan, Capture, Queue and Compare
+
+- Plan control cards follow the pointer during drag-and-drop, while the other cards animate into position. Hover highlights control cards and both the border and icon of the add card.
+- Selecting a control skips recalculating capture recommendations. Capture grid limits account for both marked Gain/Drive controls.
+- Queue fits its columns on first opening and then preserves their widths. Queue and Capture reuse existing table cells, and Compare keeps the model selector intact when its contents are unchanged.
+- Scrolling over closed dropdowns no longer changes their selection.
+
 ## Update notification
 
 - **GitHub-style Markdown release notes** are rendered directly in the update window, including headings, bold and italic text, lists, links, code blocks and tables.
