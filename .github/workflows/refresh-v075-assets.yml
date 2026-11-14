@@ -107,10 +107,11 @@ jobs:
         run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
       - name: Build optimized native Compare engine
         run: python packaging/native_engine.py
-      # The full Python suite already runs on every main push in the dedicated
-      # test workflow. Keep this release job focused on packaging and frozen
-      # bundle validation, which are platform-specific and cannot be covered
-      # by that earlier workflow.
+      # The repository test workflow starts in parallel with this release
+      # refresh, so retain this gate until it can be made an explicit required
+      # dependency for the exact source revision.
+      - name: Test Projects, metadata, Compare, training and singleton guard
+        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
       # Windows packaging also smoke-tests the native launcher and its
       # inherited stdout pipe for Inno Setup's PNGPU progress protocol.
       - name: Freeze application and package native installer

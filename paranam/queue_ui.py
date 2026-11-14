@@ -221,10 +221,17 @@ class QueueActions:
             return read_json(path, {}, tolerate_corrupt=True)
         key = str(path)
         cached = self._queue_json_cache.get(key)
-        if cached is not None and cached[0] == stamp:
+        from .recovery import is_blocked
+
+        if cached is not None and cached[0] == stamp and not is_blocked(path):
             return cached[1]
         data = read_json(path, {}, tolerate_corrupt=True)
-        self._queue_json_cache[key] = (stamp, data)
+        # An empty result can mean a transient/corrupt write. Re-read it on
+        # the next poll so read_json still has a chance to recover a backup.
+        if data and not data.get("recovery_required") and not is_blocked(path):
+            self._queue_json_cache[key] = (stamp, data)
+        else:
+            self._queue_json_cache.pop(key, None)
         return data
 
     def refresh_training(self):

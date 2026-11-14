@@ -222,8 +222,6 @@ class WizardWindow(
         self.timer.timeout.connect(self.refresh_training)
         self.timer.start()
         if sys.platform == "win32":
-            from PySide6.QtWidgets import QApplication
-
             self._audio_device_events = AudioDeviceEvents(
                 self._settings_device_changed, self.winId()
             )
@@ -1922,6 +1920,7 @@ class WizardWindow(
             return
         self.close_audio()
         info = self.device.currentData()
+        self._play_model_options_loaded = False
         self._populate_audio_controls(info)
         self.save_audio()
         self.asio_settings_button.setVisible(info is not None and info.host_api == "ASIO")
@@ -2322,7 +2321,7 @@ class WizardWindow(
             return
         self.workspace.move_control(source, target)
         self.selected_control_index = target
-        self.refresh_controls(refresh_recommendation=False)
+        self.refresh_controls()
 
     def _load_control_editor(self, control):
         from PySide6.QtCore import QSignalBlocker

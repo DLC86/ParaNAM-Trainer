@@ -373,7 +373,9 @@ class PlayActions:
         refresh = QPushButton("Refresh")
         self.play_refresh = refresh
         refresh.clicked.connect(
-            lambda _checked=False: self.refresh_play_models(force=True)
+            lambda _checked=False: self.refresh_play_models(
+                force=True, reload_selected=True
+            )
         )
         row.addWidget(refresh)
         self.play_size = QComboBox()
@@ -789,12 +791,8 @@ class PlayActions:
             )
             self.refresh_play_models(path, force=True)
 
-    def refresh_play_models(self, selected=None, *, force=False):
+    def refresh_play_models(self, selected=None, *, force=False, reload_selected=False):
         if self.play_loader:
-            return
-        if self._play_model_options_loaded and not force and selected is None:
-            self._refresh_play_calibration()
-            self.update_asset_remove_buttons()
             return
         previous = (
             selected if isinstance(selected, str) else self.play_model.currentData()
@@ -826,27 +824,33 @@ class PlayActions:
         paths = sorted(
             {str(Path(p).resolve()) for p in paths if Path(p).is_file()} - hidden
         )
-        self.play_model.blockSignals(True)
-        self.play_model.clear()
-        self.play_model.addItem("Choose a model…", None)
-        for path in paths:
-            self.play_model.addItem(
-                names.get(path, f"{Path(path).parent.name} / {Path(path).name}"), path
-            )
-            self.play_model.setItemData(
-                self.play_model.count() - 1, path, Qt.ItemDataRole.ToolTipRole
-            )
-        self.play_model.setCurrentIndex(max(0, self.play_model.findData(previous)))
-        self.play_model.blockSignals(False)
+        choices = [
+            (names.get(path, f"{Path(path).parent.name} / {Path(path).name}"), path)
+            for path in paths
+        ]
+        current_choices = [
+            (self.play_model.itemText(index), self.play_model.itemData(index))
+            for index in range(self.play_model.count())
+        ]
+        if current_choices != [("Choose a model…", None), *choices]:
+            self.play_model.blockSignals(True)
+            self.play_model.clear()
+            self.play_model.addItem("Choose a model…", None)
+            for name, path in choices:
+                self.play_model.addItem(name, path)
+                self.play_model.setItemData(
+                    self.play_model.count() - 1, path, Qt.ItemDataRole.ToolTipRole
+                )
+            self.play_model.setCurrentIndex(max(0, self.play_model.findData(previous)))
+            self.play_model.blockSignals(False)
         self._play_model_options_loaded = True
         if self.play_model.currentData() is None:
             self._play_ready = False
             self.play_start.setEnabled(False)
             self.clear_play_controls()
         elif previous and (
-            force
-            or
-            isinstance(selected, (str, bool))
+            reload_selected
+            or isinstance(selected, (str, bool))
             or previous != getattr(self, "_loaded_play_path", None)
             or not self._play_ready
         ):
