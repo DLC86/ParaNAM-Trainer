@@ -272,7 +272,14 @@ def sample_unique_settings(
             inverse = lambda v: _inverse_bias((v - spec.min) / width, spec)
             strata = _np.minimum(n - 1, (inverse(raw[:, column]) * n).astype(int))
             target = min(n - 1, int(inverse(value) * n))
-            row = int(_np.flatnonzero(strata == target)[0])
+            matching = _np.flatnonzero(strata == target)
+            if len(matching):
+                row = int(matching[0])
+            else:
+                # Scrambled Sobol is not guaranteed to occupy all n equal-width
+                # Latin strata when n is not a power of two. Still preserve the
+                # nearest available sample when pinning the required default.
+                row = int(_np.argmin(_np.abs(inverse(raw[:, column]) - inverse(value))))
             raw[0, column], raw[row, column] = raw[row, column], raw[0, column]
             raw[0, column] = value
         raw = raw[1:]
@@ -573,7 +580,7 @@ def plan_unique_splits(
     return train, validation
 
 
-LHS_METHODS = ("standard", "maximin", "orthogonal", "near_orthogonal")
+LHS_METHODS = ("standard", "maximin", "orthogonal", "near_orthogonal", "sobol", "optimized")
 
 
 def _standard_lhs(n: int, dim: int, seed: int) -> _np.ndarray:
@@ -600,8 +607,9 @@ def latin_hypercube_unit(
 ) -> _np.ndarray:
     """Create a reproducible Latin hypercube with an optional design criterion.
 
-    Design properties apply before the default anchor, quantization, bias and
-    switch mapping, which can weaken pairwise coverage/orthogonality.
+    LHS variants and scrambled Sobol sampling are deterministic for a given
+    seed. Design properties apply before the default anchor, quantization,
+    bias and switch mapping, which can weaken their ideal space coverage.
     """
     if lhs_method not in LHS_METHODS:
         raise ValueError(f"Unknown LHS method {lhs_method!r}; choose from {LHS_METHODS}")
@@ -611,6 +619,39 @@ def latin_hypercube_unit(
         raise ValueError(f"dim must be non-negative; got {dim}")
     if dim == 0:
         return _np.zeros((n, 0), dtype=_np.float64)
+    if lhs_method == "sobol":
+        # Scrambled Sobol is a low-discrepancy digital net, not an LHS:
+        # sample a power-of-two block and take its prefix so arbitrary
+        # capture counts are supported without the unbalanced-n warning.
+        from scipy.stats import qmc
+
+        try:
+            sampler = qmc.Sobol(
+                d=dim, scramble=True, rng=_np.random.default_rng(seed)
+            )
+        except TypeError:
+            sampler = qmc.Sobol(d=dim, scramble=True, seed=seed)
+        return _np.asarray(
+            sampler.random_base2(m=(n - 1).bit_length())[:n],
+            dtype=_np.float64,
+        )
+
+    if lhs_method == "optimized":
+        # SciPy's random-coordinate-descent optimization targets centered
+        # discrepancy, improving coverage of low-dimensional projections.
+        # Unlike maximin this optimizes more than the closest pair of points.
+        from scipy.stats import qmc
+
+        try:
+            sampler = qmc.LatinHypercube(
+                d=dim, optimization="random-cd", rng=_np.random.default_rng(seed)
+            )
+        except TypeError:
+            sampler = qmc.LatinHypercube(
+                d=dim, optimization="random-cd", seed=seed
+            )
+        return _np.asarray(sampler.random(n=n), dtype=_np.float64)
+
     if lhs_method == "standard" or n == 1:
         return _standard_lhs(n, dim, seed)
 
