@@ -172,6 +172,7 @@ def test_retrain_accepts_started_states_and_omits_unrecorded_suggestions(
     with pytest.raises(ValueError, match="queued"):
         queue.retrain(entry["id"])
     original = Workspace(Path(read_json(Path(entry["job"]) / "spec.json")["project"]))
+    captured_count = len(original.project.entries)
     original.project.entries.append(
         original.project.entries[0].model_copy(
             update={
@@ -197,7 +198,7 @@ def test_retrain_accepts_started_states_and_omits_unrecorded_suggestions(
         editable = queue.retrain(entry["id"])
         assert editable.training_ready()
         assert all(capture.status == "captured" for capture in editable.project.entries)
-        assert len(editable.project.entries) == 3
+        assert len(editable.project.entries) == captured_count
 
 
 @pytest.mark.parametrize("dial_class", [PlayDial, ModelPlayDial])
