@@ -60,6 +60,7 @@ def training_preset(name):
         ny=8192,
         fit_mrstft=True,
         rms_loss_normalization=False,
+        rms_loss_normalization_exponent=2.0,
         snr_weighted_loss_normalization=False,
         mrstft_weight=0.0005,
         weight_decay=3.17e-7,
