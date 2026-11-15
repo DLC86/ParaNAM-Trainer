@@ -24,6 +24,7 @@ def requested_settings():
         "hypernetwork_learning_rate": 0.001,
         "hypernetwork_lr_decay": 0.998496613,
         "branch_loss_reduction": "sum",
+        "snr_weighted_loss_normalization": False,
     }
 
 

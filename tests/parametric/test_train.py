@@ -419,6 +419,76 @@ def test_parametric_plot_label_falls_back_to_params():
     assert _parametric_plot_label(ds) == "params=[3, -3]"
 
 
+@_pytest.mark.parametrize("amplitude", [0.1, 0.0005, 0.0])
+def test_rms_normalizes_training_mse_and_preserves_targets(amplitude):
+    y = _torch.full((16,), amplitude)
+    dataset = _Dataset(
+        x=_torch.zeros_like(y), y=y, nx=1, ny=8, require_input_pre_silence=None
+    )
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    sampler = _CaptureBatchSampler((2,), batch_size=1, shuffle=False, drop_last=False)
+    list(sampler)
+    module.set_capture_batch_samplers(train_sampler=sampler)
+    module.set_capture_mse_normalization(dataset)
+    module.on_train_epoch_start()
+    loss = module.training_step((_torch.zeros(1, 8), y[None, :8]), 0)
+    scale = 10 ** -1.8 / max(amplitude**2, 10 ** -6)
+    assert module._capture_mse_scales == _pytest.approx((scale,))
+    assert loss.item() == _pytest.approx(amplitude**2 * scale)
+    assert _torch.equal(dataset.y, y)
+
+
+def test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio(tmp_path):
+    capture_dir = tmp_path / "captures" / "round1"
+    raw_dir = tmp_path / "captures_raw"
+    capture_dir.mkdir(parents=True)
+    raw_dir.mkdir()
+    capture_path = capture_dir / "take.wav"
+    x_path = tmp_path / "input.wav"
+    _np_to_wav(_np.repeat([0.0, 0.1], 16), x_path)
+    _np_to_wav(_np.repeat([0.4, 0.125], 16), capture_path)
+    playback = _np.zeros(64)
+    playback[16] = 0.5
+    raw = _np.full(64, 0.4)
+    raw[8:12] = 0.0625
+    _np_to_wav(playback, raw_dir / "main.wav")
+    _np_to_wav(raw, raw_dir / "amp.wav")
+    record = {
+        "y_path": "captures/round1/take.wav",
+        "playback": "loopback-reference.wav",
+        "main_playback": "main.wav",
+        "raw": "amp.wav",
+        "preamble_samples": 24,
+    }
+    manifest = raw_dir / "manifest.json"
+    _write_json(
+        manifest,
+        {"version": 1, "captures": [
+            dict(record, y_path="captures/round2/take.wav", raw="other.wav"),
+            record,
+        ]},
+    )
+    dataset = _Dataset.init_from_config(
+        dict(
+            x_path=str(x_path), y_path=str(capture_path), nx=1, ny=8,
+            start_samples=16, y_scale=2.0,
+        )
+    )
+    dataset.scale_output(0.5)
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    module.set_capture_mse_normalization(dataset)
+    rms_scale, = module._capture_mse_scales
+    module.set_capture_mse_normalization(dataset, snr_weighted=True)
+    # The signal fraction is 1 - (0.0625 / 0.125)^2, independent of the trim.
+    assert module._capture_mse_scales == _pytest.approx((0.75 * rms_scale,))
+
+    _write_json(manifest, {"captures": [record, record]})
+    with _pytest.raises(ValueError, match="exactly one matching capture record"):
+        module.set_capture_mse_normalization(dataset, snr_weighted=True)
+    module.set_capture_mse_normalization(dataset)
+    assert module._capture_mse_scales == (rms_scale,)
+
+
 def test_parametric_lightning_training_logs_seen_audio_seen_params_bucket(monkeypatch):
     module = _ParametricLightningModule(_MockBaseNet(1.0))
     captured: dict[str, _Any] = {}

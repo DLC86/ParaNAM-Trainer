@@ -51,6 +51,7 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
         assert spec["model"]["hypernet_lr_scale"] == 0.1
     assert not spec["data"].get("joint")  # User explicitly excludes RMS normalization.
     if kind == "parametric":
+        assert spec["learning"]["snr_weighted_loss_normalization"] is False
         assert spec["model"]["net"]["config"]["hypernet"]["mode"] == "full"
         assert spec["model"]["net"]["config"]["hypernet"]["selector"] == {}
         assert spec["model"]["loss"]["training_recipe"] == "a2"
@@ -196,6 +197,23 @@ def test_041_resume_preserves_actual_legacy_optimizer(workspace, kind, old_optim
         "Adam" if old_optimizer == "AdamW" else "AdamW"
     )
     assert not training.job_can_resume(workspace, job)
+
+
+def test_snr_checkbox_reaches_the_training_job(window, workspace):
+    key = "snr_weighted_loss_normalization"
+    ready(workspace)
+    window._attach(workspace)
+    field = window.advanced_fields[key]
+    assert field.isEnabled() and not field.isChecked()
+    fingerprint = workspace.fingerprint()
+    field.setChecked(True)
+    reopened = Workspace(workspace.directory)
+    assert reopened.training_options()[key] is True
+    assert reopened.fingerprint() != fingerprint
+    spec = read_json(training.make_job(reopened) / "spec.json")
+    assert spec["learning"][key] is True
+    window.load_advanced_options("static")
+    assert not field.isEnabled()
 
 
 def test_validation_and_checkpoint_choices_are_opt_in_and_persist(window, workspace):
