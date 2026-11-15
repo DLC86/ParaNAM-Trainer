@@ -796,7 +796,6 @@ class _ParametricLightningModule(_LightningModule):
         uncalibrated weight.
         """
         import json
-        import wave
         import numpy as np
 
         target_power = 10.0 ** (-18.0 / 10.0)
@@ -809,7 +808,7 @@ class _ParametricLightningModule(_LightningModule):
                 raise ValueError("Cannot normalize capture with non-finite power")
 
             y_path = _Path(capture._y_path).resolve()
-            raw_dir = y_path.parent / "captures_raw"
+            raw_dir = y_path.parent.parent / "captures_raw"
             manifest_path = raw_dir / "manifest.json"
             if not manifest_path.is_file():
                 raise ValueError(f"Noise-aware training requires {manifest_path}")
