@@ -1170,6 +1170,15 @@ class WizardWindow(
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
             field.valueChanged.connect(self.save_preferences)
+        snr_weighted = QCheckBox("SNR weighted loss normalization")
+        snr_weighted.setChecked(True)
+        snr_weighted.setToolTip(
+            "Use the recorded pre-blip noise floor to reduce the MSE weight "
+            "of low-SNR captures. Disable to use RMS-only normalization."
+        )
+        self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
+        advanced_form.addRow(snr_weighted)
+        snr_weighted.toggled.connect(self.save_preferences)
         fit = QCheckBox("Fit MRSTFT")
         fit.setChecked(True)
         self.advanced_fields["fit_mrstft"] = fit
