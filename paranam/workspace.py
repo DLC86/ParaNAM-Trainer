@@ -39,6 +39,7 @@ DEFAULTS = {
     "n_train": 32,
     "n_validation": 12,
     "corners": True,
+    "include_default_as_additional_capture": True,
     "seed": 0,
     "lhs_method": "standard",
     "validation_method": "independent",
@@ -116,6 +117,11 @@ class Workspace:
         self.project = load_project(self.directory)
         stored = read_json(self.directory / "paranam.json", {})
         self.preferences = {**DEFAULTS, **stored}
+        if ("include_default_as_additional_capture" not in stored
+                and self.project.include_default_as_additional_capture is not None):
+            self.preferences["include_default_as_additional_capture"] = (
+                self.project.include_default_as_additional_capture
+            )
         if "lhs_method" not in stored:
             self.preferences["lhs_method"] = self.project.lhs_method
         if "validation_method" not in stored:
@@ -509,6 +515,14 @@ class Workspace:
             or self.preferences["lhs_method"] != self.project.lhs_method
             or self.preferences["validation_method"] != self.project.validation_method
             or self.preferences["corners"] != self.project.include_initial_corners
+            or (
+                (
+                    self.project.include_default_as_additional_capture is not None
+                    or self.preferences.get("_include_default_capture_touched", False)
+                )
+                and self.preferences["include_default_as_additional_capture"]
+                != self.project.include_default_as_additional_capture
+            )
         )
 
     @staticmethod
@@ -658,7 +672,12 @@ class Workspace:
             train_input=self.desired_train_input(),
             validation_input="input_validation.wav",
             plan_rules=rules,
+            include_default_as_additional_capture=(
+                prefs["include_default_as_additional_capture"]
+                if not all_switches else None
+            ),
         )
+        prefs.pop("_include_default_capture_touched", None)
         if switches_only:
             # No unseen categorical states exist, but the fixed validation AUDIO
             # remains held out. Capture the same states with that independent signal.
