@@ -1491,7 +1491,7 @@ def main(
         raise ValueError("Per-capture RMS-normalized loss requires capture_grouped_batches")
     model.set_capture_mse_normalization(
         dataset_train,
-        snr_weighted=learning_config.get("snr_weighted_loss_normalization", True),
+        snr_weighted=learning_config.get("snr_weighted_loss_normalization", False),
     )
     _enable_training_fast_paths(
         net,
