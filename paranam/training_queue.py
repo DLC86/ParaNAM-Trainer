@@ -208,7 +208,9 @@ class TrainingQueue:
                     raise ValueError(
                         "The original job has no frozen SNR noise measurements"
                     )
-                original_project = Workspace(Path(previous_spec["project"])).project
+                from nam.capture.project import load_project
+
+                original_project = load_project(Path(previous_spec["project"]))
                 powers = {}
                 if len(original_project.entries) != len(frozen.project.entries):
                     raise ValueError("Retrain captures no longer match the original plan")
