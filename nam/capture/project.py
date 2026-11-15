@@ -426,7 +426,7 @@ class CaptureProject(_BaseModel):
     # count grows when corner captures are added, which would otherwise make the
     # planned LHS size drift every time the project is reopened.
     n_train_lhs: int = 0
-    lhs_method: Literal["standard", "maximin", "orthogonal", "near_orthogonal"] = "standard"
+    lhs_method: Literal["standard", "maximin", "orthogonal", "near_orthogonal", "sobol", "optimized"] = "standard"
     validation_method: Literal["independent", "farthest"] = "independent"
     include_initial_corners: bool = False
     # The lead this project's captures are labelled against, when it is not the current
