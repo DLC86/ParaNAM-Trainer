@@ -68,6 +68,15 @@ This is a stress test of interpolation, not an unbiased estimate of average
 generalization across knob settings. Regenerating a saved plan replaces the
 settings and archives the previous capture files.
 
+## Retrain uses the original capture plan
+
+The **Retrain** action restores the exact recorded capture plan and frozen
+audio from the selected training job into an independent editable copy. The
+current source project's capture plan is not regenerated, overwritten or used
+to select retraining combinations. Changes made to the source project after
+the job was queued therefore do not alter retraining inputs. Later pending
+active-learning suggestions are not part of the original recorded dataset.
+
 ## Muted endpoint capture planning
 
 **Mute at minimum** and **Mute at maximum** also exclude their respective
