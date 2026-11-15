@@ -107,6 +107,25 @@ def job_can_resume(workspace, job):
     )
     legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
     options = workspace.training_options()
+    if workspace.project.capture_type == "parametric":
+        from nam.capture.export import (
+            MUTE_ANCHOR_DEFAULTS,
+            mute_anchor_settings,
+            mute_anchor_targets,
+        )
+
+        if mute_anchor_targets(workspace.project):
+            saved_mute = spec.get("model", {}).get("loss", {}).get("mute_anchor")
+            if saved_mute is None:
+                return False
+            try:
+                current_mute = mute_anchor_settings(
+                    {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}
+                )
+                if current_mute != mute_anchor_settings(saved_mute):
+                    return False
+            except (AttributeError, ValueError):
+                return False
     saved_trainer = spec.get("learning", {}).get("trainer", {})
     if bool(saved_trainer.get("benchmark", True)) != (
         options["cudnn_benchmark"] and not options["deterministic_training"]
@@ -238,9 +257,11 @@ def job_can_resume(workspace, job):
 def make_job(workspace, resume=False, job_directory=None):
     from filelock import FileLock
     from nam.capture.export import (
+        MUTE_ANCHOR_DEFAULTS,
         build_data_config,
-        build_hyper_a2_model_config,
         build_hyper_a2_learning_config,
+        build_hyper_a2_model_config,
+        mute_anchor_settings,
     )
 
     if not workspace.training_ready():
@@ -378,6 +399,13 @@ def make_job(workspace, resume=False, job_directory=None):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
+            mute = model["loss"].get("mute_anchor")
+            if mute is not None:
+                mute.update(
+                    mute_anchor_settings(
+                        {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}
+                    )
+                )
             if workspace.project.output_gain:
                 # Reconcile saved calibration with the current Plan display order.
                 curve = dict(workspace.project.output_gain)
@@ -1492,6 +1520,19 @@ def run_job(job):
                 return run_batch(
                     job, spec, workspace, shared, elapsed_base, clock_start
                 )
+            if (
+                spec.get("queue_snapshot")
+                and spec["learning"].get("snr_weighted_loss_normalization")
+                and "snr_noise_powers" not in spec["learning"]
+            ):
+                # Older queue snapshots renamed recordings without keeping the
+                # noise measurement. Recover it only from matching source WAVs.
+                from .training_queue import freeze_snr_noise
+
+                spec["learning"]["snr_noise_powers"] = freeze_snr_noise(
+                    spec["original_project"], workspace
+                )
+                atomic_write_json(job / "spec.json", spec)
             completed = shared.get("completed_members", [])
             for member in range(spec["members"]):
                 if member in completed:

@@ -28,6 +28,18 @@ from .project import CaptureProject
 from .project import DATA_FILENAME
 from .project import atomic_write_json as _atomic_write_json
 
+MUTE_ANCHOR_DEFAULTS = {"interval": 1, "batch_size": 2, "ny": 512}
+
+
+def mute_anchor_settings(config):
+    settings = {
+        key: config.get(key, default) for key, default in MUTE_ANCHOR_DEFAULTS.items()
+    }
+    for key, value in settings.items():
+        if type(value) is not int or value < 1:
+            raise ValueError(f"Mute Anchor {key} must be a positive integer")
+    return settings
+
 # Active-learning defaults, adapted from PANAMA's LSTM recipe for the short single-file
 # dataset used here. Batch 37 (matching the best-generalizing prior runs -- the small-batch
 # gradient noise is itself a regularizer; batches of 40/64 trained smoother but plateaued at a
@@ -429,6 +441,19 @@ def build_hyper_a2_model_config(project: CaptureProject) -> dict[str, _Any]:
     return model
 
 
+def mute_anchor_targets(project: CaptureProject) -> list[dict[str, str]]:
+    return [
+        {"name": knob.name, "edge": edge}
+        for knob in project.knob_specs()
+        if not getattr(knob, "clean_volume", False)
+        for flag, edge in (
+            (getattr(knob, "mute_at_min", False), "min"),
+            (getattr(knob, "mute_at_max", False), "max"),
+        )
+        if flag
+    ]
+
+
 def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     config: dict[str, _Any] = {
         "layers": [
@@ -453,18 +478,13 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     }
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
-    mute_targets = [
-        {"name": knob.name, "edge": edge}
-        for knob in project.knob_specs()
-        if not getattr(knob, "clean_volume", False)
-        for flag, edge in ((getattr(knob, "mute_at_min", False), "min"),
-                           (getattr(knob, "mute_at_max", False), "max"))
-        if flag
-    ]
+    mute_targets = mute_anchor_targets(project)
     loss = {"val_loss": "esr", "mrstft_weight": 0.0005}
     if mute_targets:
         # Training-only targets: never add player-facing model fields.
-        loss["mute_anchor"] = {"targets": mute_targets, "weight": 0.25, "batch_size": 2, "ny": 512}
+        loss["mute_anchor"] = {
+            "targets": mute_targets, "weight": 0.25, **MUTE_ANCHOR_DEFAULTS
+        }
     return {
         **_calibration_metadata(project),
         "net": {"name": "HyperWaveNet", "config": config},

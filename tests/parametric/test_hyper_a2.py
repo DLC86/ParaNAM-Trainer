@@ -242,30 +242,42 @@ def test_training_main_writes_dual_size_checkpoints_and_final_exports(tmp_path, 
     assert restored.branch("full")._template._head_scale != pytest.approx(0.01)
 
 
-def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio():
+def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio(monkeypatch):
     from nam.train.parametric import _MuteAnchorConfig
 
     model = make_model()
+    anchor = _MuteAnchorConfig(
+        targets=(("Gain", "min"), ("Gain", "max")),
+        batch_size=1,
+        ny=32,
+    )
     module = _ParametricLightningModule(
         model,
-        loss_config=_ParametricLossConfig(
-            mute_anchor=_MuteAnchorConfig(
-                targets=(("Gain", "min"), ("Gain", "max")),
-                weight=0.25, batch_size=2, ny=32,
-            ),
-        ),
+        loss_config=_ParametricLossConfig(mute_anchor=anchor),
     )
     module.train()
     module.on_train_epoch_start()
     x = torch.randn(2, model.receptive_field + 63)
     p = torch.full((2, 1), 5.0)
     y = torch.randn(2, 64)
-    first = module._mute_anchor_losses((x, p, y))
+    x[0, -32:] = 0.0
+    x[1, -32:] = 0.5
+    calls = []
+    forward_sizes = model.forward_sizes
+
+    def record(audio, setting, **kwargs):
+        calls.append((audio, setting))
+        return forward_sizes(audio, setting, **kwargs)
+
+    monkeypatch.setattr(model, "forward_sizes", record)
+    first = module._mute_anchor_losses((x, p, y), anchor, 0)
     assert first.shape == (2,) and torch.isfinite(first).all()
-    assert module._mute_anchor_cursor == 1
-    second = module._mute_anchor_losses((x, p, y))
+    second = module._mute_anchor_losses((x, p, y), anchor, 1)
     assert second.shape == (2,) and torch.isfinite(second).all()
-    assert module._mute_anchor_cursor == 2
+    for (audio, setting), endpoint in zip(calls, (0.0, 10.0)):
+        assert audio.shape == (1, model.receptive_field - 1 + 32)
+        torch.testing.assert_close(audio[0], x[1, -audio.shape[-1]:])
+        assert setting.tolist() == [[endpoint]]
     loss = module.training_step((x, p, y), 2)
     assert torch.isfinite(loss)
     loss.backward()
@@ -275,6 +287,72 @@ def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio():
             for v in branch._hypernet.parameters()
         )
     assert not any("mute" in spec.to_dict() for spec in model.param_specs)
+
+
+def test_mute_anchor_cadence_and_weight_across_optimizer_steps(tmp_path, monkeypatch):
+    from pytorch_lightning import Trainer
+    from torch.utils.data import DataLoader, TensorDataset
+    from nam.train.parametric import _MuteAnchorConfig
+
+    anchor = _MuteAnchorConfig(targets=(("Gain", "min"), ("Gain", "max")), interval=2)
+    module = _ParametricLightningModule(
+        make_model(), loss_config=_ParametricLossConfig(mute_anchor=anchor)
+    )
+    calls, losses = [], []
+
+    def size_steps(batch):
+        target = batch[-1]
+        preds = next(module.parameters()).flatten()[0].expand_as(target) * 0
+        yield None, (preds, target, module._get_loss_dict(preds, target))
+
+    def anchor_loss(batch, config, target_index):
+        calls.append((module.global_step, config.targets[target_index % len(config.targets)]))
+        return torch.ones(1)
+
+    training_step = module.training_step
+
+    def record_step(batch, batch_idx):
+        loss = training_step(batch, batch_idx)
+        losses.append(loss.item())
+        return loss
+
+    monkeypatch.setattr(module, "_size_steps", size_steps)
+    monkeypatch.setattr(module, "_mute_anchor_losses", anchor_loss)
+    monkeypatch.setattr(module, "training_step", record_step)
+    batches = DataLoader(TensorDataset(torch.ones(4, 8)), batch_size=1)
+    trainer_options = dict(
+        accelerator="cpu", logger=False, enable_checkpointing=False,
+        enable_progress_bar=False, enable_model_summary=False, accumulate_grad_batches=2,
+    )
+    trainer = Trainer(max_epochs=2, **trainer_options)
+    trainer.fit(module, batches)
+    assert trainer.global_step == 4
+    assert calls == [(0, ("Gain", "min"))] * 2 + [(2, ("Gain", "max"))] * 2
+    assert losses == pytest.approx([1.5, 1.5, 1.0, 1.0] * 2)
+
+    checkpoint = tmp_path / "resume.ckpt"
+    trainer.save_checkpoint(checkpoint)
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    assert saved["mute_anchor_settings"] == {"interval": 2, "batch_size": 2, "ny": 512}
+    with pytest.raises(ValueError, match="different Mute Anchor"):
+        module.on_load_checkpoint({**saved, "mute_anchor_settings": None})
+    resumed = Trainer(max_epochs=3, **trainer_options)
+    resumed.fit(module, batches, ckpt_path=checkpoint)
+    assert calls[-2:] == [(4, ("Gain", "min"))] * 2
+    assert resumed.global_step == 6
+
+
+@pytest.mark.parametrize("key", ["interval", "batch_size", "ny"])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
+def test_invalid_mute_anchor_settings(key, value):
+    from nam.train.parametric import _MuteAnchorConfig
+
+    raw = {"targets": [{"name": "Gain", "edge": "min"}]}
+    assert _MuteAnchorConfig.from_config(raw).settings() == {
+        "interval": 1, "batch_size": 2, "ny": 512,
+    }
+    with pytest.raises(ValueError, match=rf"Mute Anchor {key} must be a positive integer"):
+        _MuteAnchorConfig.from_config({**raw, key: value})
 
 
 def test_mute_anchor_rejects_unknown_and_invalid_edges():

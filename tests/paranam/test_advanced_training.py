@@ -216,6 +216,57 @@ def test_snr_checkbox_reaches_the_training_job(window, workspace):
     assert not field.isEnabled()
 
 
+def test_mute_anchor_fields_persist_and_reach_job(window, workspace):
+    from nam.capture.params import KnobSpec
+
+    workspace.draft_controls = [KnobSpec("Gain", 0, 10, mute_at_min=True).to_dict()]
+    workspace.generate_plan()
+    ready(workspace)
+    window._attach(workspace)
+    form = window.advanced_panel.layout()
+    initial_job = training.make_job(workspace)
+    (initial_job / "resume-0.ckpt").touch()
+    assert training.job_can_resume(workspace, initial_job)
+    for row, (key, label, default, custom) in enumerate(
+        (
+            ("interval", "Mute Anchor Interval", 1, 3),
+            ("batch_size", "Mute Anchor Batch Size", 2, 4),
+            ("ny", "Mute Anchor NY", 512, 1000),
+        ),
+        start=form.rowCount() - 3,
+    ):
+        field = window.advanced_fields[f"mute_anchor_{key}"]
+        assert form.getWidgetPosition(field)[0] == row
+        assert form.labelForField(field).text() == label
+        assert field.minimum() == 1 and field.value() == default
+        field.setValue(custom)
+
+    reopened = Workspace(workspace.directory)
+    assert not training.job_can_resume(reopened, initial_job)
+    job = training.make_job(reopened)
+    spec = read_json(job / "spec.json")
+    assert spec["model"]["loss"]["mute_anchor"] == {
+        "targets": [{"name": "Gain", "edge": "min"}],
+        "weight": 0.25, "interval": 3, "batch_size": 4, "ny": 1000,
+    }
+    (job / "resume-0.ckpt").touch()
+    assert training.job_can_resume(reopened, job)
+    window.load_advanced_options("static")
+    assert not form.isRowVisible(window.advanced_fields["mute_anchor_interval"])
+
+
+@pytest.mark.parametrize("kind", ["static", "parametric"])
+def test_mute_anchor_options_do_not_affect_jobs_without_mute_targets(workspace, kind):
+    workspace.preferences["capture_type"] = kind
+    workspace.generate_plan()
+    ready(workspace)
+    before = workspace.fingerprint()
+    workspace.preferences.setdefault("advanced_" + kind, {})["mute_anchor_interval"] = 7
+    assert workspace.fingerprint() == before
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    assert "mute_anchor" not in spec["model"]["loss"]
+
+
 def test_validation_and_checkpoint_choices_are_opt_in_and_persist(window, workspace):
     window._attach(workspace)
     assert window.validation_method.currentData() == "independent"

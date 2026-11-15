@@ -20,6 +20,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint as _ModelCheckpoint
 from torch.utils.data import DataLoader as _DataLoader
 from torch.utils.data import Sampler as _Sampler
 
+from nam.capture.export import MUTE_ANCHOR_DEFAULTS as _MUTE_ANCHOR_DEFAULTS
+from nam.capture.export import mute_anchor_settings as _mute_anchor_settings
 from nam.data import ConcatDataset as _ConcatDataset
 from nam.data import Dataset as _Dataset
 from nam.data import Split as _Split
@@ -645,8 +647,9 @@ class _MuteAnchorConfig:
 
     targets: tuple[_Tuple[str, str], ...]
     weight: float = 0.25
-    batch_size: int = 2
-    ny: int = 512
+    batch_size: int = _MUTE_ANCHOR_DEFAULTS["batch_size"]
+    ny: int = _MUTE_ANCHOR_DEFAULTS["ny"]
+    interval: int = _MUTE_ANCHOR_DEFAULTS["interval"]
 
     def __post_init__(self):
         if not self.targets or any(
@@ -656,8 +659,10 @@ class _MuteAnchorConfig:
             raise ValueError("Mute Anchor requires named min/max control targets")
         if not _isfinite(self.weight) or self.weight <= 0:
             raise ValueError("Mute Anchor weight must be positive and finite")
-        if self.batch_size < 1 or self.ny < 1:
-            raise ValueError("Mute Anchor batch_size and ny must be positive")
+        _mute_anchor_settings(self.settings())
+
+    def settings(self):
+        return {key: getattr(self, key) for key in _MUTE_ANCHOR_DEFAULTS}
 
     @classmethod
     def from_config(cls, raw):
@@ -666,8 +671,7 @@ class _MuteAnchorConfig:
         return cls(
             targets=tuple((item["name"], item["edge"]) for item in raw["targets"]),
             weight=float(raw.get("weight", 0.25)),
-            batch_size=int(raw.get("batch_size", 2)),
-            ny=int(raw.get("ny", 512)),
+            **_mute_anchor_settings(raw),
         )
 
 
@@ -744,7 +748,6 @@ class _ParametricLightningModule(_LightningModule):
         # to single-level pooling over the whole split instead of a wrong two-level split.
         self._train_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
-        self._mute_anchor_cursor = 0
         self._capture_mse_scales: tuple[float, ...] = ()
 
     @classmethod
@@ -763,6 +766,8 @@ class _ParametricLightningModule(_LightningModule):
     def on_save_checkpoint(self, checkpoint):
         super().on_save_checkpoint(checkpoint)
         checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
+        mute = self._loss_config.mute_anchor
+        checkpoint["mute_anchor_settings"] = mute.settings() if mute is not None else None
 
     def on_load_checkpoint(self, checkpoint):
         if checkpoint.get("hypernet_lr_scale", 1.0) != self._hypernet_lr_scale:
@@ -770,6 +775,13 @@ class _ParametricLightningModule(_LightningModule):
                 "Checkpoint uses a different hypernetwork learning rate scale. "
                 "Start a new training run to use the stabilized HyperA2 recipe."
             )
+        mute = self._loss_config.mute_anchor
+        settings = mute.settings() if mute is not None else None
+        # Earlier checkpoints supported batch_size and ny, but did not record
+        # either value. They always applied the anchor on every training step.
+        legacy = {**settings, "interval": 1} if settings is not None else None
+        if checkpoint.get("mute_anchor_settings", legacy) != settings:
+            raise ValueError("Checkpoint uses different Mute Anchor settings.")
         super().on_load_checkpoint(checkpoint)
 
     def set_capture_batch_samplers(
@@ -786,7 +798,9 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler = train_sampler
         self._val_capture_sampler = val_sampler
 
-    def set_capture_mse_normalization(self, dataset, snr_weighted: bool = False) -> None:
+    def set_capture_mse_normalization(
+        self, dataset, snr_weighted: bool = False, snr_noise_powers=None
+    ) -> None:
         """Set per-capture MSE weights from target RMS and optional pre-blip noise."""
         from ..capture.session import pre_blip_noise_power
 
@@ -805,7 +819,17 @@ class _ParametricLightningModule(_LightningModule):
                     raise ValueError(
                         "SNR weighting requires the capture WAV path and sample rate"
                     )
-                raw_noise = pre_blip_noise_power(_Path(capture._y_path), capture.sample_rate)
+                path = _Path(capture._y_path)
+                if snr_noise_powers is None:
+                    raw_noise = pre_blip_noise_power(path, capture.sample_rate)
+                else:
+                    raw_noise = snr_noise_powers.get(path.as_posix())
+                    if (
+                        type(raw_noise) not in (int, float)
+                        or not _isfinite(raw_noise)
+                        or raw_noise < 0
+                    ):
+                        raise ValueError(f"Missing or invalid frozen noise power for {path}")
                 noise_power = raw_noise * capture.output_gain**2
                 if not _isfinite(noise_power):
                     raise ValueError(f"Invalid scaled noise power for {capture._y_path}")
@@ -1035,15 +1059,12 @@ class _ParametricLightningModule(_LightningModule):
         else:
             yield None, self._shared_step(batch)
 
-    def _mute_anchor_losses(self, batch):
+    def _mute_anchor_losses(self, batch, config, target_index):
         """Apply one muted endpoint to real input audio, alternating targets.
 
         The same randomized non-muted controls are used throughout the mini-batch
         to preserve HyperA2's packed uniform-parameter execution.
         """
-        config = self._loss_config.mute_anchor
-        if config is None:
-            return None
         net = _get_parametric_net(self)
         x = batch[0]
         ny = min(config.ny, x.shape[-1] - net.receptive_field + 1)
@@ -1053,8 +1074,7 @@ class _ParametricLightningModule(_LightningModule):
         loudness = x[:, -ny:].abs().mean(dim=1)
         indices = _torch.topk(loudness, k=count).indices
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
-        name, edge = config.targets[self._mute_anchor_cursor % len(config.targets)]
-        self._mute_anchor_cursor += 1
+        name, edge = config.targets[target_index % len(config.targets)]
         setting = _sample_raw_params(net.param_specs, 1, device=x.device)
         index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
         spec = net.param_specs[index]
@@ -1093,9 +1113,15 @@ class _ParametricLightningModule(_LightningModule):
                     preds, targets, means, capture_index
                 )
         stacked = _torch.stack(losses)
-        anchor_losses = self._mute_anchor_losses(batch)
-        if anchor_losses is not None:
-            stacked = stacked + self._loss_config.mute_anchor.weight * anchor_losses
+        mute = self._loss_config.mute_anchor
+        if mute is not None:
+            # All microbatches in an accumulated update share the same cadence
+            # and target. Lightning averages their losses. global_step persists
+            # across checkpoints and keeps the rotation independent of the epoch.
+            target_index, remainder = divmod(self.global_step, mute.interval)
+            if remainder == 0:
+                anchor_losses = self._mute_anchor_losses(batch, mute, target_index)
+                stacked = stacked + (mute.weight * mute.interval) * anchor_losses
         return (
             stacked.sum()
             if self._loss_config.training_recipe == "a2"
@@ -1448,7 +1474,11 @@ def main(
     if not isinstance(snr_weighted, bool):
         raise ValueError("snr_weighted_loss_normalization must be a boolean")
     if isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
-        model.set_capture_mse_normalization(dataset_train, snr_weighted=snr_weighted)
+        model.set_capture_mse_normalization(
+            dataset_train,
+            snr_weighted=snr_weighted,
+            snr_noise_powers=learning_config.get("snr_noise_powers"),
+        )
     elif snr_weighted:
         raise ValueError("SNR-weighted loss requires capture_grouped_batches")
     _enable_training_fast_paths(

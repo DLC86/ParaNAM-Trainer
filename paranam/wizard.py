@@ -72,6 +72,7 @@ from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
 from .plan_rules_ui import PlanRuleDialog, describe_rule
+from .recipes import MUTE_ANCHOR_OPTIONS
 from .busy_overlay import foreground_operation, run_calculation
 from .project_files import change_project
 from .widgets import (
@@ -1352,6 +1353,28 @@ class WizardWindow(
         self.advanced_fields["ny"].setToolTip(
             "Number of training output samples per window. Validation keeps its independent window."
         )
+        for key, caption, tooltip in (
+            (
+                "mute_anchor_interval", "Mute Anchor Interval",
+                "Apply Mute Anchor every N optimizer steps. Its loss weight is multiplied by N.",
+            ),
+            (
+                "mute_anchor_batch_size", "Mute Anchor Batch Size",
+                "Maximum number of examples selected from each training batch for Mute Anchor.",
+            ),
+            (
+                "mute_anchor_ny", "Mute Anchor NY",
+                "Maximum number of output samples to score per Mute Anchor example.",
+            ),
+        ):
+            field = QSpinBox()
+            field.setRange(1, 2**31 - 1)
+            field.setValue(MUTE_ANCHOR_OPTIONS[key])
+            field.setFixedWidth(260)
+            field.setToolTip(tooltip)
+            self.advanced_fields[key] = field
+            advanced_form.addRow(caption, field)
+            field.valueChanged.connect(self.save_preferences)
         box.addWidget(self.advanced_panel)
         self.advanced_panel.hide()
         self.advanced_toggle.toggled.connect(self.advanced_panel.setVisible)
@@ -1542,6 +1565,10 @@ class WizardWindow(
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(parametric)
+        for key in MUTE_ANCHOR_OPTIONS:
+            self.advanced_panel.layout().setRowVisible(
+                self.advanced_fields[key], parametric
+            )
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.advanced_fields["cudnn_benchmark"].setEnabled(

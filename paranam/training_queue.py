@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import filecmp
 import hashlib
 import os
 import shutil
@@ -12,7 +13,7 @@ import uuid
 
 from filelock import FileLock
 
-from nam.capture.project import atomic_write_json, save_project
+from nam.capture.project import atomic_write_json, load_project, save_project
 from .workspace import Workspace, read_json
 from . import training
 
@@ -115,6 +116,41 @@ def snapshot_workspace(workspace, root):
     return Workspace(destination)
 
 
+def freeze_snr_noise(source, snapshot, source_project=None):
+    """Bind raw pre-blip noise to the frozen training WAVs in a queue instance."""
+    import soundfile as sf
+    from nam.capture.session import pre_blip_noise_power
+
+    source = Path(source)
+    if source_project is None:
+        source_project = load_project(source)
+    powers = {}
+    for index, frozen in enumerate(snapshot.project.entries):
+        if frozen.split != "train" or frozen.status != "captured":
+            continue
+        original = (
+            source_project.entries[index] if index < len(source_project.entries) else None
+        )
+        frozen_path = snapshot.directory / frozen.y_path
+        if (
+            original is None
+            or original.split != frozen.split
+            or original.index != frozen.index
+            or original.params != frozen.params
+            or original.captured_at != frozen.captured_at
+            or not (source / original.y_path).is_file()
+            or not filecmp.cmp(source / original.y_path, frozen_path, shallow=False)
+        ):
+            raise ValueError(
+                f"Cannot match the original capture for {frozen.y_path}. "
+                "Add a new training instance using the current recordings."
+            )
+        powers[Path(frozen.y_path).as_posix()] = pre_blip_noise_power(
+            source / original.y_path, sf.info(frozen_path).samplerate
+        )
+    return powers
+
+
 class TrainingQueue:
     def __init__(self, directory):
         self.directory = Path(directory).resolve()
@@ -156,6 +192,10 @@ class TrainingQueue:
         frozen.save()
         job = training.make_job(frozen, job_directory=frozen.directory.parent)
         spec = read_json(job / "spec.json")
+        if spec["learning"].get("snr_weighted_loss_normalization"):
+            spec["learning"]["snr_noise_powers"] = freeze_snr_noise(
+                workspace.directory, frozen, workspace.project
+            )
         source = frozen.preferences["_queue_source_project"]
         spec.update(
             original_project=source,

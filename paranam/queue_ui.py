@@ -443,6 +443,7 @@ class QueueActions:
             and not running
             and not exporting
         )
+        self.resume_button.setText("Retry" if state == "failed" else "Resume")
         self.resume_button.setEnabled(resumable)
         self.retrain_button.setEnabled(
             state in FINISHED and not running and not active and not preparing

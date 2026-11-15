@@ -3,6 +3,12 @@
 import math
 from pathlib import Path
 
+from nam.capture.export import MUTE_ANCHOR_DEFAULTS
+
+MUTE_ANCHOR_OPTIONS = {
+    f"mute_anchor_{key}": default for key, default in MUTE_ANCHOR_DEFAULTS.items()
+}
+
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
 DATASET_RATE_PRESETS = ("a2_dataset", "a2_dataset_sqrt")
@@ -59,6 +65,7 @@ def training_preset(name):
         gradient_clipping=not hyper_a2,
         gradient_clip_val=1.0,
         check_nonfinite_gradients=not hyper_a2,
+        **MUTE_ANCHOR_OPTIONS,
     )
 
 

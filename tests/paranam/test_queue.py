@@ -31,6 +31,51 @@ def small_ready(workspace, kind="parametric"):
     return workspace
 
 
+def enable_snr(workspace):
+    workspace.preferences["advanced_parametric"]["snr_weighted_loss_normalization"] = True
+    raw_dir = workspace.directory / "captures_raw"
+    raw_dir.mkdir()
+    playback = np.zeros(64)
+    playback[16] = 0.5
+    np_to_wav(playback, raw_dir / "playback.wav", rate=48000)
+    records = []
+    for index, entry in enumerate(
+        entry for entry in workspace.project.entries if entry.split == "train"
+    ):
+        noise = 0.03125 * (index + 1)
+        raw_name = f"raw-{index}.wav"
+        np_to_wav(np.full(64, noise), raw_dir / raw_name, rate=48000)
+        records.append(
+            {
+                "y_path": entry.y_path,
+                "main_playback": "playback.wav",
+                "raw": raw_name,
+                "preamble_samples": 24,
+            }
+        )
+    atomic_write_json(raw_dir / "manifest.json", {"captures": records})
+    workspace.save()
+    return raw_dir
+
+
+def test_failed_queue_job_reuses_resume_as_retry(window, workspace, monkeypatch):
+    small_ready(workspace)
+    window._attach(workspace)
+    controller = window.queue_controller
+    entry = controller.store.add(workspace)
+    window.selected_job_id = entry["id"]
+    controller.store.update(entry["id"], state="failed", error="Temporary error")
+    window.refresh_training()
+    assert window.resume_button.text() == "Retry"
+    assert window.resume_button.isEnabled()
+    starts = []
+    monkeypatch.setattr(controller, "start", lambda: starts.append(True))
+    window.resume_button.click()
+    assert starts == [True]
+    assert controller.store.get(entry["id"])["state"] == "queued"
+    assert window.resume_button.text() == "Resume"
+
+
 @pytest.mark.parametrize("kind", ["static", "parametric"])
 def test_instances_freeze_audio_metadata_and_recipe_independently(
     workspace, tmp_path, kind
@@ -299,19 +344,31 @@ def test_checkpoint_resume_after_first_epoch_survives_project_edits(
     assert read_json(job / "spec.json")["learning"]["val_dataloader"]["batch_size"] == 1
 
 
-@pytest.mark.parametrize("kind", ["static", "parametric"])
+@pytest.mark.parametrize(
+    "kind,snr_mode",
+    [("static", None), ("parametric", None), ("parametric", "frozen"), ("parametric", "legacy")],
+)
 def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
-    workspace, tmp_path, qapp, kind
+    workspace, tmp_path, qapp, kind, snr_mode
 ):
     from paranam.queue_controller import QueueController
 
     small_ready(workspace, kind)
+    raw_dir = enable_snr(workspace) if snr_mode else None
     workspace.project.user_metadata["name"] = "Named Capture"
     workspace.save()
     controller = QueueController(tmp_path / "queue")
     entry = controller.store.add(workspace)
     job = Path(entry["job"])
     spec = read_json(job / "spec.json")
+    if snr_mode:
+        powers = spec["learning"]["snr_noise_powers"]
+        assert list(powers) == [entry["y_path"] for entry in spec["data"]["train"]]
+        assert list(powers.values()) == pytest.approx([0.03125**2, 0.0625**2])
+        if snr_mode == "legacy":
+            del spec["learning"]["snr_noise_powers"]
+        else:
+            (raw_dir / "manifest.json").unlink()
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
     spec["data"].setdefault("common", {})["require_input_pre_silence"] = None
     for split in ("train", "train_evaluation"):
@@ -345,6 +402,8 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     assert Path(progress["export"]).is_file()
     assert str(workspace.directory / "models") in progress["export"]
     assert read_json(job / "spec.json")["preferences"]["epochs"] == 2
+    if snr_mode:
+        assert read_json(job / "spec.json")["learning"]["snr_noise_powers"] == powers
     exported = read_json(Path(progress["export"]))
     assert exported["metadata"].get("modeled_by") != "Changed after enqueue"
     assert Path(progress["export"]).stem == exported["metadata"]["name"]

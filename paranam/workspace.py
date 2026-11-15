@@ -23,6 +23,7 @@ from nam.capture.project import (
     reconcile_with_disk,
     save_project,
 )
+from .recipes import MUTE_ANCHOR_OPTIONS
 
 DEFAULTS = {
     "capture_level_dbfs": 0.0,
@@ -793,6 +794,7 @@ class Workspace:
             gradient_clip_val=1.0,
             check_nonfinite_gradients=(kind == "parametric"),
             hypernetwork_recipe="HyperA2",
+            **MUTE_ANCHOR_OPTIONS,
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
         options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
@@ -817,7 +819,7 @@ class Workspace:
         include_hypernetwork_controls=True,
     ):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
-        from nam.capture.export import build_data_config
+        from nam.capture.export import build_data_config, mute_anchor_targets
 
         data = {
             **(
@@ -877,6 +879,13 @@ class Workspace:
         if include_advanced:
             options = self.training_options()
             data["settings"]["advanced_training"] = options
+            uses_mute_anchor = (
+                self.project.capture_type == "parametric"
+                and bool(mute_anchor_targets(self.project))
+            )
+            for key, default in MUTE_ANCHOR_OPTIONS.items():
+                if not uses_mute_anchor or options[key] == default:
+                    options.pop(key)
             if self.project.capture_type == "static" or not options[
                 "snr_weighted_loss_normalization"
             ]:
