@@ -74,8 +74,8 @@ def test_clean_volume_defaults_step_to_one_but_keeps_it_editable(qapp):
         control=KnobSpec("Volume", 0, 10, step=0.25, clean_volume=True)
     )
     assert existing.step.value() == 0.25
-    assert not existing.avoid_zero.isEnabled()
-    assert not existing.avoid_max.isEnabled()
+    assert not existing.mute_at_min.isEnabled()
+    assert not existing.mute_at_max.isEnabled()
 
 
 def test_plan_control_scene_reflows_cards_while_dragging(qapp):
