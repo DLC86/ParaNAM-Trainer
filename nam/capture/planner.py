@@ -463,6 +463,7 @@ def plan_unique_splits(
     validation_exclude: _Optional[set[tuple[_Any, ...]]] = None,
     anchor: _Optional[dict[str, _Any]] = None,
     rules=(),
+    anchor_policy: str = "inside",
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
     """
     Draw ``n_train`` + ``n_validation`` distinct on-grid settings, with the validation
@@ -491,17 +492,41 @@ def plan_unique_splits(
         if validation_exclude is None or n_validation == 0
         else set(validation_exclude)
     )
-    if anchor is not None:
-        if n_train < 1:
-            raise ValueError("The default setting requires a training capture")
-        reserved.add(_settings_key(anchor, specs))
+    if anchor_policy not in ("inside", "extra", "exclude", "sample"):
+        raise ValueError(f"Unknown default capture policy: {anchor_policy}")
+    if anchor_policy == "sample":
+        anchor = None
+    if anchor is not None and anchor_policy == "inside" and n_train < 1:
+        raise ValueError("The default setting requires a training capture")
+    default_key = _settings_key(anchor, specs) if anchor is not None else None
+    default_on_grid = (
+        settings_on_capture_grid(anchor, specs, default_step)
+        if anchor is not None else False
+    )
+    # The default is reserved from validation in all modes. For the explicit
+    # modes it is never inserted into the sampled LHS/Sobol design: it is either
+    # appended as an additional training capture, or completely excluded.
+    if default_key is not None and (default_on_grid or anchor_policy != "exclude"):
+        reserved.add(default_key)
+    sampled_exclusions = (
+        {default_key}
+        if default_key is not None and anchor_policy in ("extra", "exclude")
+        else set()
+    )
+    sampled_anchor = anchor if anchor_policy == "inside" else None
+    def _with_extra(points):
+        return points + [dict(anchor)] if anchor_policy == "extra" and anchor is not None else points
 
     # Every train and validation setting must be distinct, and validation must be held out
     # from train. That is only possible if the knob grid has at least that many distinct
     # settings; fail loudly up front rather than after sampling work.
     required = n_train + n_validation
+    if default_key is not None and default_on_grid and anchor_policy in ("extra", "exclude"):
+        # The default consumes a grid combination even though it does not
+        # consume one of the requested LHS/Sobol sample positions.
+        required += 1
     capacity = _grid_capacity(specs, default_step, rules)
-    if anchor is not None and not settings_on_capture_grid(anchor, specs, default_step):
+    if anchor is not None and not default_on_grid and anchor_policy in ("inside", "extra"):
         # Explicit defaults may fall between the ordinary capture-grid positions.
         capacity += 1
     if required > capacity:
@@ -524,7 +549,8 @@ def plan_unique_splits(
         # validation must be picked *after* seeing the train locations.
         train = sample_unique_settings(
             specs, n_train, seed=seed, default_step=default_step,
-            lhs_method=lhs_method, anchor=anchor, rules=rules,
+            lhs_method=lhs_method, anchor=sampled_anchor,
+            exclude=sampled_exclusions, rules=rules,
         )
         train_keys = {_settings_key(point, specs) for point in train}
         if capacity - len(reserved | train_keys) < n_validation:
@@ -534,15 +560,19 @@ def plan_unique_splits(
                 specs, n_train=n_train, n_validation=n_validation, seed=seed,
                 default_step=default_step, lhs_method=lhs_method,
                 validation_method="independent",
-                validation_exclude=validation_exclude, anchor=anchor, rules=rules,
+                validation_exclude=validation_exclude, anchor=anchor,
+                rules=rules, anchor_policy=anchor_policy,
             )
-        return train, _farthest_validation(
+            if anchor_policy == "extra":
+                train = train[:-1]  # the fallback already appended this extra capture
+        return _with_extra(train), _farthest_validation(
             specs, train, reserved, n_validation, seed=validation_seed,
             default_step=default_step, rules=rules,
         )
     if not reserved:
         train = sample_unique_settings(
-            specs, n_train, seed=seed, default_step=default_step, lhs_method=lhs_method, rules=rules
+            specs, n_train, seed=seed, default_step=default_step,
+            lhs_method=lhs_method, exclude=sampled_exclusions, rules=rules,
         )
         validation = sample_unique_settings(
             specs,
@@ -553,7 +583,7 @@ def plan_unique_splits(
             exclude={_settings_key(params, specs) for params in train},
             rules=rules,
         )
-        return train, validation
+        return _with_extra(train), validation
 
     # With settings reserved away from validation, draw validation first: taking train first
     # could consume every unreserved setting and leave validation nothing to draw from, even
@@ -573,11 +603,11 @@ def plan_unique_splits(
         seed=seed,
         default_step=default_step,
         lhs_method=lhs_method,
-        exclude={_settings_key(params, specs) for params in validation},
-        anchor=anchor,
+        exclude={_settings_key(params, specs) for params in validation} | sampled_exclusions,
+        anchor=sampled_anchor,
         rules=rules,
     )
-    return train, validation
+    return _with_extra(train), validation
 
 
 LHS_METHODS = ("standard", "maximin", "orthogonal", "near_orthogonal", "sobol", "optimized")
