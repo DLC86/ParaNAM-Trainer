@@ -11,6 +11,8 @@ Changes since **0.7.6**.
 - **Mute at minimum / Mute at maximum:** each option now combines the training-only Mute Anchor with automatic exclusion of the corresponding silent endpoint from all new training, validation and corner captures. The nearest usable knob position replaces muted corners, so no muted recording is required. Both options work independently for normal and reversed controls. Legacy Avoid min/max settings remain honored for saved projects without silently enabling Mute Anchor. If the additional Default capture is enabled, its setting cannot be a muted endpoint.
 - **Linear Volume capture calibration:** other numeric controls are held at 10 (or the nearest physically reachable position), while switches use their highest position. Avoid thresholds and capture-plan rules do not restrict the volume sweep; the Linear Volume control is still measured across its entire range. Training captures otherwise use that volume control at maximum.
 
+- **Planning and Retrain regressions:** added coverage for optional default capture on/off with Standard LHS, Sobol and Optimized LHS; Simple/Complex Switch combinations; mute/avoid thresholds; grid capacity; legacy Plan settings; and restoring the job's original recorded captures after subsequent project changes.
+
 ## Parametric training and loss normalization
 
 - **Mute Anchor:** when a knob has an enabled mute endpoint, parametric training adds a training-only silence constraint using real input audio, the selected knob held at its mute endpoint and randomized settings for the other controls. HyperA2 Full and Lite can learn the endpoint without an extra muted recording. Learned silence is approximate, not mathematically guaranteed zero.
