@@ -307,7 +307,8 @@ def capture_grid_limits(controls: _Sequence[ControlSpec]) -> tuple[int, int, int
 
 
 def capture_count_maxima(
-    controls: _Sequence[ControlSpec], n_train: int, n_validation: int
+    controls: _Sequence[ControlSpec], n_train: int, n_validation: int,
+    include_default_as_additional_capture: _Optional[bool] = None,
 ) -> tuple[int, int]:
     """Largest feasible totals for each spinner, given the other split.
 
@@ -316,6 +317,62 @@ def capture_count_maxima(
     This is for distinct held-out settings, not the switch-only second-audio
     validation supported by the main trainer UI.
     """
+    if (include_default_as_additional_capture is not None
+            and any(isinstance(c, KnobSpec) and not c.clean_volume for c in controls)):
+        from .planner import _grid_capacity, corner_settings, settings_on_capture_grid
+
+        active = [c for c in controls if not getattr(c, "clean_volume", False)]
+        switches = [c for c in active if isinstance(c, SwitchSpec)
+                    and c.planning_mode == "complex"]
+        per_state = [c for c in active if c not in switches]
+        specs = tuple(c.to_param_spec() for c in per_state)
+        grid_capacity = _grid_capacity(specs, DEFAULT_KNOB_STEP)
+        corners = {
+            tuple(p[s.name] for s in specs)
+            for p in corner_settings(
+                specs, gain_index=gain_knob_indices(per_state),
+                default_step=DEFAULT_KNOB_STEP,
+            )
+        }
+        default = {
+            s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
+            for s in specs
+        }
+        default_key = tuple(default[s.name] for s in specs)
+        default_on_grid = settings_on_capture_grid(
+            default, specs, DEFAULT_KNOB_STEP
+        )
+        # Only the default Complex Switch combination reserves the default.
+        switch_combos = list(_itertools.product(*(s.enum_names for s in switches)))
+        default_switch = tuple(s.enum_names[s.default] for s in switches)
+        default_index = switch_combos.index(default_switch)
+        count = len(switch_combos)
+        sample_capacity = [
+            grid_capacity - int(i == default_index and default_on_grid)
+            for i in range(count)
+        ]
+        validation_capacity = [
+            grid_capacity - len(corners) - int(
+                i == default_index and default_on_grid and default_key not in corners
+            )
+            for i in range(count)
+        ]
+        def quota(capacities):
+            return max(0, min(
+                max(0, remaining) * count + i
+                for i, remaining in enumerate(capacities)
+            ))
+        train_max = quota([
+            capacity - (n_validation // count + (i < n_validation % count))
+            for i, capacity in enumerate(sample_capacity)
+        ])
+        validation_max = quota([
+            min(validation_capacity[i],
+                sample_capacity[i] - (n_train // count + (i < n_train % count)))
+            for i in range(count)
+        ])
+        return train_max, validation_max
+
     capacity, held_out_capacity, combinations = capture_grid_limits(controls)
     train_max = combinations * max(
         0, capacity - _math.ceil(n_validation / combinations)
@@ -327,7 +384,10 @@ def capture_count_maxima(
     return train_max, validation_max
 
 
-def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int, int]:
+def capture_recommendations(
+    controls: _Sequence[ControlSpec],
+    include_default_as_additional_capture: _Optional[bool] = None,
+) -> tuple[int, int, int]:
     """Recommend feasible train/validation counts on the actual capture grid.
 
     Counts are totals across Complex Switch states. Validation avoids corner
@@ -374,7 +434,21 @@ def capture_recommendations(controls: _Sequence[ControlSpec]) -> tuple[int, int,
             )
             train = min(train, budget - held_out)
             validation = min(validation, validation_capacity, budget - train)
-    return train * combinations, validation * combinations, combinations
+    train_total, validation_total = train * combinations, validation * combinations
+    if include_default_as_additional_capture is not None:
+        # Explicit plans reserve exactly one global default (even if there are
+        # many Complex Switch combinations), rather than pinning one per group.
+        train_max, _ = capture_count_maxima(
+            controls, train_total, validation_total,
+            include_default_as_additional_capture,
+        )
+        train_total = min(train_total, train_max)
+        _, val_max = capture_count_maxima(
+            controls, train_total, validation_total,
+            include_default_as_additional_capture,
+        )
+        validation_total = min(validation_total, val_max)
+    return train_total, validation_total, combinations
 
 def validate_knobs(knobs: _Sequence[ControlSpec]) -> tuple[ControlSpec, ...]:
     """
