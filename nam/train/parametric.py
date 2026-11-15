@@ -786,7 +786,7 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler = train_sampler
         self._val_capture_sampler = val_sampler
 
-    def set_capture_mse_normalization(self, dataset) -> None:
+    def set_capture_mse_normalization(self, dataset, snr_weighted: bool = True) -> None:
         """Noise-aware per-capture MSE weighting from the recorded pre-blip silence.
 
         The raw amp-return WAV already contains silence before the first timing
@@ -806,6 +806,10 @@ class _ParametricLightningModule(_LightningModule):
             total_power = _torch.mean(y.double().square()).item()
             if not _isfinite(total_power):
                 raise ValueError("Cannot normalize capture with non-finite power")
+
+            if not snr_weighted:
+                scales.append(target_power / max(total_power, floor_power))
+                continue
 
             y_path = _Path(capture._y_path).resolve()
             raw_dir = y_path.parent.parent / "captures_raw"
@@ -1485,7 +1489,10 @@ def main(
     )
     if not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
         raise ValueError("Per-capture RMS-normalized loss requires capture_grouped_batches")
-    model.set_capture_mse_normalization(dataset_train)
+    model.set_capture_mse_normalization(
+        dataset_train,
+        snr_weighted=learning_config.get("snr_weighted_loss_normalization", True),
+    )
     _enable_training_fast_paths(
         net,
         (train_dataloader, val_dataloader),
