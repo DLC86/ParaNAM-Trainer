@@ -941,26 +941,30 @@ class WizardWindow(
         self.lhs_method.addItem("Maximin", "maximin")
         self.lhs_method.addItem("Orthogonal", "orthogonal")
         self.lhs_method.addItem("Near-orthogonal", "near_orthogonal")
+        self.lhs_method.addItem("Sobol", "sobol")
+        self.lhs_method.addItem("Optimized LHS", "optimized")
         self.lhs_method.setToolTip(
             "Standard: random stratified Latin hypercube. Maximin: maximize the closest-pair "
             "distance over candidate designs. Orthogonal: strength-2 orthogonal-array LHS "
             "requiring p² samples per split and Complex Switch state, for prime p and "
             "at most p+1 dimensions (e.g. 9, 25, 49, 121). Near-orthogonal: minimize "
             "pairwise control correlations without those count restrictions. "
+            "Sobol: scrambled low-discrepancy points (strongest with powers of two). "
+            "Optimized LHS: improve low-dimensional coverage using centered discrepancy. "
             "Anchors, switch mapping and knob-grid rounding may reduce the ideal properties."
         )
         self.corners = QCheckBox(
             "Include range-extreme captures for every knob/switch combination (corners)"
         )
         self.corners.setChecked(True)
-        form.addRow("Training LHS captures", self.n_train)
-        form.addRow("LHS design", self.lhs_method)
+        form.addRow("Training captures", self.n_train)
+        form.addRow("Capture sampling method", self.lhs_method)
         form.addRow("Validation captures", self.n_validation)
         self.validation_method = QComboBox()
-        self.validation_method.addItem("Independent LHS (current)", "independent")
+        self.validation_method.addItem("Independent sampling (current)", "independent")
         self.validation_method.addItem("Farthest from train (maximin)", "farthest")
         self.validation_method.setToolTip(
-            "Independent LHS keeps the existing validation settings selection. "
+            "Independent sampling draws validation settings using the selected method. "
             "Farthest from train chooses on-grid validation points as far as possible "
             "from training LHS/default and corners, balancing Simple Switch states. "
             "Updating the plan keeps compatible recordings and skips unused takes."
