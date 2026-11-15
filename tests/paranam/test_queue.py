@@ -154,7 +154,7 @@ def test_reorder_remove_and_resume_belong_to_instances(workspace, tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["static", "parametric"])
-def test_retrain_restores_source_project_before_creating_fresh_job(
+def test_retrain_restores_original_job_plan_into_independent_editable_copy(
     window, workspace, tmp_path, kind
 ):
     small_ready(workspace, kind)
@@ -182,8 +182,13 @@ def test_retrain_restores_source_project_before_creating_fresh_job(
     assert window.epochs.value() == 2
     assert editable.project.user_metadata == {"modeled_by": "Original job"}
     assert editable.training_ready() and not editable.plan_changed()
-    assert editable.directory == workspace.directory
+    assert editable.directory != workspace.directory
     assert editable.directory != frozen.directory
+    assert editable.directory.exists()
+    assert [(e.split, e.params) for e in editable.project.entries] == [
+        (e.split, e.params) for e in frozen.project.entries
+    ]
+    assert editable.preferences["_retrain_source_job"] == str(job.resolve())
     assert training.current_job(editable.directory) is None
     assert len(queue.entries()) == 1
     window.epochs.setValue(5)
@@ -199,9 +204,34 @@ def test_retrain_restores_source_project_before_creating_fresh_job(
         new_spec["models_directory"] != read_json(job / "spec.json")["models_directory"]
     )
     assert (job / "spec.json").read_bytes() == spec_before
+    assert workspace.project.user_metadata == {"modeled_by": "Later project edits"}
     assert queue.get(entry["id"])["state"] == "completed"
     with pytest.raises(ValueError, match="queued"):
         queue.retrain(new["id"])
+
+
+def test_retrain_uses_original_captures_after_source_plan_changes(
+    workspace, tmp_path
+):
+    small_ready(workspace)
+    queue = TrainingQueue(tmp_path / "queue")
+    entry = queue.add(workspace)
+    queue.update(entry["id"], state="completed")
+    frozen = Workspace(Path(read_json(Path(entry["job"]) / "spec.json")["project"]))
+    original_plan = [(e.split, dict(e.params)) for e in frozen.project.entries]
+
+    # Regenerate the SOURCE project with fewer and different captures.
+    workspace.preferences.update(n_train=2, n_validation=0, seed=437)
+    workspace.generate_plan()
+    assert [(e.split, e.params) for e in workspace.project.entries] != original_plan
+
+    editable = queue.retrain(entry["id"])
+    assert editable.directory != workspace.directory
+    assert [(e.split, e.params) for e in editable.project.entries] == original_plan
+    assert editable.training_ready()
+    assert not editable.plan_changed()
+    assert workspace.project.n_train_lhs == 2
+    assert [(e.split, dict(e.params)) for e in frozen.project.entries] == original_plan
 
 
 def test_queue_view_and_project_editing_are_independent(
