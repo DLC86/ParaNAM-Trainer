@@ -46,10 +46,18 @@ nonfinite values break a curve rather than becoming a misleading point. History
 is saved with progress and checkpoints and survives pause/resume. Each static
 capture or ensemble member has its own displayed history.
 
-## Validation selection in Plan
+## Capture sampling and validation selection in Plan
 
-The Plan page keeps **Independent LHS** as its default: validation captures are
-held-out combinations with a different seeded LHS stream. **Farthest from train
+ParaNAM offers **Standard**, **Maximin**, **Orthogonal** and **Near-orthogonal**
+Latin-hypercube methods, plus **Sobol** (scrambled low-discrepancy points,
+preferably in power-of-two counts) and **Optimized LHS** (centered-discrepancy
+optimization using SciPy's `random-cd`). All methods are reproducible from the
+saved seed, but default anchors, grid quantization, avoid rules, and switch
+assignments can weaken their ideal geometric properties.
+
+The Plan page keeps **Independent sampling** as the default validation method:
+validation captures use the selected design with a different seeded stream.
+**Farthest from train
 (maximin)** is an opt-in alternative: generate training LHS first, then choose
 validation points from a deterministic pool of quantized candidates, greedily
 maximizing the nearest-point distance to training settings, reserved corners,
