@@ -233,6 +233,39 @@ def test_snr_checkbox_reaches_the_training_job(window, workspace):
     assert not rms.isEnabled() and not field.isEnabled()
 
 
+def test_rms_normalization_exponent_ui_and_resume(window, workspace):
+    ready(workspace)
+    window._attach(workspace)
+    rms = window.advanced_fields["rms_loss_normalization"]
+    exponent = window.advanced_fields["rms_loss_normalization_exponent"]
+    assert exponent.value() == 2.0
+    assert not exponent.isEnabled()
+    rms.setChecked(True)
+    assert exponent.isEnabled()
+    fingerprint_default = workspace.fingerprint()
+    exponent.setValue(1.0)
+    changed = Workspace(workspace.directory)
+    assert changed.training_options()["rms_loss_normalization_exponent"] == 1.0
+    assert changed.fingerprint() != fingerprint_default
+    spec_path = training.make_job(changed) / "spec.json"
+    spec = read_json(spec_path)
+    assert spec["learning"]["rms_loss_normalization_exponent"] == 1.0
+    job = spec_path.parent
+    (job / "resume-0.ckpt").touch()
+    assert training.job_can_resume(changed, job)
+
+    exponent.setValue(0.0)
+    assert not training.job_can_resume(Workspace(workspace.directory), job)
+    rms.setChecked(False)
+    assert not exponent.isEnabled()
+    # When RMS normalization is disabled, the exponent cannot affect training.
+    fingerprint_disabled = Workspace(workspace.directory).fingerprint()
+    exponent.setValue(2.0)
+    assert Workspace(workspace.directory).fingerprint() == fingerprint_disabled
+    window.load_advanced_options("static")
+    assert not exponent.isEnabled()
+
+
 def test_mute_anchor_fields_persist_and_reach_job(window, workspace):
     from nam.capture.params import KnobSpec
 
