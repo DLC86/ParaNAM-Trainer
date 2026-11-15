@@ -59,6 +59,21 @@ def enable_snr(workspace):
     return raw_dir
 
 
+def test_snr_only_queue_freezes_raw_noise_without_rms(workspace, tmp_path):
+    small_ready(workspace)
+    enable_snr(workspace)
+    workspace.preferences["advanced_parametric"]["rms_loss_normalization"] = False
+    workspace.save()
+    queue = TrainingQueue(tmp_path / "queue")
+    entry = queue.add(workspace)
+    spec = read_json(Path(entry["job"]) / "spec.json")
+    assert spec["learning"]["rms_loss_normalization"] is False
+    assert spec["learning"]["snr_weighted_loss_normalization"] is True
+    powers = spec["learning"]["snr_noise_powers"]
+    assert len(powers) == len(spec["data"]["train"])
+    assert all(power >= 0.0 for power in powers.values())
+
+
 def test_failed_queue_job_reuses_resume_as_retry(window, workspace, monkeypatch):
     small_ready(workspace)
     window._attach(workspace)
