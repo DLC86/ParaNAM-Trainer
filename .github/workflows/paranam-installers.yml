@@ -132,6 +132,9 @@ jobs:
       - name: Upload tested installer directly to the release draft
         if: inputs.release_id != ''
         env:
+          # gh api returns UTF-8 JSON, including Unicode release-note text.
+          # Windows Python otherwise decodes check_output(text=True) as cp1252.
+          PYTHONUTF8: '1'
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_ID: ${{ inputs.release_id }}
