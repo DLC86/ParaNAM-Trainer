@@ -745,6 +745,7 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._mute_anchor_cursor = 0
+        self._capture_mse_scales: tuple[float, ...] = ()
 
     @classmethod
     def parse_config(cls, config):
@@ -784,6 +785,24 @@ class _ParametricLightningModule(_LightningModule):
         """
         self._train_capture_sampler = train_sampler
         self._val_capture_sampler = val_sampler
+
+    def set_capture_mse_normalization(self, dataset) -> None:
+        """Normalize the training MSE per capture to -18 dBFS RMS.
+
+        Only the optimization objective is scaled: original audio, exported weights,
+        validation metrics, and inference gain remain untouched. A -60 dBFS RMS
+        floor prevents near-silent captures from dominating the gradients.
+        """
+        target_rms = 10.0 ** (-18.0 / 20.0)
+        floor_rms = 10.0 ** (-60.0 / 20.0)
+        scales = []
+        for capture in _iter_inner_datasets(dataset):
+            y = capture.y
+            rms = _torch.sqrt(_torch.mean(y.double().square())).item()
+            if not _isfinite(rms):
+                raise ValueError("Cannot normalize capture with non-finite RMS")
+            scales.append((target_rms / max(rms, floor_rms)) ** 2)
+        self._capture_mse_scales = tuple(scales)
 
     @staticmethod
     def _capture_index(sampler: _Optional[_Sampler], batch_idx: int) -> _Optional[int]:
@@ -1035,6 +1054,7 @@ class _ParametricLightningModule(_LightningModule):
     def training_step(self, batch, batch_idx):
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
         losses = []
+        mse_contributions = []
         for size, (preds, targets, loss_dict) in self._size_steps(batch):
             loss = _torch.zeros((), device=preds.device)
             for v in loss_dict.values():
@@ -1045,12 +1065,23 @@ class _ParametricLightningModule(_LightningModule):
                         )
                     loss = loss + v.weight * v.value
             losses.append(loss)
+            mse_contributions.append(sum((v.weight * v.value for name, v in loss_dict.items() if name in ("MSE", "MSE_FFT") and v.weight is not None and v.weight > 0 and v.value is not None), _torch.zeros((), device=preds.device)))
             means = _bucket_means(loss_dict)
             self._train_metrics.update(preds, targets, means, capture_index)
             if size is not None:
                 self._train_size_metrics.setdefault(size, _EpochMetrics()).update(
                     preds, targets, means, capture_index
                 )
+        # A capture-pure batch uses the same reference RMS for every window.
+        # Apply the correction only to MSE; leave spectral and anchor terms intact.
+        if capture_index is not None and self._capture_mse_scales:
+            mse_scale = self._capture_mse_scales[capture_index]
+            # Replace the unweighted MSE contribution in each size-specific loss.
+            # _size_steps returns one loss dict per A2 size.
+            losses = [
+                loss + (mse_scale - 1.0) * mse
+                for loss, mse in zip(losses, mse_contributions)
+            ]
         stacked = _torch.stack(losses)
         anchor_losses = self._mute_anchor_losses(batch)
         if anchor_losses is not None:
@@ -1403,6 +1434,9 @@ def main(
         train_sampler=train_dataloader.batch_sampler,
         val_sampler=val_dataloader.batch_sampler,
     )
+    if not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
+        raise ValueError("Per-capture RMS-normalized loss requires capture_grouped_batches")
+    model.set_capture_mse_normalization(dataset_train)
     _enable_training_fast_paths(
         net,
         (train_dataloader, val_dataloader),
