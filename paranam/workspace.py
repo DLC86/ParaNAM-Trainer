@@ -787,6 +787,8 @@ class Workspace:
             lr_decay=0.994,
             ny=self.project.train_window.ny or 8192,
             fit_mrstft=True,
+            # Queue snapshots created before the switch used RMS weighting.
+            rms_loss_normalization="_queue_source_project" in self.preferences,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
@@ -886,10 +888,14 @@ class Workspace:
             for key, default in MUTE_ANCHOR_OPTIONS.items():
                 if not uses_mute_anchor or options[key] == default:
                     options.pop(key)
-            if self.project.capture_type == "static" or not options[
-                "snr_weighted_loss_normalization"
-            ]:
+            static = self.project.capture_type == "static"
+            rms_enabled = options["rms_loss_normalization"]
+            if (
+                static or not rms_enabled or not options["snr_weighted_loss_normalization"]
+            ):
                 options.pop("snr_weighted_loss_normalization")
+            if static or rms_enabled:
+                options.pop("rms_loss_normalization")
             method = data["settings"]["advanced_training"].get("checkpoint_method")
             # Preserve legacy fingerprints when only the new default options
             # have been added to the settings dialog.

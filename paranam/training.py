@@ -108,6 +108,10 @@ def job_can_resume(workspace, job):
     legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
     options = workspace.training_options()
     if workspace.project.capture_type == "parametric":
+        if spec.get("learning", {}).get("rms_loss_normalization", True) != options[
+            "rms_loss_normalization"
+        ]:
+            return False
         from nam.capture.export import (
             MUTE_ANCHOR_DEFAULTS,
             mute_anchor_settings,
@@ -540,9 +544,13 @@ def make_job(workspace, resume=False, job_directory=None):
             prefs["rate_schedule"] = schedule
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
-        learning["snr_weighted_loss_normalization"] = options[
-            "snr_weighted_loss_normalization"
-        ]
+        rms = options["rms_loss_normalization"]
+        if not isinstance(rms, bool):
+            raise ValueError("rms_loss_normalization must be a boolean")
+        learning["rms_loss_normalization"] = rms
+        learning["snr_weighted_loss_normalization"] = (
+            rms and options["snr_weighted_loss_normalization"]
+        )
         learning["checkpoint_metric"] = "ESR_full"
         learning["separate_size_checkpoints"] = True
         learning["export_checkpoints"] = False

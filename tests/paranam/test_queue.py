@@ -32,6 +32,7 @@ def small_ready(workspace, kind="parametric"):
 
 
 def enable_snr(workspace):
+    workspace.preferences["advanced_parametric"]["rms_loss_normalization"] = True
     workspace.preferences["advanced_parametric"]["snr_weighted_loss_normalization"] = True
     raw_dir = workspace.directory / "captures_raw"
     raw_dir.mkdir()
@@ -367,6 +368,7 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
         assert list(powers.values()) == pytest.approx([0.03125**2, 0.0625**2])
         if snr_mode == "legacy":
             del spec["learning"]["snr_noise_powers"]
+            del spec["learning"]["rms_loss_normalization"]
         else:
             (raw_dir / "manifest.json").unlink()
     spec["learning"]["trainer"].update(limit_train_batches=1, limit_val_batches=1)
@@ -375,6 +377,11 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
         for item in spec["data"][split]:
             item.update(start_seconds=0, stop_seconds=None)
     frozen = Workspace(Path(spec["project"]))
+    if snr_mode == "legacy":
+        del frozen.preferences["advanced_parametric"]["rms_loss_normalization"]
+        del spec["preferences"]["advanced_training"]["rms_loss_normalization"]
+        frozen.save()
+        assert frozen.fingerprint() == spec["fingerprint"]
     for item in spec["data"]["validation"]:
         item["x_path"] = frozen.project.train_input
         item["y_path"] = frozen.project.entries[0].y_path

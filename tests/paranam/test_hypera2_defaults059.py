@@ -25,6 +25,7 @@ def requested_settings():
         "hypernetwork_lr_decay": 0.998496613,
         "branch_loss_reduction": "sum",
         "snr_weighted_loss_normalization": False,
+        "rms_loss_normalization": False,
         "mute_anchor_interval": 1,
         "mute_anchor_batch_size": 2,
         "mute_anchor_ny": 512,

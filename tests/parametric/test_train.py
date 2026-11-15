@@ -351,20 +351,28 @@ def test_parametric_training_exports_before_plot_failure(
     assert plot_calls == failed_plot_call
 
 
-def test_parametric_training_without_normalization_skips_compensation(tmp_path):
+@_pytest.mark.parametrize("rms", [None, True, False])
+def test_parametric_training_without_joint_normalization_skips_compensation(
+    tmp_path, mocker, rms
+):
     model_config = _tiny_model_config()
     data_config = _build_data_config(tmp_path, normalize=False)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
+    learning = _learning_config()
+    if rms is not None:
+        learning["rms_loss_normalization"] = rms
+    normalize = mocker.spy(_ParametricLightningModule, "set_capture_mse_normalization")
     _main(
         data_config=data_config,
         model_config=model_config,
-        learning_config=_learning_config(),
+        learning_config=learning,
         outdir=run_dir,
         no_show=True,
         make_plots=False,
     )
+    assert normalize.call_count == (rms is not False)
 
     baked = _load_json(run_dir / "model.nam")
     parametric = _load_json(run_dir / "model_parametric.pnam")

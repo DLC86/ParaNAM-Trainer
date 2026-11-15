@@ -51,6 +51,7 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
         assert spec["model"]["hypernet_lr_scale"] == 0.1
     assert not spec["data"].get("joint")  # User explicitly excludes RMS normalization.
     if kind == "parametric":
+        assert spec["learning"]["rms_loss_normalization"] is False
         assert spec["learning"]["snr_weighted_loss_normalization"] is False
         assert spec["model"]["net"]["config"]["hypernet"]["mode"] == "full"
         assert spec["model"]["net"]["config"]["hypernet"]["selector"] == {}
@@ -203,17 +204,33 @@ def test_snr_checkbox_reaches_the_training_job(window, workspace):
     key = "snr_weighted_loss_normalization"
     ready(workspace)
     window._attach(workspace)
+    rms = window.advanced_fields["rms_loss_normalization"]
     field = window.advanced_fields[key]
-    assert field.isEnabled() and not field.isChecked()
+    assert rms.isEnabled() and not rms.isChecked()
+    assert not field.isEnabled()
     fingerprint = workspace.fingerprint()
+    rms.setChecked(True)
+    assert field.isEnabled()
     field.setChecked(True)
     reopened = Workspace(workspace.directory)
     assert reopened.training_options()[key] is True
     assert reopened.fingerprint() != fingerprint
-    spec = read_json(training.make_job(reopened) / "spec.json")
+    job = training.make_job(reopened)
+    spec = read_json(job / "spec.json")
+    assert spec["learning"]["rms_loss_normalization"] is True
     assert spec["learning"][key] is True
-    window.load_advanced_options("static")
+    (job / "resume-0.ckpt").touch()
+    assert training.job_can_resume(reopened, job)
+    rms.setChecked(False)
     assert not field.isEnabled()
+    disabled = Workspace(workspace.directory)
+    assert not training.job_can_resume(disabled, job)
+    assert disabled.fingerprint() == fingerprint
+    disabled_spec = read_json(training.make_job(disabled) / "spec.json")
+    assert disabled_spec["learning"]["rms_loss_normalization"] is False
+    assert disabled_spec["learning"][key] is False
+    window.load_advanced_options("static")
+    assert not rms.isEnabled() and not field.isEnabled()
 
 
 def test_mute_anchor_fields_persist_and_reach_job(window, workspace):

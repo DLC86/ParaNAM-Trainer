@@ -1170,10 +1170,20 @@ class WizardWindow(
             field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
+        rms = QCheckBox("RMS loss normalization")
+        rms.setToolTip(
+            "Weight each capture's training MSE relative to -18 dBFS RMS, "
+            "with a -60 dBFS floor."
+        )
+        self.advanced_fields["rms_loss_normalization"] = rms
+        advanced_form.addRow(rms)
+        rms.toggled.connect(self.save_preferences)
+        rms.toggled.connect(lambda _: self.refresh_loss_normalization_controls())
         snr_weighted = QCheckBox("SNR weighted loss normalization")
         snr_weighted.setChecked(False)
+        snr_weighted.setEnabled(False)
         snr_weighted.setToolTip(
-            "Parametric training only. Requires raw captures with pre-blip silence. "
+            "Requires RMS loss normalization and raw captures with pre-blip silence. "
             "Reduces the MSE weight of low-SNR captures. Off uses RMS-only normalization."
         )
         self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
@@ -1563,7 +1573,7 @@ class WizardWindow(
         parametric = (
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
-        self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(parametric)
+        self.refresh_loss_normalization_controls(parametric)
         for key in MUTE_ANCHOR_OPTIONS:
             self.advanced_panel.layout().setRowVisible(
                 self.advanced_fields[key], parametric
@@ -1581,6 +1591,15 @@ class WizardWindow(
         self.refresh_hypernetwork_controls(kind)
         self.refresh_checkpoint_controls()
         self.refresh_rate_preview(kind)
+
+    def refresh_loss_normalization_controls(self, parametric=None):
+        if parametric is None:
+            parametric = self.capture_kind.currentData() == "parametric"
+        rms = self.advanced_fields["rms_loss_normalization"]
+        rms.setEnabled(parametric)
+        self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(
+            parametric and rms.isChecked()
+        )
 
     def refresh_checkpoint_controls(self, *_):
         if not self.workspace:

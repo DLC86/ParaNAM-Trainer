@@ -56,6 +56,10 @@ def snapshot_workspace(workspace, root):
     destination.mkdir(parents=True)
     project = workspace.project.model_copy(deep=True)
     preferences = copy.deepcopy(workspace.preferences)
+    preferences.setdefault("advanced_parametric", {}).setdefault(
+        "rms_loss_normalization",
+        workspace.training_options("parametric")["rms_loss_normalization"],
+    )
     preferences["draft_controls"] = copy.deepcopy(workspace.draft_controls)
     preferences["_queue_source_project"] = preferences.get(
         "_queue_source_project", str(workspace.directory)

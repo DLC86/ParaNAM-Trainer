@@ -1470,10 +1470,15 @@ def main(
         train_sampler=train_dataloader.batch_sampler,
         val_sampler=val_dataloader.batch_sampler,
     )
+    rms = learning_config.get("rms_loss_normalization", True)
+    if not isinstance(rms, bool):
+        raise ValueError("rms_loss_normalization must be a boolean")
     snr_weighted = learning_config.get("snr_weighted_loss_normalization", False)
     if not isinstance(snr_weighted, bool):
         raise ValueError("snr_weighted_loss_normalization must be a boolean")
-    if isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
+    if snr_weighted and not rms:
+        raise ValueError("SNR-weighted loss requires RMS loss normalization")
+    if rms and isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
         model.set_capture_mse_normalization(
             dataset_train,
             snr_weighted=snr_weighted,
