@@ -192,7 +192,10 @@ def test_switch_coverage_recommendations_and_signal_selection(window, workspace)
     ]
     window._attach(workspace)
     window.refresh_recommendation(True)
-    assert window.n_train.value() == 96
+    # With a separately reserved default in one of the six Complex Switch
+    # states, the feasible equally allocated LHS quota is 90 rather than 96.
+    assert window.include_default_as_additional_capture.isChecked()
+    assert window.n_train.value() == 90
     # The actual stepped control grid has only five reserved-free validation
     # positions per Complex Switch combination, rather than the old heuristic 8.
     assert window.n_validation.value() == 30
