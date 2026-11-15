@@ -695,11 +695,18 @@ class ControlDialog(QDialog):
         # Legacy Avoid min/max flags are still read and preserved for old
         # projects. New controls use Mute at minimum/maximum to both train
         # silence and exclude the endpoint from real captures.
+        # If an older project had both flags enabled at one endpoint,
+        # the new unified Mute checkbox owns its avoidance: turning it off
+        # must not leave an invisible legacy Avoid flag active.
         self._legacy_avoid_zero = bool(
-            control.avoid_zero if isinstance(control, KnobSpec) else False
+            isinstance(control, KnobSpec)
+            and control.avoid_zero
+            and not control.mute_at_min
         )
         self._legacy_avoid_max = bool(
-            control.avoid_max if isinstance(control, KnobSpec) else False
+            isinstance(control, KnobSpec)
+            and control.avoid_max
+            and not control.mute_at_max
         )
         for label, field in (
             ("Minimum", self.minimum),
