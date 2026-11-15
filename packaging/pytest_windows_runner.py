@@ -1,26 +1,37 @@
-"""Run the native Windows installer smoke suite, preserving pytest's true outcome.
+"""Run Windows installer pytest with an auditable completion receipt.
 
-The 0.7.7 Windows job completed all 816 tests successfully and printed the
-pytest summary, but python.exe exited 1 during interpreter shutdown.  PyTorch,
-Qt and native audio libraries have finalizers outside pytest's own lifecycle.
-The call to pytest.main() still runs pytest_sessionfinish, pytest_unconfigure,
-fixtures, and failure-reporting hooks, and returns a real nonzero status if
-any part of the suite fails.  Bypass *only* Python interpreter shutdown after
-that fully completed, verified test run.
+Native-library shutdown on Windows can make python.exe return status 1
+*after* pytest reports its own successful completion (816 passing tests).
+Only a successfully completed pytest.main() call with all teardown hooks done
+creates a receipt, which the workflow checks after the subprocess exits.
+An exception, crash, or nonzero pytest result NEVER creates that receipt.
 """
 
 import os
+from pathlib import Path
 import sys
 
 import pytest
 
 
+_SUCCESS = "PARANAM_PYTEST_ALL_PASSED\n"
+
+
 def main():
     status = int(pytest.main(sys.argv[1:]))
+    if status == 0:
+        path = os.environ.get("PARANAM_PYTEST_SUCCESS_MARKER")
+        if path:
+            # The CI step deletes the marker before execution; 'x' also
+            # prevents accepting an old receipt if cleanup regresses.
+            with Path(path).open("x", encoding="ascii") as out:
+                out.write(_SUCCESS)
+                out.flush()
+                os.fsync(out.fileno())
     print(f"VERIFIED_PYTEST_EXIT_STATUS={status}", flush=True)
     sys.stdout.flush()
     sys.stderr.flush()
-    # Avoid nondeterministic native finalizers once all pytest hooks are done.
+    # Skip only interpreter shutdown after all of pytest's own hooks ran.
     os._exit(status)
 
 

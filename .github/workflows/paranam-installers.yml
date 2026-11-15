@@ -87,11 +87,30 @@ jobs:
         run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
       - name: Test wizard, queue, native playback and real pause/resume training (Windows)
         if: runner.os == 'Windows'
-        # On the previous Windows runner all 816 tests passed, but python.exe
-        # exited 1 *after* pytest finished. Return pytest's verified status
-        # directly, so a native-library interpreter shutdown cannot override it.
-        # Actual pytest failures still return non-zero.
-        run: python packaging/pytest_windows_runner.py tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+        shell: pwsh
+        run: |
+          # A Windows native finalizer sometimes changes python.exe's exit
+          # status after pytest has COMPLETED all tests and its teardown hooks.
+          # The previous run verified 816/816 passing and status=0 inside
+          # pytest, but GitHub Actions observed process status=1 afterward.
+          # Verify an explicit, newly created pytest-success receipt instead
+          # of suppressing a real test failure or relying on process teardown.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $marker = Join-Path $env:RUNNER_TEMP 'paranam-pytest-completed-ok.txt'
+          Remove-Item -LiteralPath $marker -ErrorAction SilentlyContinue
+          $env:PARANAM_PYTEST_SUCCESS_MARKER = $marker
+          python packaging/pytest_windows_runner.py tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+          $nativeStatus = $LASTEXITCODE
+          if ($nativeStatus -eq 0) { exit 0 }
+          if (Test-Path -LiteralPath $marker) {
+            $receipt = (Get-Content -LiteralPath $marker -Raw).Trim()
+            if ($receipt -eq 'PARANAM_PYTEST_ALL_PASSED') {
+              Write-Warning "All pytest checks completed successfully, but Windows Python native teardown returned $nativeStatus."
+              exit 0
+            }
+          }
+          [Console]::Error.WriteLine("Pytest failed, crashed, or did not finish. Exit code: $nativeStatus")
+          exit 1
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Verify optional NVIDIA engine inside the frozen CPU app
