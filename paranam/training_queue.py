@@ -197,9 +197,36 @@ class TrainingQueue:
         job = training.make_job(frozen, job_directory=frozen.directory.parent)
         spec = read_json(job / "spec.json")
         if spec["learning"].get("snr_weighted_loss_normalization"):
-            spec["learning"]["snr_noise_powers"] = freeze_snr_noise(
-                workspace.directory, frozen, workspace.project
-            )
+            # Retraining from a historical frozen job must not depend on the
+            # source rig still having its pre-blip raw recordings. The old job
+            # has already frozen the exact noise values for these same takes.
+            previous_job = workspace.preferences.get("_retrain_source_job")
+            if previous_job:
+                previous_spec = read_json(Path(previous_job) / "spec.json")
+                previous_noise = previous_spec.get("learning", {}).get("snr_noise_powers")
+                if not isinstance(previous_noise, dict):
+                    raise ValueError(
+                        "The original job has no frozen SNR noise measurements"
+                    )
+                original_project = Workspace(Path(previous_spec["project"])).project
+                powers = {}
+                if len(original_project.entries) != len(frozen.project.entries):
+                    raise ValueError("Retrain captures no longer match the original plan")
+                for old, new in zip(original_project.entries, frozen.project.entries):
+                    if old.split != new.split or old.params != new.params:
+                        raise ValueError("Retrain captures no longer match the original plan")
+                    if old.split == "train" and old.status == "captured":
+                        raw_noise = previous_noise.get(old.y_path)
+                        if raw_noise is None:
+                            raise ValueError(
+                                f"Missing original SNR measurement for {old.y_path}"
+                            )
+                        powers[new.y_path] = raw_noise
+                spec["learning"]["snr_noise_powers"] = powers
+            else:
+                spec["learning"]["snr_noise_powers"] = freeze_snr_noise(
+                    workspace.directory, frozen, workspace.project
+                )
         source = frozen.preferences["_queue_source_project"]
         spec.update(
             original_project=source,
@@ -226,18 +253,22 @@ class TrainingQueue:
         return entry
 
     def retrain(self, identifier):
-        """Restore instance settings in its source project without starting a job."""
+        """Open an independent editable copy of this job's exact original plan.
+
+        Never derive the retrain dataset from the currently open project or
+        regenerate it using newer LHS/Sobol settings. Frozen audio belongs to
+        the old instance; a fresh editable copy keeps it immutable.
+        """
         entry = self.get(identifier)
         if not entry or entry["state"] not in FINISHED:
             raise ValueError(
                 "Select a stopped, paused or finished training instance; queued or active jobs cannot be retrained."
             )
         spec = read_json(Path(entry["job"]) / "spec.json")
-        if not spec or not (Path(entry["project"]) / "capture_project.json").is_file():
-            raise ValueError("Reconnect the drive containing the original project.")
-        workspace = Workspace(Path(entry["project"]))
-        # Keep the source recordings/paths and hardware configuration. Frozen job
-        # paths must never become editable capture destinations.
+        if not spec or not Path(spec.get("project", "")).is_dir():
+            raise ValueError("The original training snapshot is unavailable.")
+        snapshot = Workspace(Path(spec["project"]))
+        workspace = snapshot_workspace(snapshot, self.snapshot_root(snapshot))
         source_input = workspace.preferences.get("custom_input", "")
         saved = copy.deepcopy(spec.get("preferences", {}))
         for key in ("rate_schedule", "_queue_source_project"):
@@ -248,13 +279,15 @@ class TrainingQueue:
                 copy.deepcopy(effective)
             )
         workspace.preferences.update(saved)
+        # The source project's plan may have been changed after this job was
+        # queued; never import that plan or its current recording paths.
         workspace.preferences["custom_input"] = source_input
-        snapshot = Workspace(Path(spec["project"]))
+        workspace.preferences["_queue_source_project"] = entry["project"]
+        workspace.preferences["_retrain_source_job"] = str(Path(entry["job"]).resolve())
         workspace.draft_controls = copy.deepcopy(snapshot.draft_controls)
         workspace.project.user_metadata = copy.deepcopy(snapshot.project.user_metadata)
         if isinstance(effective, dict):
             from .cadences import editable_cadences, stored_schedules
-
             workspace.preferences[
                 "advanced_" + saved.get("capture_type", entry["kind"])
             ] = editable_cadences(
