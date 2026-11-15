@@ -25,7 +25,7 @@ Changes since **0.7.6**.
 ## Application, queue and installer fixes
 
 - **Training queue:** failed jobs display **Retry** and continue through the existing checkpoint recovery flow; frozen queue datasets retain per-capture SNR measurements.
-- **Retrain restores the original plan:** clicking Retrain creates an independent editable copy of the selected job's recorded capture plan and frozen audio, rather than rebuilding captures using the current source project's Plan settings. Later unrecorded active-learning suggestions are omitted; the old job and current source project remain unchanged.
+- **Retrain restores the original plan:** clicking Retrain creates an independent editable copy of the selected job's recorded capture plan and frozen audio, rather than rebuilding captures using the current source project's Plan settings. Later unrecorded active-learning suggestions are omitted; the old job and current source project remain unchanged. Retrain audio files are physically independent copies, not writable hardlinks to the original job's immutable WAV cache.
 - **Numeric controls:** fixed runaway repeated +/− increments in advanced training spin boxes.
 - **Windows GPU runtime:** support extended-length paths when extracting optional NVIDIA/PyTorch runtime files.
 - **Build and CI safeguards:** draft 0.7.7 native installers are built for Windows, Linux, macOS Apple Silicon and macOS Intel. The draft-update workflow requires passing tests for the exact source revision, prevents obsolete workflows from replacing newer release assets and performs targeted regression and frozen-app checks before finalizing the draft. Release remains a draft until explicitly published.
