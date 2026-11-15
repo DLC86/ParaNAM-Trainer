@@ -787,16 +787,8 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler = val_sampler
 
     def set_capture_mse_normalization(self, dataset, snr_weighted: bool = False) -> None:
-        """Noise-aware per-capture MSE weighting from the recorded pre-blip silence.
-
-        The raw amp-return WAV already contains silence before the first timing
-        impulse. Read its actual playback layout from the raw manifest, so the
-        latency-calibration and training audio are never changed. Captures without
-        raw recordings are intentionally rejected rather than silently using an
-        uncalibrated weight.
-        """
-        import json
-        import numpy as np
+        """Set per-capture MSE weights from target RMS and optional pre-blip noise."""
+        from ..capture.session import pre_blip_noise_power
 
         target_power = 10.0 ** (-18.0 / 10.0)
         floor_power = 10.0 ** (-60.0 / 10.0)
@@ -807,54 +799,23 @@ class _ParametricLightningModule(_LightningModule):
             if not _isfinite(total_power):
                 raise ValueError("Cannot normalize capture with non-finite power")
 
-            if not snr_weighted:
-                scales.append(target_power / max(total_power, floor_power))
-                continue
-
-            y_path = _Path(capture._y_path).resolve()
-            raw_dir = y_path.parent.parent / "captures_raw"
-            manifest_path = raw_dir / "manifest.json"
-            if not manifest_path.is_file():
-                raise ValueError(f"Noise-aware training requires {manifest_path}")
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            records = [
-                record for record in manifest.get("captures", [])
-                if _Path(record.get("y_path", "")).name == y_path.name
-            ]
-            if len(records) != 1:
-                raise ValueError(f"Expected one raw capture record for {y_path}")
-            record = records[0]
-            playback_path = raw_dir / record["playback"]
-            raw_path = raw_dir / record["raw"]
-            from nam.data import wav_to_np
-            playback = np.asarray(wav_to_np(playback_path), dtype=np.float64).reshape(-1)
-            preamble_samples = int(record["preamble_samples"])
-            preamble = playback[:preamble_samples]
-            peaks = np.flatnonzero(np.abs(preamble) > 0.5 * np.max(np.abs(preamble)))
-            if not len(peaks) or peaks[0] <= 0:
-                raise ValueError(f"No pre-blip silence in {playback_path}")
-            # The input has not yet received any timing impulse. No additional
-            # settling interval is needed: captures are separated by knob changes.
-            noise_samples = int(peaks[0])
-            raw = np.asarray(wav_to_np(raw_path), dtype=np.float64).reshape(-1)
-            if len(raw) < noise_samples:
-                raise ValueError(f"Raw recording is too short: {raw_path}")
-            noise_power = float(np.mean(np.square(raw[:noise_samples])))
-            if not _isfinite(noise_power):
-                raise ValueError(f"Invalid noise estimate for {raw_path}")
-            # Dataset hooks may have scaled the target. Express raw noise power
-            # in the same units by comparing the saved aligned WAV to dataset y.
-            saved = np.asarray(wav_to_np(y_path), dtype=np.float64).reshape(-1)
-            saved_power = float(np.mean(np.square(saved)))
-            if saved_power > 0.0:
-                noise_power *= total_power / saved_power
-            signal_power = max(total_power - noise_power, 0.0)
-            reliability = signal_power / max(total_power, 1e-20)
-            # Squared reliability is intentional: using reliability once
-            # cancels the noise-subtracted normalization whenever floor is
-            # inactive, leaving the original RMS weighting unchanged.
-            scale = (target_power / max(signal_power, floor_power)) * reliability**2
-            scales.append(float(scale))
+            noise_power = 0.0
+            if snr_weighted:
+                if capture._y_path is None or capture.sample_rate is None:
+                    raise ValueError(
+                        "SNR weighting requires the capture WAV path and sample rate"
+                    )
+                raw_noise = pre_blip_noise_power(_Path(capture._y_path), capture.sample_rate)
+                noise_power = raw_noise * capture.output_gain**2
+                if not _isfinite(noise_power):
+                    raise ValueError(f"Invalid scaled noise power for {capture._y_path}")
+            scale = target_power / max(total_power, floor_power)
+            if noise_power > 0.0:
+                signal_power = max(total_power - noise_power, 0.0)
+                reliability = signal_power / total_power if total_power > 0.0 else 0.0
+                # Above the floor this is RMS weighting times the signal fraction.
+                scale = target_power / max(signal_power, floor_power) * reliability**2
+            scales.append(scale)
         self._capture_mse_scales = tuple(scales)
 
     @staticmethod
@@ -1106,35 +1067,31 @@ class _ParametricLightningModule(_LightningModule):
 
     def training_step(self, batch, batch_idx):
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
+        mse_scale = (
+            self._capture_mse_scales[capture_index]
+            if capture_index is not None and self._capture_mse_scales
+            else 1.0
+        )
         losses = []
-        mse_contributions = []
         for size, (preds, targets, loss_dict) in self._size_steps(batch):
             loss = _torch.zeros((), device=preds.device)
-            for v in loss_dict.values():
+            for name, v in loss_dict.items():
                 if v.weight is not None and v.weight > 0.0:
                     if v.value is None:
                         raise RuntimeError(
                             "Weighted training losses must define a tensor value"
                         )
-                    loss = loss + v.weight * v.value
+                    weight = v.weight
+                    if name in ("MSE", "MSE_FFT"):
+                        weight *= mse_scale
+                    loss = loss + weight * v.value
             losses.append(loss)
-            mse_contributions.append(sum((v.weight * v.value for name, v in loss_dict.items() if name in ("MSE", "MSE_FFT") and v.weight is not None and v.weight > 0 and v.value is not None), _torch.zeros((), device=preds.device)))
             means = _bucket_means(loss_dict)
             self._train_metrics.update(preds, targets, means, capture_index)
             if size is not None:
                 self._train_size_metrics.setdefault(size, _EpochMetrics()).update(
                     preds, targets, means, capture_index
                 )
-        # A capture-pure batch uses the same reference RMS for every window.
-        # Apply the correction only to MSE; leave spectral and anchor terms intact.
-        if capture_index is not None and self._capture_mse_scales:
-            mse_scale = self._capture_mse_scales[capture_index]
-            # Replace the unweighted MSE contribution in each size-specific loss.
-            # _size_steps returns one loss dict per A2 size.
-            losses = [
-                loss + (mse_scale - 1.0) * mse
-                for loss, mse in zip(losses, mse_contributions)
-            ]
         stacked = _torch.stack(losses)
         anchor_losses = self._mute_anchor_losses(batch)
         if anchor_losses is not None:
@@ -1487,12 +1444,13 @@ def main(
         train_sampler=train_dataloader.batch_sampler,
         val_sampler=val_dataloader.batch_sampler,
     )
-    if not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
-        raise ValueError("Per-capture RMS-normalized loss requires capture_grouped_batches")
-    model.set_capture_mse_normalization(
-        dataset_train,
-        snr_weighted=learning_config.get("snr_weighted_loss_normalization", False),
-    )
+    snr_weighted = learning_config.get("snr_weighted_loss_normalization", False)
+    if not isinstance(snr_weighted, bool):
+        raise ValueError("snr_weighted_loss_normalization must be a boolean")
+    if isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
+        model.set_capture_mse_normalization(dataset_train, snr_weighted=snr_weighted)
+    elif snr_weighted:
+        raise ValueError("SNR-weighted loss requires capture_grouped_batches")
     _enable_training_fast_paths(
         net,
         (train_dataloader, val_dataloader),

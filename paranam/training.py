@@ -512,7 +512,9 @@ def make_job(workspace, resume=False, job_directory=None):
             prefs["rate_schedule"] = schedule
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
-        learning["snr_weighted_loss_normalization"] = options["snr_weighted_loss_normalization"]
+        learning["snr_weighted_loss_normalization"] = options[
+            "snr_weighted_loss_normalization"
+        ]
         learning["checkpoint_metric"] = "ESR_full"
         learning["separate_size_checkpoints"] = True
         learning["export_checkpoints"] = False

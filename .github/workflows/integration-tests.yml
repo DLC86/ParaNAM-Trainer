@@ -7,6 +7,9 @@ on:
 
 jobs:
   call-integration-tests:
+    # The upstream workflow hardcodes sdatkinson/neural-amp-modeler as its
+    # trainer checkout. ParaNAM's own suite builds and tests its playback engine.
+    if: github.repository == 'sdatkinson/neural-amp-modeler'
     uses: Atkinson-Advanced-Modeling/NamIntegrationTests/.github/workflows/integration-tests.yml@main
     with:
       source_repo: neural-amp-modeler

@@ -1173,8 +1173,8 @@ class WizardWindow(
         snr_weighted = QCheckBox("SNR weighted loss normalization")
         snr_weighted.setChecked(False)
         snr_weighted.setToolTip(
-            "Use the recorded pre-blip noise floor to reduce the MSE weight "
-            "of low-SNR captures. Disable to use RMS-only normalization."
+            "Parametric training only. Requires raw captures with pre-blip silence. "
+            "Reduces the MSE weight of low-SNR captures. Off uses RMS-only normalization."
         )
         self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
         advanced_form.addRow(snr_weighted)
@@ -1541,6 +1541,7 @@ class WizardWindow(
         parametric = (
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
+        self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.advanced_fields["cudnn_benchmark"].setEnabled(

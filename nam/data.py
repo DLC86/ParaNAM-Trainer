@@ -475,6 +475,7 @@ class Dataset(AbstractDataset, _InitializableFromConfig):
         y = y * y_scale
         self._x_path = x_path
         self._y_path = y_path
+        self._configured_y_scale = y_scale
         self._validate_inputs_after_processing(x, y, nx, ny)
         self._x = x
         self._y = y
@@ -537,6 +538,11 @@ class Dataset(AbstractDataset, _InitializableFromConfig):
     def y_offset(self) -> int:
         return self._nx - 1
 
+    @property
+    def output_gain(self) -> float:
+        """Gain applied to the original samples, including dataset normalization."""
+        return self._configured_y_scale * (1.0 if self._y_scale is None else self._y_scale)
+
     @classmethod
     def parse_config(cls, config):
         """
@@ -555,11 +561,11 @@ class Dataset(AbstractDataset, _InitializableFromConfig):
         """
         config = _deepcopy(config)
         sample_rate = config.pop("sample_rate", None)
-        x, x_wavinfo = wav_to_tensor(config.pop("x_path"), info=True, rate=sample_rate)
+        x, x_wavinfo = wav_to_tensor(config["x_path"], info=True, rate=sample_rate)
         sample_rate = x_wavinfo.rate
         if config.pop("allow_unequal_lengths", False):
             y = wav_to_tensor(
-                config.pop("y_path"),
+                config["y_path"],
                 rate=sample_rate,
                 preroll=config.pop("y_preroll", None),
                 required_wavinfo=x_wavinfo,
@@ -578,7 +584,7 @@ class Dataset(AbstractDataset, _InitializableFromConfig):
         else:
             try:
                 y = wav_to_tensor(
-                    config.pop("y_path"),
+                    config["y_path"],
                     rate=sample_rate,
                     preroll=config.pop("y_preroll", None),
                     required_shape=(len(x), 1),

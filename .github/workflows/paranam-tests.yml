@@ -32,6 +32,11 @@ jobs:
         run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - name: Validate switch schema and parametric model exports
         run: python -m pytest tests/parametric/test_spec.py tests/parametric/test_export.py tests/capture/test_switch_controls.py -q -o addopts=
+      - name: Verify parametric capture loss normalization
+        run: >-
+          python -m pytest -q -o addopts=
+          tests/parametric/test_train.py::test_rms_normalizes_training_mse_and_preserves_targets
+          tests/parametric/test_train.py::test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio
       - name: Build native playback engine (retry transient Eigen / GitLab fetch errors)
         run: |
           for attempt in 1 2 3; do

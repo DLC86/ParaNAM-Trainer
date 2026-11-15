@@ -875,7 +875,12 @@ class Workspace:
             data["files"].append([relative, stat.st_size, stat.st_mtime_ns])
         data["settings"]["batch_size"] = self.training_batch_size()
         if include_advanced:
-            data["settings"]["advanced_training"] = self.training_options()
+            options = self.training_options()
+            data["settings"]["advanced_training"] = options
+            if self.project.capture_type == "static" or not options[
+                "snr_weighted_loss_normalization"
+            ]:
+                options.pop("snr_weighted_loss_normalization")
             method = data["settings"]["advanced_training"].get("checkpoint_method")
             # Preserve legacy fingerprints when only the new default options
             # have been added to the settings dialog.

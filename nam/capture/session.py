@@ -501,6 +501,62 @@ def played_preamble(
     )
 
 
+def pre_blip_noise_power(capture_path: _Path, sample_rate: int) -> float:
+    """Measure mean-square amp-return noise in the saved preamble's silence."""
+    from ..data import wav_to_np
+
+    capture_path = capture_path.resolve()
+    for root in capture_path.parents:
+        raw_dir = root / _CAPTURES_RAW_DIRNAME
+        manifest_path = raw_dir / _RAW_MANIFEST_FILENAME
+        if manifest_path.is_file():
+            break
+    else:
+        raise ValueError(f"No raw recording manifest for {capture_path}")
+
+    try:
+        manifest = _json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(manifest, dict) or not isinstance(
+            manifest.get("captures"), list
+        ):
+            raise ValueError("Expected a captures list")
+        relative_path = capture_path.relative_to(root)
+        records = [
+            record
+            for record in manifest["captures"]
+            if isinstance(record, dict)
+            and isinstance(record.get("y_path"), str)
+            and _Path(record["y_path"]) == relative_path
+        ]
+        if len(records) != 1:
+            raise ValueError("Expected exactly one matching capture record")
+        record = records[0]
+        playback_name = record.get("main_playback", record.get("playback"))
+        raw_name = record.get("raw")
+        for name in (playback_name, raw_name):
+            if not isinstance(name, str) or not name or _Path(name).name != name:
+                raise ValueError("Expected a WAV filename in captures_raw")
+        playback = wav_to_np(raw_dir / playback_name, rate=sample_rate)
+        preamble_samples = record.get("preamble_samples")
+        if type(preamble_samples) is not int or not (
+            0 < preamble_samples <= len(playback)
+        ):
+            raise ValueError("Invalid playback preamble length")
+        preamble = _PlayedPreamble.from_playback(playback, preamble_samples, sample_rate)
+        start, stop = preamble.noise_interval
+        raw = wav_to_np(raw_dir / raw_name, rate=sample_rate)
+        if not 0 <= start < stop <= len(raw):
+            raise ValueError("Raw recording has no usable pre-blip silence")
+        noise = float(_np.mean(_np.square(raw[start:stop], dtype=_np.float64)))
+        if not _np.isfinite(noise):
+            raise ValueError("Non-finite pre-blip noise power")
+        return noise
+    except (OSError, ValueError, RuntimeError, AssertionError) as exc:
+        raise ValueError(
+            f"Cannot estimate noise for {capture_path} from {manifest_path}: {exc}"
+        ) from exc
+
+
 def _read_rate(path: _Path) -> int:
     import wave as _wave
 
@@ -1684,7 +1740,7 @@ class CaptureSession:
         That is the point of them. The capture WAV is already interpreted -- cut to the
         input's length, slid onto the project's timebase and labelled with a measured
         delay -- so if any of that turns out to be wrong, the only way back is a copy no
-        such decision has touched. Nothing in training reads these.
+        such decision has touched. SNR-weighted training uses only the pre-blip silence.
 
         The manifest record is written here, with the audio, so it can only ever describe
         files that exist; see :func:`update_raw_manifest`.
