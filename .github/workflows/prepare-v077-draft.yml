@@ -31,6 +31,8 @@ jobs:
           set -euo pipefail
           grep -qx '__version__ = "0.7.7"' paranam/__init__.py
           grep -qx 'version = "0.7.7"' pyproject.toml
+          # The draft must include the focused RMS-exponent regression coverage.
+          grep -q 'test_rms_loss_exponent_adjusts_capture_weight' .github/workflows/paranam-tests.yml
           # Older release preparations can otherwise finish later, overwrite
           # the draft target commit and cancel the correct installer run.
           # Cancel them before touching the release; allow Actions time to stop.
