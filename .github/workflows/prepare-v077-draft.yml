@@ -9,6 +9,11 @@ on:
       - '.github/workflows/paranam-tests.yml'
       - 'packaging/pytest_windows_runner.py'
       - 'tests/paranam/test_plan_rules.py'
+      - 'nam/capture/planner.py'
+      - 'nam/capture/project.py'
+      - 'paranam/wizard.py'
+      - 'tests/capture/test_lhs_methods.py'
+      - 'docs/release-0.7.7.md'
 permissions:
   contents: write
   actions: write
