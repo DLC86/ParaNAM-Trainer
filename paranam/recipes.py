@@ -53,7 +53,7 @@ def training_preset(name):
         lr_decay=0.994,
         ny=8192,
         fit_mrstft=True,
-        snr_weighted_loss_normalization=True,
+        snr_weighted_loss_normalization=False,
         mrstft_weight=0.0005,
         weight_decay=3.17e-7,
         gradient_clipping=not hyper_a2,
