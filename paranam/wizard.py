@@ -1170,7 +1170,6 @@ class WizardWindow(
             field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
-            field.valueChanged.connect(self.save_preferences)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
         snr_weighted.setChecked(False)
         snr_weighted.setToolTip(
@@ -1220,7 +1219,6 @@ class WizardWindow(
         )
         self.advanced_fields["checkpoint_alpha"] = alpha
         advanced_form.addRow("Checkpoint alpha", alpha)
-        alpha.valueChanged.connect(self.save_preferences)
         preset = QComboBox()
         preset.addItem("HyperA2", "HyperA2")
         preset.addItem("HyperWaveNet (Phillip Self)", "HyperWaveNet")
@@ -1286,7 +1284,6 @@ class WizardWindow(
         advanced_form.addRow("Maximum gradient norm", limit)
         clipping.toggled.connect(limit.setEnabled)
         clipping.toggled.connect(self.save_preferences)
-        limit.valueChanged.connect(self.save_preferences)
         nonfinite = QCheckBox("Check NaN/Inf gradients")
         nonfinite.setToolTip(
             "Skip an optimizer update if any gradient is NaN or infinite. Disabling this removes the scan overhead."
@@ -1341,7 +1338,6 @@ class WizardWindow(
         advanced_form.addRow("Full/Lite loss reduction", reduction)
         for field, signal in (
             (weight_mode, weight_mode.currentIndexChanged),
-            (rank, rank.valueChanged),
             (dilated, dilated.toggled),
             (reduction, reduction.currentIndexChanged),
         ):
@@ -1374,7 +1370,10 @@ class WizardWindow(
             field.setToolTip(tooltip)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
-            field.valueChanged.connect(self.save_preferences)
+        for field in self.advanced_fields.values():
+            if isinstance(field, (QSpinBox, QDoubleSpinBox)):
+                field.valueChanged.connect(self.save_training_numeric_preferences)
+        rank.valueChanged.connect(lambda *_: self.refresh_hypernetwork_controls())
         box.addWidget(self.advanced_panel)
         self.advanced_panel.hide()
         self.advanced_toggle.toggled.connect(self.advanced_panel.setVisible)
@@ -1397,8 +1396,8 @@ class WizardWindow(
             self.refresh_gpu_button()
         self.train_button = button("Train · add to queue", self.start_training, True)
         layout.addWidget(self.train_button)
-        self.epochs.valueChanged.connect(self.save_preferences)
-        self.batch_size.valueChanged.connect(self.save_preferences)
+        self.epochs.valueChanged.connect(self.save_training_numeric_preferences)
+        self.batch_size.valueChanged.connect(self.save_training_numeric_preferences)
         self.accelerator.currentIndexChanged.connect(self.save_preferences)
 
     def _queue(self, layout):
@@ -2902,7 +2901,12 @@ class WizardWindow(
         if autofill:
             self.save_preferences()
 
-    def save_preferences(self, *_):
+    def save_training_numeric_preferences(self, *_):
+        # A nested Qt event loop can handle the mouse release before the spin
+        # box finishes handling the press, leaving its repeat timer active.
+        self.save_preferences(refresh_capture_recommendation=False)
+
+    def save_preferences(self, *_, refresh_capture_recommendation=True):
         if self._loading or not self.workspace or self.busy():
             return
         prefs = self.workspace.preferences
@@ -3033,7 +3037,8 @@ class WizardWindow(
         self.rounds.setEnabled(False)
         self.additions.setEnabled(False)
         self.workspace.save()
-        self.refresh_recommendation()
+        if refresh_capture_recommendation:
+            self.refresh_recommendation()
         self.refresh_rate_preview()
         self.custom_button.setEnabled(prefs["input_mode"] == "custom")
 
