@@ -28,10 +28,15 @@ the number of distinct Complex Switch combinations. The baseline heuristics are
 
 The app now calculates the *actual* capture grid from each knob's min/max,
 step, automatically excluded mute endpoints, legacy Avoid min/max flags and any discrete switch positions. It reduces the
-recommendations automatically if the grid is too small for the baseline. The
-default setting is part of training even when it is off-grid. Validation avoids
-the default, all corner settings and every training setting; the recommendation
-reserves enough room for those constraints.
+recommendations automatically if the grid is too small for the baseline. The Plan checkbox **Include default as additional capture** is enabled by
+default for newly generated plans. It adds one training capture at the complete
+default combination **in addition to** the requested LHS/Sobol count, rather
+than changing any of the sampler's points. With the checkbox off, the default
+is not added as a special training capture and the actual LHS/Sobol samples
+are used (the exact default combination is excluded). Existing project plans
+are left unchanged until Plan is edited and applied. Validation avoids the
+default when reserved, all corner settings and every training setting; the
+recommendation reserves enough room for those constraints.
 
 For example, a knob spanning 0–10 in steps of 0.5 with Mute at minimum enabled has
 20 usable positions per switch state. With a two-position Complex Switch the
