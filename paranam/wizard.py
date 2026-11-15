@@ -951,12 +951,24 @@ class WizardWindow(
             "pairwise control correlations without those count restrictions. "
             "Sobol: scrambled low-discrepancy points (strongest with powers of two). "
             "Optimized LHS: improve low-dimensional coverage using centered discrepancy. "
-            "Anchors, switch mapping and knob-grid rounding may reduce the ideal properties."
+            "Switch mapping and knob-grid rounding may reduce the ideal properties. "
+            "The optional default capture is not part of the LHS/Sobol design."
         )
         self.corners = QCheckBox(
             "Include range-extreme captures for every knob/switch combination (corners)"
         )
         self.corners.setChecked(True)
+        self.include_default_as_additional_capture = QCheckBox(
+            "Include default as additional capture"
+        )
+        self.include_default_as_additional_capture.setChecked(True)
+        self.include_default_as_additional_capture.setToolTip(
+            "Enabled: add exactly one default-setting training capture in addition "
+            "to the requested LHS/Sobol points. Disabled: do not include or reserve "
+            "a default capture; sample only from the selected method, excluding "
+            "the exact default combination. Existing plans are preserved until "
+            "their Plan settings are edited and applied."
+        )
         form.addRow("Training captures", self.n_train)
         form.addRow("Capture sampling method", self.lhs_method)
         form.addRow("Validation captures", self.n_validation)
@@ -971,6 +983,7 @@ class WizardWindow(
         )
         form.addRow("Validation selection", self.validation_method)
         form.addRow("Reproducible plan seed", self.seed)
+        form.addRow(self.include_default_as_additional_capture)
         form.addRow(self.corners)
         self.rounds, self.additions = QSpinBox(), QSpinBox()
         self.rounds.setRange(2, 10)
@@ -1005,6 +1018,9 @@ class WizardWindow(
         ):
             field.valueChanged.connect(self.save_preferences)
         self.corners.toggled.connect(self.save_preferences)
+        self.include_default_as_additional_capture.toggled.connect(
+            self._default_capture_toggled
+        )
         self.lhs_method.currentIndexChanged.connect(self.save_preferences)
         self.validation_method.currentIndexChanged.connect(self.save_preferences)
         self.mode.currentIndexChanged.connect(self.save_preferences)
@@ -1998,6 +2014,9 @@ class WizardWindow(
             self.batch_size.setValue(workspace.training_batch_size())
             self.load_advanced_options()
             self.corners.setChecked(prefs["corners"])
+            self.include_default_as_additional_capture.setChecked(
+                prefs["include_default_as_additional_capture"]
+            )
             self.lhs_method.setCurrentIndex(
                 max(0, self.lhs_method.findData(prefs.get("lhs_method", "standard")))
             )
@@ -2818,18 +2837,26 @@ class WizardWindow(
             requested_validation = self.n_validation.value()
 
             rules = self.workspace.plan_rules()
+            include_default = self.include_default_as_additional_capture.isChecked()
 
             def limits():
                 if rules:
-                    combinations, train_cap, _ = rule_capture_limits(controls, rules)
+                    combinations, train_cap, _ = rule_capture_limits(
+                        controls, rules, include_default_as_additional_capture=include_default
+                    )
                     if all(isinstance(c, SwitchSpec) for c in controls):
                         return combinations, combinations, combinations, combinations, combinations, True
                     train = min(max(combinations, requested_train), train_cap)
-                    _, _, val_cap = rule_capture_limits(controls, rules, train)
+                    _, _, val_cap = rule_capture_limits(
+                        controls, rules, train, include_default_as_additional_capture=include_default
+                    )
                     validation = min(requested_validation, val_cap)
                     if validation < combinations:
                         validation = 0
-                    _, train_cap, val_cap = rule_capture_limits(controls, rules, train, validation)
+                    _, train_cap, val_cap = rule_capture_limits(
+                        controls, rules, train, validation,
+                        include_default_as_additional_capture=include_default,
+                    )
                     return combinations, train_cap, val_cap, train, validation, False
                 capacity, _, combinations = capture_grid_limits(controls)
                 if all(isinstance(c, SwitchSpec) for c in controls):
@@ -2837,11 +2864,15 @@ class WizardWindow(
                     maximum = capacity * combinations
                     return maximum, maximum, maximum, maximum, maximum, True
                 train = min(max(combinations, requested_train), capacity * combinations)
-                _, validation_max = capture_count_maxima(controls, train, 0)
+                _, validation_max = capture_count_maxima(
+                    controls, train, 0, include_default
+                )
                 validation = min(requested_validation, validation_max)
                 if 0 < validation < combinations:
                     validation = 0
-                train_max, validation_max = capture_count_maxima(controls, train, validation)
+                train_max, validation_max = capture_count_maxima(
+                    controls, train, validation, include_default
+                )
                 return combinations, train_max, validation_max, train, validation, False
 
             train_min, train_max, validation_max, train, validation, switches_only = (
@@ -2885,14 +2916,23 @@ class WizardWindow(
             self.recommendation.setText("Add at least one control to build a plan.")
             return
         rules = self.workspace.plan_rules()
+        include_default = self.include_default_as_additional_capture.isChecked()
 
         def recommendations():
-            recommendation = capture_recommendations(controls)
+            recommendation = capture_recommendations(
+                controls, include_default_as_additional_capture=include_default
+            )
             if rules:
-                combinations, capacity, _ = rule_capture_limits(controls, rules)
+                combinations, capacity, _ = rule_capture_limits(
+                    controls, rules,
+                    include_default_as_additional_capture=include_default,
+                )
                 train, val, old_combinations = recommendation
                 train = min(capacity, max(combinations, train // old_combinations * combinations))
-                _, _, val_cap = rule_capture_limits(controls, rules, train)
+                _, _, val_cap = rule_capture_limits(
+                    controls, rules, train,
+                    include_default_as_additional_capture=include_default,
+                )
                 val = min(val_cap, val // old_combinations * combinations)
                 recommendation = train, val if val >= combinations else 0, combinations
             return recommendation, corner_capture_count(controls, rules=rules)
@@ -2911,7 +2951,9 @@ class WizardWindow(
             else ""
         )
         self.recommendation.setText(
-            f"Suggested: {train} training + {val} validation captures, plus up to {count} corners.\n"
+            f"Suggested: {train} sampled training + {val} validation captures, "
+            f"plus {'1 default + ' if include_default and any(isinstance(c, KnobSpec) and not c.clean_volume for c in controls) else ''}"
+            f"up to {count} corners.\n"
             f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts account for actual control positions and are starting guidelines, not an accuracy guarantee.{note}"
         )
         if autofill:
@@ -2942,6 +2984,15 @@ class WizardWindow(
                 self._sync_capture_limits()
         if autofill:
             self.save_preferences()
+
+    def _default_capture_toggled(self, *_):
+        if self._loading or not self.workspace:
+            return
+        # A legacy plan has no stored policy. Only an explicit edit to the
+        # checkbox should make the option itself trigger plan regeneration.
+        self.workspace.preferences["_include_default_capture_touched"] = True
+        self.save_preferences()
+        self._sync_capture_limits()
 
     def save_training_numeric_preferences(self, *_):
         # A nested Qt event loop can handle the mouse release before the spin
@@ -3034,6 +3085,9 @@ class WizardWindow(
             mode="normal",  # Active Learning remains implemented but unavailable.
             device=self.accelerator.currentData(),
             corners=self.corners.isChecked(),
+            include_default_as_additional_capture=(
+                self.include_default_as_additional_capture.isChecked()
+            ),
             lhs_method=self.lhs_method.currentData(),
             validation_method=self.validation_method.currentData(),
             input_mode=self.signal_mode.currentData(),
@@ -3056,7 +3110,8 @@ class WizardWindow(
         self.mode.setEnabled(not static)
         for widget in (
             self.n_train, self.n_validation, self.seed, self.lhs_method,
-            self.validation_method, self.corners
+            self.validation_method, self.corners,
+            self.include_default_as_additional_capture,
         ):
             widget.setEnabled(not static)
         self.training_title.setText(
@@ -3070,6 +3125,7 @@ class WizardWindow(
             self.lhs_method,
             self.validation_method,
             self.corners,
+            self.include_default_as_additional_capture,
             self.rounds,
             self.additions,
         ):
@@ -3078,6 +3134,15 @@ class WizardWindow(
             )
         self.rounds.setEnabled(False)
         self.additions.setEnabled(False)
+        # Switch-only plans already enumerate every state; no extra distinct
+        # capture setting is available for the default.
+        self.include_default_as_additional_capture.setEnabled(
+            not static and any(
+                control_from_dict(c).__class__ is KnobSpec
+                and not control_from_dict(c).clean_volume
+                for c in (self.workspace.draft_controls if self.workspace else [])
+            )
+        )
         self.workspace.save()
         if refresh_capture_recommendation:
             self.refresh_recommendation()
