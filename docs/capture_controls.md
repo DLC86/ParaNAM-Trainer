@@ -40,7 +40,7 @@ state), rather than 32 + 16. A coarser grid may have no feasible held-out
 settings; in that case the suggested validation count is zero. Use a finer
 step or wider range to make held-out control validation possible.
 
-The **Training LHS captures** and **Validation captures** numeric fields are
+The **Training captures** and **Validation captures** numeric fields are
 bounded dynamically: they cannot exceed the realizable unique combinations.
 Raising either split reduces the permitted maximum of the other. The limit is
 checked per Complex Switch state, including uneven totals and corners, rather
