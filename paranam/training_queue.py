@@ -48,8 +48,13 @@ def immutable_audio(source, cache):
         temporary.unlink(missing_ok=True)
 
 
-def snapshot_workspace(workspace, root):
-    """Capture the click-time configuration, independently of future project edits."""
+def snapshot_workspace(workspace, root, *, editable=False):
+    """Copy a project; retrain editors receive *private* writable audio files.
+
+    Queue jobs use content-addressed hardlinked immutable audio for storage
+    efficiency. An editable Retrain copy must never share those inodes: even
+    a plain WAV overwrite must not modify the original job or audio cache.
+    """
     root = Path(root).resolve()
     identifier = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
     destination = root / "instances" / identifier / "project"
@@ -68,14 +73,19 @@ def snapshot_workspace(workspace, root):
 
     def freeze(path, relative):
         original = (workspace.directory / path).resolve()
-        if original not in paths:
-            paths[original] = immutable_audio(original, root / "audio")
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.link(paths[original], target)
-        except OSError:
-            shutil.copy2(paths[original], target)
+        if editable:
+            # Never hardlink a mutable Retrain file to an existing frozen
+            # job or the immutable cache. Users may overwrite any WAV.
+            shutil.copy2(original, target)
+        else:
+            if original not in paths:
+                paths[original] = immutable_audio(original, root / "audio")
+            try:
+                os.link(paths[original], target)
+            except OSError:
+                shutil.copy2(paths[original], target)
         return relative
 
     project.train_input = freeze(
@@ -277,7 +287,9 @@ class TrainingQueue:
             capture for capture in snapshot.project.entries
             if capture.status == "captured"
         ]
-        workspace = snapshot_workspace(snapshot, self.snapshot_root(snapshot))
+        workspace = snapshot_workspace(
+            snapshot, self.snapshot_root(snapshot), editable=True
+        )
         source_input = workspace.preferences.get("custom_input", "")
         saved = copy.deepcopy(spec.get("preferences", {}))
         for key in ("rate_schedule", "_queue_source_project"):
