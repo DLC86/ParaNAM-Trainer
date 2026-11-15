@@ -73,6 +73,9 @@ def test_import_keeps_existing_project_plan_counts(workspace):
 def test_plan_default_checkbox_starts_checked_and_only_marks_legacy_plan_on_edit(
     window, workspace
 ):
+    # Simulate a project saved before the new Plan checkbox existed.
+    workspace.project.include_default_as_additional_capture = None
+    workspace.save()
     window._attach(workspace)
     checkbox = window.include_default_as_additional_capture
     assert checkbox.text() == "Include default as additional capture"
@@ -90,6 +93,10 @@ def test_plan_default_checkbox_starts_checked_and_only_marks_legacy_plan_on_edit
 
 
 def test_legacy_plan_is_not_regenerated_until_plan_settings_change(workspace):
+    # Newly created fixture plans use the new default-on policy. Recreate the
+    # legacy field state explicitly before verifying backwards compatibility.
+    workspace.project.include_default_as_additional_capture = None
+    workspace.save()
     assert workspace.project.include_default_as_additional_capture is None
     original = [(e.split, dict(e.params), e.y_path) for e in workspace.project.entries]
     assert workspace.preferences["include_default_as_additional_capture"] is True
