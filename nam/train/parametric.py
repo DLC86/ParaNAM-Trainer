@@ -799,11 +799,13 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler = val_sampler
 
     def set_capture_mse_normalization(
-        self, dataset, snr_weighted: bool = False, snr_noise_powers=None
+        self, dataset, snr_weighted: bool = False, snr_noise_powers=None, rms_exponent: float = 2.0
     ) -> None:
         """Set per-capture MSE weights from target RMS and optional pre-blip noise."""
         from ..capture.session import pre_blip_noise_power
 
+        if isinstance(rms_exponent, bool) or not isinstance(rms_exponent, (float, int)) or not _isfinite(rms_exponent) or not 0.0 <= rms_exponent <= 2.0:
+            raise ValueError("RMS loss normalization exponent must be between 0 and 2")
         target_power = 10.0 ** (-18.0 / 10.0)
         floor_power = 10.0 ** (-60.0 / 10.0)
         scales = []
@@ -833,12 +835,17 @@ class _ParametricLightningModule(_LightningModule):
                 noise_power = raw_noise * capture.output_gain**2
                 if not _isfinite(noise_power):
                     raise ValueError(f"Invalid scaled noise power for {capture._y_path}")
-            scale = target_power / max(total_power, floor_power)
+            # Apply the user-selected exponent to the ratio of RMS amplitudes.
+            scale = (target_power / max(total_power, floor_power)) ** (rms_exponent / 2.0)
             if noise_power > 0.0:
                 signal_power = max(total_power - noise_power, 0.0)
                 reliability = signal_power / total_power if total_power > 0.0 else 0.0
-                # Above the floor this is RMS weighting times the signal fraction.
-                scale = target_power / max(signal_power, floor_power) * reliability**2
+                # Keep the original SNR reliability attenuation independent of
+                # the RMS exponent. Exponent 2 exactly preserves the prior loss.
+                scale = (
+                    (target_power / max(signal_power, floor_power)) ** (rms_exponent / 2.0)
+                    * reliability**2
+                )
             scales.append(scale)
         self._capture_mse_scales = tuple(scales)
 
@@ -1473,6 +1480,9 @@ def main(
     rms = learning_config.get("rms_loss_normalization", True)
     if not isinstance(rms, bool):
         raise ValueError("rms_loss_normalization must be a boolean")
+    rms_exponent = learning_config.get("rms_loss_normalization_exponent", 2.0)
+    if isinstance(rms_exponent, bool) or not isinstance(rms_exponent, (float, int)) or not _isfinite(rms_exponent) or not 0.0 <= rms_exponent <= 2.0:
+        raise ValueError("RMS loss normalization exponent must be between 0 and 2")
     snr_weighted = learning_config.get("snr_weighted_loss_normalization", False)
     if not isinstance(snr_weighted, bool):
         raise ValueError("snr_weighted_loss_normalization must be a boolean")
@@ -1483,6 +1493,7 @@ def main(
             dataset_train,
             snr_weighted=snr_weighted,
             snr_noise_powers=learning_config.get("snr_noise_powers"),
+            rms_exponent=rms_exponent,
         )
     elif snr_weighted:
         raise ValueError("SNR-weighted loss requires capture_grouped_batches")
