@@ -1364,7 +1364,7 @@ def _inverse_bias(unit, spec):
 
 def _plan_simple_switches(
     controls, specs, n_train, n_validation, seed, lhs_method,
-    validation_method="independent",
+    validation_method="independent", anchor_policy="inside",
 ):
     complex_specs = tuple(
         s for s in specs if s.type == "switch" and not s.simple_switch
@@ -1381,8 +1381,13 @@ def _plan_simple_switches(
                 f"Cover all {count} Complex Switch combinations in each split"
             )
         train, val = [], []
+        default_combo = tuple(s.enum_names[int(s.default)] for s in complex_specs)
         for i, combo in enumerate(combinations):
             fixed = dict(zip((s.name for s in complex_specs), combo))
+            inner_default = (
+                None if anchor_policy == "inside" else
+                False if combo == default_combo else "sample"
+            )
             t, v = plan_captures(
                 inner,
                 n_train=n_train // count + (i < n_train % count),
@@ -1390,6 +1395,7 @@ def _plan_simple_switches(
                 seed=(seed + i * 104729) % 2**32,
                 lhs_method=lhs_method,
                 validation_method=validation_method,
+                include_default_as_additional_capture=inner_default,
             )
             train.extend(
                 {name: ({**e.params, **fixed})[name] for name in names} for e in t
@@ -1397,6 +1403,11 @@ def _plan_simple_switches(
             val.extend(
                 {name: ({**e.params, **fixed})[name] for name in names} for e in v
             )
+        if anchor_policy == "extra":
+            train.append({
+                s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
+                for s in specs
+            })
     else:
         corners = {
             _settings_key(p, specs)
@@ -1415,7 +1426,8 @@ def _plan_simple_switches(
             lhs_method=lhs_method,
             validation_method=validation_method,
             validation_exclude=corners,
-            anchor=anchor,
+            anchor=anchor if anchor_policy != "sample" else None,
+            anchor_policy=anchor_policy,
         )
     return (
         _planned_from_params("lhs", "train", specs, sort_settings(train, names)),
