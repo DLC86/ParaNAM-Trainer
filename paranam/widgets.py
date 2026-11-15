@@ -677,15 +677,30 @@ class ControlDialog(QDialog):
         self.gain = QCheckBox("Gain/Drive control")
         self.clean_volume = QCheckBox("Linear volume control")
         self.mute_at_min = QCheckBox("Mute at minimum")
+        self.mute_at_min.setToolTip(
+            "Teach the neural model silence at the knob minimum AND exclude that "
+            "exact position from all training and validation captures, including corners."
+        )
         self.mute_at_max = QCheckBox("Mute at maximum")
+        self.mute_at_max.setToolTip(
+            "Teach the neural model silence at the knob maximum AND exclude that "
+            "exact position from all training and validation captures, including corners."
+        )
         self.clean_volume.setToolTip(
             "Train at maximum volume and measure a separate short-signal attenuation curve. "
             "Use only for an output attenuator that does not change tone or distortion. "
             "A silent minimum is identified by the absence of the timing test signal, "
             "not by a zero-noise recording."
         )
-        self.avoid_zero = QCheckBox("Avoid min")
-        self.avoid_max = QCheckBox("Avoid max")
+        # Legacy Avoid min/max flags are still read and preserved for old
+        # projects. New controls use Mute at minimum/maximum to both train
+        # silence and exclude the endpoint from real captures.
+        self._legacy_avoid_zero = bool(
+            control.avoid_zero if isinstance(control, KnobSpec) else False
+        )
+        self._legacy_avoid_max = bool(
+            control.avoid_max if isinstance(control, KnobSpec) else False
+        )
         for label, field in (
             ("Minimum", self.minimum),
             ("Maximum", self.maximum),
@@ -696,8 +711,6 @@ class ControlDialog(QDialog):
             ("", self.clean_volume),
             ("", self.mute_at_min),
             ("", self.mute_at_max),
-            ("", self.avoid_zero),
-            ("", self.avoid_max),
         ):
             knob_form.addRow(label, field)
         self.switch_mode = QComboBox()
@@ -734,9 +747,7 @@ class ControlDialog(QDialog):
                 (self.default, control.default),
             ):
                 spin.setValue(value)
-            self.avoid_zero.setChecked(control.avoid_zero)
             self.gain.setChecked(control.is_gain)
-            self.avoid_max.setChecked(control.avoid_max)
             self.sampling_bias.setCurrentIndex(
                 self.sampling_bias.findData(control.sampling_bias)
             )
@@ -768,7 +779,7 @@ class ControlDialog(QDialog):
     def _clean_volume_changed(self, checked, reset_step=True):
         if checked and reset_step:
             self.step.setValue(1.0)
-        for field in (self.avoid_zero, self.avoid_max, self.gain, self.mute_at_min, self.mute_at_max):
+        for field in (self.gain, self.mute_at_min, self.mute_at_max):
             if checked:
                 field.setChecked(False)
             field.setEnabled(not checked)
@@ -816,9 +827,9 @@ class ControlDialog(QDialog):
                     self.maximum.value(),
                     self.step.value(),
                     self.default.value(),
-                    self.avoid_zero.isChecked(),
+                    self._legacy_avoid_zero,
                     self.gain.isChecked(),
-                    avoid_max=self.avoid_max.isChecked(),
+                    avoid_max=self._legacy_avoid_max,
                     sampling_bias=self.sampling_bias.currentData(),
                     clean_volume=self.clean_volume.isChecked(),
                     mute_at_min=self.mute_at_min.isChecked(),
