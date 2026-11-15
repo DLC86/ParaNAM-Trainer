@@ -429,6 +429,9 @@ class CaptureProject(_BaseModel):
     lhs_method: Literal["standard", "maximin", "orthogonal", "near_orthogonal", "sobol", "optimized"] = "standard"
     validation_method: Literal["independent", "farthest"] = "independent"
     include_initial_corners: bool = False
+    # None identifies legacy plans, whose LHS draws included the default.
+    # New plans explicitly record whether default is an additional capture.
+    include_default_as_additional_capture: _Optional[bool] = None
     # The lead this project's captures are labelled against, when it is not the current
     # constant. Absent for anything captured under the stateless timebase, which is the
     # normal case; present for a project captured before it.
@@ -506,6 +509,7 @@ def new_project(
     train_input: str = "input_train.wav",
     validation_input: str = "input_validation.wav",
     plan_rules: _Sequence[PlanRule] = (),
+    include_default_as_additional_capture: _Optional[bool] = None,
 ) -> CaptureProject:
     """
     Plan every capture up front and return a project ready to save. Nothing is
@@ -516,6 +520,7 @@ def new_project(
         lhs_method=lhs_method,
         validation_method=validation_method,
         rules=plan_rules,
+        include_default_as_additional_capture=include_default_as_additional_capture,
     )
     entries = [
         CaptureEntryModel(
@@ -535,6 +540,7 @@ def new_project(
         validation_input=validation_input,
         entries=entries,
         n_train_lhs=n_train,
+        include_default_as_additional_capture=include_default_as_additional_capture,
         lhs_method=lhs_method,
         validation_method=validation_method,
         created_with_version=_CAPTURE_APP_VERSION,
