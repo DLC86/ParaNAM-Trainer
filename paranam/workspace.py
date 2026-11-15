@@ -789,6 +789,7 @@ class Workspace:
             fit_mrstft=True,
             # Queue snapshots created before the switch used RMS weighting.
             rms_loss_normalization="_queue_source_project" in self.preferences,
+            rms_loss_normalization_exponent=2.0,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
@@ -890,6 +891,8 @@ class Workspace:
                     options.pop(key)
             static = self.project.capture_type == "static"
             rms_enabled = options["rms_loss_normalization"]
+            if static or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
+                options.pop("rms_loss_normalization_exponent")
             if (
                 static or not rms_enabled or not options["snr_weighted_loss_normalization"]
             ):
