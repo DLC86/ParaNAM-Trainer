@@ -1,7 +1,7 @@
 # Knobs and switches in the capture app
 
 The **Controls** tab replaces **Knobs**. Choose **Add control**, then **Knob** or
-**Switch**. A knob keeps its range, step, Avoid zero and Gain/Drive settings. For a
+**Switch**. A knob keeps its range, step and Gain/Drive settings. **Mute at minimum** and **Mute at maximum** each teach the network silence at the selected endpoint **and** exclude that position from new capture plans (including validation and corners). Legacy Avoid min/max flags in existing projects remain supported without enabling mute training. For a
 switch, enter its name, number of positions (at least two), and a distinct name
 for every position, in physical switch order. Use its **positions — edit** button
 to change these later. Positions are categorical: intermediate positions are
@@ -27,13 +27,13 @@ the number of distinct Complex Switch combinations. The baseline heuristics are
 **min(max(8, 4 × K), 24) × S** validation captures.
 
 The app now calculates the *actual* capture grid from each knob's min/max,
-step, Avoid min, Avoid max and any discrete switch positions. It reduces the
+step, automatically excluded mute endpoints, legacy Avoid min/max flags and any discrete switch positions. It reduces the
 recommendations automatically if the grid is too small for the baseline. The
 default setting is part of training even when it is off-grid. Validation avoids
 the default, all corner settings and every training setting; the recommendation
 reserves enough room for those constraints.
 
-For example, a knob spanning 0–10 in steps of 0.5 with Avoid min enabled has
+For example, a knob spanning 0–10 in steps of 0.5 with Mute at minimum enabled has
 20 usable positions per switch state. With a two-position Complex Switch the
 suggestion is **32 training + 8 validation captures total** (16 + 4 per
 state), rather than 32 + 16. A coarser grid may have no feasible held-out
