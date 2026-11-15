@@ -14,6 +14,20 @@ on:
       - 'paranam/wizard.py'
       - 'tests/capture/test_lhs_methods.py'
       - 'docs/release-0.7.7.md'
+      # Rebuild the draft when Plan/default sampling or frozen Retrain changes.
+      # Missing these paths previously left the newest passing main commit
+      # without a corresponding installer dispatch.
+      - 'nam/capture/params.py'
+      - 'paranam/workspace.py'
+      - 'paranam/training_queue.py'
+      - 'tests/paranam/test_workspace.py'
+      - 'tests/paranam/test_queue.py'
+      - 'tests/paranam/test_wizard.py'
+      - 'tests/paranam/test_workflow052.py'
+      - 'tests/paranam/test_workflow056.py'
+      - 'tests/capture/test_planner.py'
+      - 'docs/capture_controls.md'
+      - 'docs/training-controls.md'
 permissions:
   contents: write
   actions: write
