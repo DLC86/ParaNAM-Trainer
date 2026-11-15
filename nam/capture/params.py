@@ -39,9 +39,9 @@ class KnobSpec:
         ``min + k * step`` so every planned value is one a human can actually dial.
     :param default: Resting value baked into the generated model config; the knob's
         midpoint (snapped to the grid) when omitted.
-    :param avoid_zero: When true, no planned capture sets this knob to its minimum; a draw that
-        would snap to the minimum uses the next reachable grid value instead. Use for
-        gain/drive knobs that mute the rig at minimum and can destabilize training.
+    :param avoid_zero: Legacy capture-only avoidance for the minimum position.
+        New rigs should use mute_at_min for a genuinely silent endpoint: it
+        excludes minimum captures and enables the training Mute Anchor.
     :param is_gain: Marks this knob as the amp's gain/drive control. At most two knobs may
         be marked. It changes how the initial corner captures are generated (the gain knob
         gets its own min/max sweep so the EQ params' corners are learned at both gain
@@ -128,11 +128,17 @@ class KnobSpec:
             raise ValueError(
                 "Linear volume cannot use Gain/Drive or capture thresholds"
             )
-        if self.avoid_max and self.avoid_zero and not (
+        # Mute endpoints are also excluded from real audio captures. Retain
+        # independent legacy Avoid min/max flags for existing saved projects.
+        exclude_min = self.avoid_zero or self.mute_at_min
+        exclude_max = self.avoid_max or self.mute_at_max
+        if exclude_min and exclude_max and not (
             (_math.floor(self.min / self.step + 1e-10) + 1) * self.step
             < self.max - 1e-10
         ):
-            raise ValueError("No usable knob positions remain after Avoid min/Avoid max")
+            raise ValueError(
+                "No usable knob positions remain after excluding mute/avoided endpoints"
+            )
 
     def to_param_spec(self) -> _ParamSpec:
         return _ParamSpec(
@@ -142,8 +148,8 @@ class KnobSpec:
             default=self.default,
             type="continuous",
             step=self.step,
-            avoid_zero=self.avoid_zero,
-            avoid_max=self.avoid_max,
+            avoid_zero=self.avoid_zero or self.mute_at_min,
+            avoid_max=self.avoid_max or self.mute_at_max,
             avoid_below=self.avoid_below,
             avoid_above=self.avoid_above,
             sampling_bias=self.sampling_bias,
