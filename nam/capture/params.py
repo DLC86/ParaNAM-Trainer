@@ -11,6 +11,7 @@ This module is deliberately torch-free so the GUI can import it at startup.
 
 from __future__ import annotations
 
+import itertools as _itertools
 import math as _math
 from dataclasses import dataclass as _dataclass
 from typing import Any as _Any
@@ -359,7 +360,7 @@ def capture_count_maxima(
         ]
         def quota(capacities):
             return max(0, min(
-                max(0, remaining) * count + i
+                remaining * count + i
                 for i, remaining in enumerate(capacities)
             ))
         train_max = quota([
