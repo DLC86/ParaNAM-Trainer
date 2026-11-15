@@ -1179,6 +1179,18 @@ class WizardWindow(
         advanced_form.addRow(rms)
         rms.toggled.connect(self.save_preferences)
         rms.toggled.connect(lambda _: self.refresh_loss_normalization_controls())
+        exponent = QDoubleSpinBox()
+        exponent.setRange(0.0, 2.0)
+        exponent.setDecimals(2)
+        exponent.setSingleStep(0.1)
+        exponent.setValue(2.0)
+        exponent.setFixedWidth(260)
+        exponent.setToolTip(
+            "Exponent applied to the per-capture RMS ratio in the MSE loss: "
+            "0 = no RMS normalization, 1 = amplitude ratio, 2 = squared ratio (original)."
+        )
+        self.advanced_fields["rms_loss_normalization_exponent"] = exponent
+        advanced_form.addRow("RMS loss normalization exponent", exponent)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
         snr_weighted.setChecked(False)
         snr_weighted.setEnabled(False)
@@ -1574,6 +1586,9 @@ class WizardWindow(
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         self.refresh_loss_normalization_controls(parametric)
+        self.advanced_panel.layout().setRowVisible(
+            self.advanced_fields["rms_loss_normalization_exponent"], parametric
+        )
         for key in MUTE_ANCHOR_OPTIONS:
             self.advanced_panel.layout().setRowVisible(
                 self.advanced_fields[key], parametric
@@ -1598,6 +1613,9 @@ class WizardWindow(
         rms = self.advanced_fields["rms_loss_normalization"]
         rms.setEnabled(parametric)
         self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(
+            parametric and rms.isChecked()
+        )
+        self.advanced_fields["rms_loss_normalization_exponent"].setEnabled(
             parametric and rms.isChecked()
         )
 
