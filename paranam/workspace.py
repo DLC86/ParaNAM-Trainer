@@ -800,6 +800,13 @@ class Workspace:
             **MUTE_ANCHOR_OPTIONS,
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
+        # Older projects could set exponent=0 to keep only SNR attenuation.
+        # The new independent switches represent that exact loss as RMS off,
+        # leaving SNR as configured. Migrate the effective options, not the
+        # original project data or any existing frozen training job.
+        if options["rms_loss_normalization_exponent"] == 0:
+            options["rms_loss_normalization"] = False
+            options["rms_loss_normalization_exponent"] = 0.01
         options.setdefault("hypernetwork_learning_rate", options["learning_rate"] * 0.1)
         options.setdefault("hypernetwork_rate_preset", "follow")
         options.setdefault("hypernetwork_lr_decay", options["lr_decay"])
