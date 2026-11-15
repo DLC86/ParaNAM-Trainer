@@ -268,6 +268,13 @@ class TrainingQueue:
         if not spec or not Path(spec.get("project", "")).is_dir():
             raise ValueError("The original training snapshot is unavailable.")
         snapshot = Workspace(Path(spec["project"]))
+        # A later active-learning round may have appended *pending* proposals
+        # to the same frozen project. They were not part of this job's training
+        # dataset and must never be imported into Retrain.
+        snapshot.project.entries = [
+            capture for capture in snapshot.project.entries
+            if capture.status == "captured"
+        ]
         workspace = snapshot_workspace(snapshot, self.snapshot_root(snapshot))
         source_input = workspace.preferences.get("custom_input", "")
         saved = copy.deepcopy(spec.get("preferences", {}))
