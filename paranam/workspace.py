@@ -893,9 +893,8 @@ class Workspace:
             rms_enabled = options["rms_loss_normalization"]
             if static or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
                 options.pop("rms_loss_normalization_exponent")
-            if (
-                static or not rms_enabled or not options["snr_weighted_loss_normalization"]
-            ):
+            # SNR is independent of RMS: preserve its setting even when RMS is off.
+            if static or not options["snr_weighted_loss_normalization"]:
                 options.pop("snr_weighted_loss_normalization")
             if static or rms_enabled:
                 options.pop("rms_loss_normalization")
