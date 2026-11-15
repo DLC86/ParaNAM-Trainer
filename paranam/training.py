@@ -112,6 +112,11 @@ def job_can_resume(workspace, job):
             "rms_loss_normalization"
         ]:
             return False
+        if options["rms_loss_normalization"] and (
+            spec.get("learning", {}).get("rms_loss_normalization_exponent", 2.0)
+            != options["rms_loss_normalization_exponent"]
+        ):
+            return False
         from nam.capture.export import (
             MUTE_ANCHOR_DEFAULTS,
             mute_anchor_settings,
@@ -547,6 +552,10 @@ def make_job(workspace, resume=False, job_directory=None):
         rms = options["rms_loss_normalization"]
         if not isinstance(rms, bool):
             raise ValueError("rms_loss_normalization must be a boolean")
+        exponent = options["rms_loss_normalization_exponent"]
+        if isinstance(exponent, bool) or not isinstance(exponent, (float, int)) or not math.isfinite(exponent) or not 0.0 <= exponent <= 2.0:
+            raise ValueError("RMS loss normalization exponent must be between 0 and 2")
+        learning["rms_loss_normalization_exponent"] = float(exponent)
         learning["rms_loss_normalization"] = rms
         learning["snr_weighted_loss_normalization"] = (
             rms and options["snr_weighted_loss_normalization"]
