@@ -125,6 +125,64 @@ def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_en
 
 
 
+@pytest.mark.parametrize(
+    "mute_flags,forbidden",
+    [
+        ({"mute_at_min": True}, {0.0}),
+        ({"mute_at_max": True}, {10.0}),
+        ({"mute_at_min": True, "mute_at_max": True}, {0.0, 10.0}),
+    ],
+)
+def test_muted_endpoint_is_excluded_from_training_validation_and_corners(
+    mute_flags, forbidden
+):
+    from nam.capture.planner import (
+        _capture_grid_values, corner_capture_count, plan_corner_captures
+    )
+
+    controls = [
+        KnobSpec("Drive", 0, 10, 1, default=5, **mute_flags),
+        KnobSpec("Tone", 0, 10, 1, default=5),
+        SwitchSpec("Mode", ("A", "B")),
+    ]
+    drive_spec = controls[0].to_param_spec()
+    assert not forbidden.intersection(_capture_grid_values(drive_spec, 1))
+    train, validation = plan_captures(
+        controls, n_train=20, n_validation=8, seed=31
+    )
+    corners, _ = plan_corner_captures(controls)
+    assert corners and corner_capture_count(controls) == len(corners)
+    assert any(row.params["Drive"] == 1.0 for row in corners) == bool(
+        mute_flags.get("mute_at_min")
+    )
+    assert any(row.params["Drive"] == 9.0 for row in corners) == bool(
+        mute_flags.get("mute_at_max")
+    )
+    assert all(
+        row.params["Drive"] not in forbidden
+        for row in [*train, *validation, *corners]
+    )
+    assert {row.params["Mode"] for row in train} == {"A", "B"}
+
+
+@pytest.mark.parametrize("edge", ["min", "max"])
+def test_muted_endpoint_cannot_be_the_required_default(edge):
+    controls = [
+        KnobSpec(
+            "Drive", 0, 10, 1,
+            default=0 if edge == "min" else 10,
+            **{f"mute_at_{edge}": True},
+        )
+    ]
+    with pytest.raises(ValueError, match=f"default.*{edge}|{edge}.*default|Mute"):
+        plan_captures(controls, n_train=4, n_validation=0)
+
+
+def test_both_mute_edges_require_an_interior_capture_position():
+    with pytest.raises(ValueError, match="No usable knob positions"):
+        KnobSpec("Toggle", 0, 1, 1, mute_at_min=True, mute_at_max=True)
+
+
 def test_mute_anchor_targets_ignore_switches_and_keep_both_endpoints():
     from nam.capture.export import build_hyper_a2_model_config
 
