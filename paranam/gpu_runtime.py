@@ -240,6 +240,15 @@ def _download(wheel, cache, progress, cancelled, completed, total):
 
 def _extract(wheel, destination, cancelled):
     root = destination.resolve()
+    if os.name == "nt":
+        # PyTorch wheels contain headers whose full paths can exceed MAX_PATH.
+        # Use the extended namespace for extraction regardless of system policy.
+        absolute = str(root)
+        if not absolute.startswith("\\\\?\\"):
+            if absolute.startswith("\\\\"):
+                root = Path("\\\\?\\UNC\\" + absolute[2:])
+            else:
+                root = Path("\\\\?\\" + absolute)
     with zipfile.ZipFile(wheel) as archive:
         for member in archive.infolist():
             if cancelled():
