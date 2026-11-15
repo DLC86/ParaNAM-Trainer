@@ -786,7 +786,7 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler = train_sampler
         self._val_capture_sampler = val_sampler
 
-    def set_capture_mse_normalization(self, dataset, snr_weighted: bool = True) -> None:
+    def set_capture_mse_normalization(self, dataset, snr_weighted: bool = False) -> None:
         """Noise-aware per-capture MSE weighting from the recorded pre-blip silence.
 
         The raw amp-return WAV already contains silence before the first timing
