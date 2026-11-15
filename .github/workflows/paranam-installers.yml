@@ -82,10 +82,15 @@ jobs:
         run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" "pytest" "pytest-mock" "Pillow" -e .
       - name: Build native playback engine
         run: python packaging/native_engine.py
-      - name: Test wizard, queue, native playback and real pause/resume training
+      # The full application suite is run in paranam-tests.yml, not repeated
+      # separately by each native installer. Targeted checks below cover
+      # control settings, mute anchors, volume calibration and packed HyperA2.
+      # packaging/build.py then smoke-tests the frozen executable and trains
+      # parametric and static models using the actual packaged application.
+      - name: Targeted capture and HyperA2 regression checks
         if: runner.os != 'Windows'
-        run: python -m pytest tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
-      - name: Test wizard, queue, native playback and real pause/resume training (Windows)
+        run: python -m pytest tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Targeted capture and HyperA2 regression checks (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -99,7 +104,7 @@ jobs:
           $marker = Join-Path $env:RUNNER_TEMP 'paranam-pytest-completed-ok.txt'
           Remove-Item -LiteralPath $marker -ErrorAction SilentlyContinue
           $env:PARANAM_PYTEST_SUCCESS_MARKER = $marker
-          python packaging/pytest_windows_runner.py tests/paranam tests/capture tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+          python packaging/pytest_windows_runner.py tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
           $nativeStatus = $LASTEXITCODE
           if ($nativeStatus -eq 0) { exit 0 }
           if (Test-Path -LiteralPath $marker) {
