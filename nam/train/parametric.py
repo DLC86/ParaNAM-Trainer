@@ -787,21 +787,71 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler = val_sampler
 
     def set_capture_mse_normalization(self, dataset) -> None:
-        """Normalize the training MSE per capture to -18 dBFS RMS.
+        """Noise-aware per-capture MSE weighting from the recorded pre-blip silence.
 
-        Only the optimization objective is scaled: original audio, exported weights,
-        validation metrics, and inference gain remain untouched. A -60 dBFS RMS
-        floor prevents near-silent captures from dominating the gradients.
+        The raw amp-return WAV already contains silence before the first timing
+        impulse. Read its actual playback layout from the raw manifest, so the
+        latency-calibration and training audio are never changed. Captures without
+        raw recordings are intentionally rejected rather than silently using an
+        uncalibrated weight.
         """
-        target_rms = 10.0 ** (-18.0 / 20.0)
-        floor_rms = 10.0 ** (-60.0 / 20.0)
+        import json
+        import wave
+        import numpy as np
+
+        target_power = 10.0 ** (-18.0 / 10.0)
+        floor_power = 10.0 ** (-60.0 / 10.0)
         scales = []
         for capture in _iter_inner_datasets(dataset):
             y = capture.y
-            rms = _torch.sqrt(_torch.mean(y.double().square())).item()
-            if not _isfinite(rms):
-                raise ValueError("Cannot normalize capture with non-finite RMS")
-            scales.append((target_rms / max(rms, floor_rms)) ** 2)
+            total_power = _torch.mean(y.double().square()).item()
+            if not _isfinite(total_power):
+                raise ValueError("Cannot normalize capture with non-finite power")
+
+            y_path = _Path(capture._y_path).resolve()
+            raw_dir = y_path.parent / "captures_raw"
+            manifest_path = raw_dir / "manifest.json"
+            if not manifest_path.is_file():
+                raise ValueError(f"Noise-aware training requires {manifest_path}")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            records = [
+                record for record in manifest.get("captures", [])
+                if _Path(record.get("y_path", "")).name == y_path.name
+            ]
+            if len(records) != 1:
+                raise ValueError(f"Expected one raw capture record for {y_path}")
+            record = records[0]
+            playback_path = raw_dir / record["playback"]
+            raw_path = raw_dir / record["raw"]
+            from nam.data import wav_to_np
+            playback = np.asarray(wav_to_np(playback_path), dtype=np.float64).reshape(-1)
+            preamble_samples = int(record["preamble_samples"])
+            preamble = playback[:preamble_samples]
+            peaks = np.flatnonzero(np.abs(preamble) > 0.5 * np.max(np.abs(preamble)))
+            if not len(peaks) or peaks[0] <= 0:
+                raise ValueError(f"No pre-blip silence in {playback_path}")
+            # The input has not yet received any timing impulse. No additional
+            # settling interval is needed: captures are separated by knob changes.
+            noise_samples = int(peaks[0])
+            raw = np.asarray(wav_to_np(raw_path), dtype=np.float64).reshape(-1)
+            if len(raw) < noise_samples:
+                raise ValueError(f"Raw recording is too short: {raw_path}")
+            noise_power = float(np.mean(np.square(raw[:noise_samples])))
+            if not _isfinite(noise_power):
+                raise ValueError(f"Invalid noise estimate for {raw_path}")
+            # Dataset hooks may have scaled the target. Express raw noise power
+            # in the same units by comparing the saved aligned WAV to dataset y.
+            saved = np.asarray(wav_to_np(y_path), dtype=np.float64).reshape(-1)
+            saved_power = float(np.mean(np.square(saved)))
+            if saved_power > 0.0:
+                noise_power *= total_power / saved_power
+            signal_power = max(total_power - noise_power, 0.0)
+            reliability = signal_power / max(total_power, 1e-20)
+            # Squared reliability is intentional: using reliability once
+            # cancels the noise-subtracted normalization whenever floor is
+            # inactive, leaving the original RMS weighting unchanged.
+            scale = (target_power / max(signal_power, floor_power)) * reliability**2
+            scales.append(float(scale))
         self._capture_mse_scales = tuple(scales)
 
     @staticmethod
