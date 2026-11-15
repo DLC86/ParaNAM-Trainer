@@ -446,7 +446,7 @@ def test_rms_normalizes_training_mse_and_preserves_targets(amplitude):
     assert _torch.equal(dataset.y, y)
 
 
-@_pytest.mark.parametrize("exponent", [0.0, 1.0, 2.0])
+@_pytest.mark.parametrize("exponent", [0.01, 1.0, 2.0])
 def test_rms_loss_exponent_adjusts_capture_weight(exponent):
     amplitude = 0.001  # -60 dBFS: extreme ratio exercises the floor
     y = _torch.full((16,), amplitude)
@@ -459,14 +459,14 @@ def test_rms_loss_exponent_adjusts_capture_weight(exponent):
     assert module._capture_mse_scales == _pytest.approx((expected,))
 
 
-@_pytest.mark.parametrize("invalid", [-0.1, 2.1, True, float("nan"), float("inf")])
+@_pytest.mark.parametrize("invalid", [-0.1, 0.0, 0.009, 2.1, True, float("nan"), float("inf")])
 def test_rms_loss_exponent_rejects_invalid_values(invalid):
     y = _torch.full((16,), 0.01)
     dataset = _Dataset(
         x=_torch.zeros_like(y), y=y, nx=1, ny=8, require_input_pre_silence=None
     )
     module = _ParametricLightningModule(_MockBaseNet(1.0))
-    with _pytest.raises(ValueError, match="exponent must be between 0 and 2"):
+    with _pytest.raises(ValueError, match="exponent must be between 0.01 and 2"):
         module.set_capture_mse_normalization(dataset, rms_exponent=invalid)
 
 
@@ -515,7 +515,7 @@ def test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio(tmp_path):
     assert module._capture_mse_scales == _pytest.approx((0.75 * rms_scale,))
     # The SNR reliability factor remains active for every exponent, and
     # exponent=2 preserves the former SNR-weighted normalization exactly.
-    for exponent in (0.0, 1.0, 2.0):
+    for exponent in (0.01, 1.0, 2.0):
         module.set_capture_mse_normalization(dataset, rms_exponent=exponent)
         base, = module._capture_mse_scales
         module.set_capture_mse_normalization(
@@ -524,6 +524,14 @@ def test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio(tmp_path):
         assert module._capture_mse_scales == _pytest.approx(
             (base * 0.75 ** (2.0 - exponent / 2.0),)
         )
+
+    # SNR-only uses reliability² with no RMS compensation at any level.
+    module.set_capture_mse_normalization(
+        dataset, rms_enabled=False, snr_weighted=True,
+    )
+    assert module._capture_mse_scales == _pytest.approx((0.75 ** 2,))
+    module.set_capture_mse_normalization(dataset, rms_enabled=False)
+    assert module._capture_mse_scales == (1.0,)
 
     _write_json(manifest, {"captures": [record, record]})
     with _pytest.raises(ValueError, match="exactly one matching capture record"):
