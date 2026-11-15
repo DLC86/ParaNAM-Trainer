@@ -26,6 +26,7 @@ def requested_settings():
         "branch_loss_reduction": "sum",
         "snr_weighted_loss_normalization": False,
         "rms_loss_normalization": False,
+        "rms_loss_normalization_exponent": 2.0,
         "mute_anchor_interval": 1,
         "mute_anchor_batch_size": 2,
         "mute_anchor_ny": 512,
