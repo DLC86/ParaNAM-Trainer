@@ -70,6 +70,39 @@ def test_import_keeps_existing_project_plan_counts(workspace):
     assert reopened.preferences["corners"] is False
 
 
+def test_legacy_plan_is_not_regenerated_until_plan_settings_change(workspace):
+    assert workspace.project.include_default_as_additional_capture is None
+    original = [(e.split, dict(e.params), e.y_path) for e in workspace.project.entries]
+    assert workspace.preferences["include_default_as_additional_capture"] is True
+    assert not workspace.plan_changed()
+
+    # Merely opening an existing project or storing the new checkbox default
+    # must not alter the capture list.
+    workspace.preferences["include_default_as_additional_capture"] = True
+    workspace.save()
+    reopened = Workspace(workspace.directory)
+    assert not reopened.plan_changed()
+    assert [(e.split, dict(e.params), e.y_path) for e in reopened.project.entries] == original
+
+    # Once another Plan setting changes, apply the new explicit policy.
+    reopened.preferences["seed"] += 1
+    assert reopened.plan_changed()
+    reopened.generate_plan()
+    assert reopened.project.include_default_as_additional_capture is True
+    assert len(reopened.project.entries_for_split("train")) == reopened.project.n_train_lhs + 1
+    assert not reopened.plan_changed()
+
+
+def test_disabling_default_checkbox_does_not_force_a_capture(workspace):
+    workspace.preferences["include_default_as_additional_capture"] = False
+    workspace.preferences["_include_default_capture_touched"] = True
+    assert workspace.plan_changed()
+    workspace.generate_plan()
+    assert workspace.project.include_default_as_additional_capture is False
+    assert len(workspace.project.entries_for_split("train")) == workspace.project.n_train_lhs
+    assert not workspace.plan_changed()
+
+
 def test_new_project_never_overwrites_existing_files(tmp_path):
     (tmp_path / "important.wav").write_bytes(b"keep")
     with pytest.raises(ValueError, match="empty folder"):
