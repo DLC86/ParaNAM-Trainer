@@ -200,6 +200,18 @@ def test_041_resume_preserves_actual_legacy_optimizer(workspace, kind, old_optim
     assert not training.job_can_resume(workspace, job)
 
 
+@pytest.mark.parametrize("method", ["sobol", "optimized"])
+def test_new_sampling_methods_are_available_and_saved(window, workspace, method):
+    window._attach(workspace)
+    choice = window.lhs_method
+    index = choice.findData(method)
+    assert index >= 0
+    choice.setCurrentIndex(index)
+    assert Workspace(workspace.directory).preferences["lhs_method"] == method
+    window.load_advanced_options("parametric")
+    assert choice.currentData() == method
+
+
 def test_snr_checkbox_reaches_the_training_job(window, workspace):
     key = "snr_weighted_loss_normalization"
     ready(workspace)
