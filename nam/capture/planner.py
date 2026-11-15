@@ -636,6 +636,10 @@ def latin_hypercube_unit(
             dtype=_np.float64,
         )
 
+    if lhs_method == "optimized" and n == 1:
+        # A single point has no pairwise discrepancy to optimize.
+        return _standard_lhs(n, dim, seed)
+
     if lhs_method == "optimized":
         # SciPy's random-coordinate-descent optimization targets centered
         # discrepancy, improving coverage of low-dimensional projections.
