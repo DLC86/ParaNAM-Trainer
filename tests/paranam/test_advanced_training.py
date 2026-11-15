@@ -212,29 +212,37 @@ def test_new_sampling_methods_are_available_and_saved(window, workspace, method)
     assert choice.currentData() == method
 
 
-def test_snr_checkbox_reaches_the_training_job(window, workspace):
+def test_snr_checkbox_reaches_the_training_job_independently_of_rms(window, workspace):
     key = "snr_weighted_loss_normalization"
     ready(workspace)
     window._attach(workspace)
     rms = window.advanced_fields["rms_loss_normalization"]
     field = window.advanced_fields[key]
     assert rms.isEnabled() and not rms.isChecked()
-    assert not field.isEnabled()
+    assert field.isEnabled() and not field.isChecked()
     fingerprint = workspace.fingerprint()
-    rms.setChecked(True)
-    assert field.isEnabled()
     field.setChecked(True)
     reopened = Workspace(workspace.directory)
     assert reopened.training_options()[key] is True
+    assert reopened.training_options()["rms_loss_normalization"] is False
     assert reopened.fingerprint() != fingerprint
     job = training.make_job(reopened)
     spec = read_json(job / "spec.json")
-    assert spec["learning"]["rms_loss_normalization"] is True
+    assert spec["learning"]["rms_loss_normalization"] is False
     assert spec["learning"][key] is True
     (job / "resume-0.ckpt").touch()
     assert training.job_can_resume(reopened, job)
+
+    # Turning RMS on/off must never switch SNR off.
+    rms.setChecked(True)
+    assert field.isEnabled() and field.isChecked()
+    assert not training.job_can_resume(Workspace(workspace.directory), job)
     rms.setChecked(False)
-    assert not field.isEnabled()
+    assert field.isEnabled() and field.isChecked()
+    assert training.job_can_resume(Workspace(workspace.directory), job)
+
+    # SNR mode, like RMS mode, is incompatible with the saved optimizer state.
+    field.setChecked(False)
     disabled = Workspace(workspace.directory)
     assert not training.job_can_resume(disabled, job)
     assert disabled.fingerprint() == fingerprint
@@ -251,6 +259,7 @@ def test_rms_normalization_exponent_ui_and_resume(window, workspace):
     rms = window.advanced_fields["rms_loss_normalization"]
     exponent = window.advanced_fields["rms_loss_normalization_exponent"]
     assert exponent.value() == 2.0
+    assert exponent.minimum() == pytest.approx(0.01)
     assert not exponent.isEnabled()
     rms.setChecked(True)
     assert exponent.isEnabled()
@@ -267,6 +276,8 @@ def test_rms_normalization_exponent_ui_and_resume(window, workspace):
     assert training.job_can_resume(changed, job)
 
     exponent.setValue(0.0)
+    assert exponent.value() == pytest.approx(0.01)
+    assert Workspace(workspace.directory).training_options()["rms_loss_normalization_exponent"] == pytest.approx(0.01)
     assert not training.job_can_resume(Workspace(workspace.directory), job)
     rms.setChecked(False)
     assert not exponent.isEnabled()
