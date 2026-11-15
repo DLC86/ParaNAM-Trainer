@@ -105,6 +105,23 @@ def test_legacy_avoid_flags_survive_edit_without_enabling_mute_anchor(qapp):
     dialog.close()
 
 
+def test_unchecking_mute_drops_redundant_old_avoid_flag(qapp):
+    knob = KnobSpec(
+        "Gain", 0, 10, mute_at_min=True, avoid_zero=True,
+        mute_at_max=True, avoid_max=True,
+    )
+    dialog = ControlDialog(control=knob)
+    dialog.mute_at_min.setChecked(False)
+    dialog.mute_at_max.setChecked(False)
+    dialog._accept()
+    updated = dialog.result_control
+    assert not updated.mute_at_min and not updated.mute_at_max
+    assert not updated.avoid_zero and not updated.avoid_max
+    spec = updated.to_param_spec()
+    assert not spec.avoid_zero and not spec.avoid_max
+    dialog.close()
+
+
 def test_unchecking_mute_reenables_endpoint_without_legacy_avoid(qapp):
     dialog = ControlDialog(control=KnobSpec("Gain", 0, 10, mute_at_min=True))
     dialog.mute_at_min.setChecked(False)
