@@ -565,8 +565,9 @@ def plan_unique_splits(
             )
             if anchor_policy == "extra":
                 train = train[:-1]  # the fallback already appended this extra capture
-        return _with_extra(train), _farthest_validation(
-            specs, train, reserved, n_validation, seed=validation_seed,
+        final_train = _with_extra(train)
+        return final_train, _farthest_validation(
+            specs, final_train, reserved, n_validation, seed=validation_seed,
             default_step=default_step, rules=rules,
         )
     if not reserved:
