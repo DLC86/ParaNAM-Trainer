@@ -289,6 +289,23 @@ def test_rms_normalization_exponent_ui_and_resume(window, workspace):
     assert not exponent.isEnabled()
 
 
+def test_legacy_zero_exponent_migrates_to_equivalent_snr_only_settings(workspace):
+    ready(workspace)
+    workspace.preferences.setdefault("advanced_parametric", {}).update(
+        rms_loss_normalization=True,
+        rms_loss_normalization_exponent=0.0,
+        snr_weighted_loss_normalization=True,
+    )
+    options = workspace.training_options("parametric")
+    assert options["rms_loss_normalization"] is False
+    assert options["snr_weighted_loss_normalization"] is True
+    assert options["rms_loss_normalization_exponent"] == pytest.approx(0.01)
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    assert spec["learning"]["rms_loss_normalization"] is False
+    assert spec["learning"]["snr_weighted_loss_normalization"] is True
+    assert spec["learning"]["rms_loss_normalization_exponent"] == pytest.approx(0.01)
+
+
 def test_mute_anchor_fields_persist_and_reach_job(window, workspace):
     from nam.capture.params import KnobSpec
 
