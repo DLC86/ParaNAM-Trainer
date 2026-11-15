@@ -307,7 +307,12 @@ def test_open_other_project_and_retrain_while_another_job_runs(
         assert window.queue_table.item(0, 0).text() == "My NAM"
         assert window.retrain_button.isEnabled()
         window.retrain_button.click()
-        assert window.workspace.directory == workspace.directory
+        # Retrain always opens an independent editable copy of the job's
+        # recorded plan, not the later-opened or changed source project.
+        assert window.workspace.directory != workspace.directory
+        assert window.workspace.directory != other.directory
+        assert window.workspace.project.name == workspace.project.name
+        assert not window.workspace.plan_changed()
         assert window.pages.currentIndex() == 3
         assert window.queue_controller.active_id == running["id"]
         assert len(store.entries()) == 2
