@@ -1171,7 +1171,7 @@ class WizardWindow(
             advanced_form.addRow(caption, field)
             field.valueChanged.connect(self.save_preferences)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
-        snr_weighted.setChecked(True)
+        snr_weighted.setChecked(False)
         snr_weighted.setToolTip(
             "Use the recorded pre-blip noise floor to reduce the MSE weight "
             "of low-SNR captures. Disable to use RMS-only normalization."
