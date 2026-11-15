@@ -7,7 +7,6 @@ on:
     paths-ignore:
       - '.github/workflows/paranam-installers.yml'
       - '.github/workflows/prepare-v077-draft.yml'
-      - '.github/workflows/paranam-tests.yml'
       - 'packaging/pytest_windows_runner.py'
   pull_request:
 permissions:
