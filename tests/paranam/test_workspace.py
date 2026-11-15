@@ -70,6 +70,25 @@ def test_import_keeps_existing_project_plan_counts(workspace):
     assert reopened.preferences["corners"] is False
 
 
+def test_plan_default_checkbox_starts_checked_and_only_marks_legacy_plan_on_edit(
+    window, workspace
+):
+    window._attach(workspace)
+    checkbox = window.include_default_as_additional_capture
+    assert checkbox.text() == "Include default as additional capture"
+    assert checkbox.isChecked()
+    before = [(e.split, dict(e.params), e.y_path) for e in workspace.project.entries]
+    assert not workspace.plan_changed()
+    checkbox.setChecked(False)
+    assert not checkbox.isChecked()
+    assert workspace.preferences["include_default_as_additional_capture"] is False
+    assert workspace.plan_changed()
+    # Plan is not replaced until the user actually applies the changes.
+    assert [(e.split, dict(e.params), e.y_path) for e in workspace.project.entries] == before
+    assert workspace.project.include_default_as_additional_capture is None
+    window.close()
+
+
 def test_legacy_plan_is_not_regenerated_until_plan_settings_change(workspace):
     assert workspace.project.include_default_as_additional_capture is None
     original = [(e.split, dict(e.params), e.y_path) for e in workspace.project.entries]
