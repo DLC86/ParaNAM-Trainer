@@ -1184,23 +1184,24 @@ class WizardWindow(
         rms.toggled.connect(self.save_preferences)
         rms.toggled.connect(lambda _: self.refresh_loss_normalization_controls())
         exponent = QDoubleSpinBox()
-        exponent.setRange(0.0, 2.0)
+        exponent.setRange(0.01, 2.0)
         exponent.setDecimals(2)
         exponent.setSingleStep(0.1)
         exponent.setValue(2.0)
         exponent.setFixedWidth(260)
         exponent.setToolTip(
             "Exponent applied to the per-capture RMS ratio in the MSE loss: "
-            "0 = no RMS normalization, 1 = amplitude ratio, 2 = squared ratio (original)."
+            "0.01 = minimal RMS normalization, 1 = amplitude ratio, "
+            "2 = squared ratio (original). Disable RMS to remove compensation."
         )
         self.advanced_fields["rms_loss_normalization_exponent"] = exponent
         advanced_form.addRow("RMS loss normalization exponent", exponent)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
         snr_weighted.setChecked(False)
-        snr_weighted.setEnabled(False)
         snr_weighted.setToolTip(
-            "Requires RMS loss normalization and raw captures with pre-blip silence. "
-            "Reduces the MSE weight of low-SNR captures. Off uses RMS-only normalization."
+            "Independently reduce the MSE weight of low-SNR captures using the "
+            "pre-blip silence in their raw recordings. Can be enabled without RMS "
+            "normalization; requires raw recordings to estimate noise."
         )
         self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
         advanced_form.addRow(snr_weighted)
@@ -1617,7 +1618,7 @@ class WizardWindow(
         rms = self.advanced_fields["rms_loss_normalization"]
         rms.setEnabled(parametric)
         self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(
-            parametric and rms.isChecked()
+            parametric
         )
         self.advanced_fields["rms_loss_normalization_exponent"].setEnabled(
             parametric and rms.isChecked()
