@@ -68,6 +68,16 @@ This is a stress test of interpolation, not an unbiased estimate of average
 generalization across knob settings. Regenerating a saved plan replaces the
 settings and archives the previous capture files.
 
+## Muted endpoint capture planning
+
+**Mute at minimum** and **Mute at maximum** also exclude their respective
+endpoints from *new* training, validation, and corner captures. Corner captures
+move to the next usable grid value; the trainer learns exact silence at each
+selected endpoint through Mute Anchor rather than a muted recording. Keep the
+default knob setting away from excluded endpoints. Old Avoid min/max project
+metadata stays effective without automatically creating a mute target; already
+recorded captures are never silently removed or regenerated.
+
 ## Advanced training settings
 
 For parametric HyperA2 training, **Checkpoint selection** can use:
