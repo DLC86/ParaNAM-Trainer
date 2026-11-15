@@ -410,7 +410,10 @@ def test_actual_queue_worker_finishes_and_resumes_its_frozen_instance(
     if snr_mode:
         powers = spec["learning"]["snr_noise_powers"]
         assert list(powers) == [entry["y_path"] for entry in spec["data"]["train"]]
-        assert list(powers.values()) == pytest.approx([0.03125**2, 0.0625**2])
+        assert list(powers.values()) == pytest.approx([
+            (0.03125 * (index + 1)) ** 2
+            for index in range(len(spec["data"]["train"]))
+        ])
         if snr_mode == "legacy":
             del spec["learning"]["snr_noise_powers"]
             del spec["learning"]["rms_loss_normalization"]
