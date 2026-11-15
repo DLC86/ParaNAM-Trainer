@@ -939,7 +939,7 @@ def plan_captures(
         for spec in specs
     ):
         raise ValueError(
-            "Choose a default above minimum for controls with Avoid min enabled: every new plan includes the default setting"
+            "Choose a default above minimum when Mute at minimum or legacy Avoid min is enabled: every new plan includes the default setting"
         )
 
     if any(
@@ -947,7 +947,7 @@ def plan_captures(
         for spec in specs
     ):
         raise ValueError(
-            "Choose a default below maximum for controls with Avoid max enabled"
+            "Choose a default below maximum when Mute at maximum or legacy Avoid max is enabled"
         )
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
         return _plan_simple_switches(
@@ -1116,7 +1116,8 @@ def corner_settings(
     bound the amp's behavior (see :func:`_corner_vertices` for the pattern, and
     :func:`_corner_high_flag_sets` for how a marked gain/drive knob is crossed with it).
     Values are quantized to the capture grid (honoring each knob's ``step`` and
-    ``avoid_zero``, so an Avoid min knob's minimum corner moves to the next usable position), then
+    ``avoid_zero`` (including Mute at minimum) and ``avoid_max`` (including Mute
+    at maximum), so a muted endpoint moves to its nearest usable position), then
     deduplicated so the small knob counts that collapse (a single knob yields only
     min/max) don't repeat a setting.
     """
