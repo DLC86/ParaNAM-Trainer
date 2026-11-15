@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write
   actions: write
+concurrency:
+  group: paranam-draft-v0.7.7
+  cancel-in-progress: true
 jobs:
   prepare:
     runs-on: ubuntu-22.04
@@ -28,6 +31,25 @@ jobs:
           set -euo pipefail
           grep -qx '__version__ = "0.7.7"' paranam/__init__.py
           grep -qx 'version = "0.7.7"' pyproject.toml
+          # Older release preparations can otherwise finish later, overwrite
+          # the draft target commit and cancel the correct installer run.
+          # Cancel them before touching the release; allow Actions time to stop.
+          for attempt in $(seq 1 12); do
+            stale="$(gh api "repos/$GH_REPO/actions/workflows/prepare-v077-draft.yml/runs?per_page=50" \
+              --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\" and (.status == \"queued\" or .status == \"in_progress\")) | .id")"
+            [[ -n "$stale" ]] || break
+            while IFS= read -r old_run; do
+              [[ -n "$old_run" ]] || continue
+              echo "Cancelling stale v0.7.7 preparation $old_run"
+              gh api --method POST "repos/$GH_REPO/actions/runs/$old_run/cancel" || true
+            done <<< "$stale"
+            sleep 5
+          done
+          latest="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+          test "$latest" = "$GITHUB_SHA" || {
+            echo "::error::Refusing to publish an obsolete commit ($GITHUB_SHA; current $latest)"
+            exit 1
+          }
           existing="$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.7.7" or .name == "ParaNAM Trainer 0.7.7") | .id' | head -n 1)"
           if [[ -z "$existing" ]]; then
             gh api --method POST "repos/$GH_REPO/releases" \
@@ -96,6 +118,11 @@ jobs:
               exit 1
             }
           fi
+          latest="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+          test "$latest" = "$GITHUB_SHA" || {
+            echo "::error::A newer main commit appeared; skip obsolete installer dispatch"
+            exit 1
+          }
           gh workflow run paranam-installers.yml --ref main \
             -f target=all -f keep_draft=true -f release_id="$release_id"
           echo "Native installers dispatched for draft v0.7.7"
