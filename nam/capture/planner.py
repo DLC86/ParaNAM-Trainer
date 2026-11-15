@@ -913,6 +913,7 @@ def plan_captures(
     lhs_method: str = "standard",
     validation_method: str = "independent",
     rules=(),
+    include_default_as_additional_capture: bool | None | str = None,
 ) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
     """
     Generate the full capture plan: ``n_train`` Latin-Hypercube training settings and
@@ -932,9 +933,18 @@ def plan_captures(
     there.
     """
     knobs = _validate_knobs(knobs)
+    policy = (
+        "inside" if include_default_as_additional_capture is None
+        else "extra" if include_default_as_additional_capture is True
+        else "exclude" if include_default_as_additional_capture is False
+        else "sample" if include_default_as_additional_capture == "sample"
+        else None
+    )
+    if policy is None:
+        raise ValueError("Unknown default capture option")
     if rules:
         return _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method,
-                                validation_method, rules)
+                                validation_method, rules, policy)
     if n_train <= 0:
         raise ValueError(f"n_train must be positive; got {n_train}")
     if n_validation < 0:
@@ -950,6 +960,7 @@ def plan_captures(
         t, v = plan_captures(
             inner, n_train=n_train, n_validation=n_validation, seed=seed,
             lhs_method=lhs_method, validation_method=validation_method,
+            include_default_as_additional_capture=include_default_as_additional_capture,
         )
         fixed = {clean[0].name: clean[0].max}
         merged = lambda entries: [
@@ -959,12 +970,12 @@ def plan_captures(
             "lhs", "train", specs, merged(t)
         ), _planned_from_params("val_lhs", "validation", specs, merged(v))
 
-    for spec in specs:
+    for spec in specs if policy in ("inside", "extra") else ():
         if ((spec.avoid_below is not None and round(spec.default, 6) < spec.avoid_below)
             or (spec.avoid_above is not None and round(spec.default, 6) > spec.avoid_above)):
             raise ValueError(f"Default for {spec.name} is excluded by its capture thresholds")
 
-    if any(
+    if policy in ("inside", "extra") and any(
         spec.type != "switch" and spec.avoid_zero and spec.default == spec.min
         for spec in specs
     ):
@@ -972,7 +983,7 @@ def plan_captures(
             "Choose a default above minimum when Mute at minimum or legacy Avoid min is enabled: every new plan includes the default setting"
         )
 
-    if any(
+    if policy in ("inside", "extra") and any(
         spec.type != "switch" and spec.avoid_max and spec.default == spec.max
         for spec in specs
     ):
@@ -982,7 +993,7 @@ def plan_captures(
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
         return _plan_simple_switches(
             knobs, specs, n_train, n_validation, seed, lhs_method,
-            validation_method,
+            validation_method, policy,
         )
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
@@ -1001,11 +1012,16 @@ def plan_captures(
                 "and set validation to 0: no unseen settings remain for validation."
             )
         training, validation = [], []
+        default_combo = tuple(spec.enum_names[int(spec.default)] for spec in switches)
         for i, combo in enumerate(
             _itertools.product(*(spec.enum_names for spec in switches))
         ):
             fixed = dict(zip((spec.name for spec in switches), combo))
             if continuous:
+                inner_default = (
+                    None if policy == "inside" else
+                    False if combo == default_combo else "sample"
+                )
                 try:
                     train_part, val_part = plan_captures(
                         continuous,
@@ -1014,6 +1030,7 @@ def plan_captures(
                         seed=(seed + i * 104729) % (2**32),
                         lhs_method=lhs_method,
                         validation_method=validation_method,
+                        include_default_as_additional_capture=inner_default,
                     )
                 except ValueError as exc:
                     raise ValueError(f"Switch combination {fixed}: {exc}") from exc
@@ -1021,6 +1038,14 @@ def plan_captures(
                 validation.extend({**capture.params, **fixed} for capture in val_part)
             else:
                 training.append(fixed)
+        if policy == "extra" and continuous:
+            training.append({
+                spec.name: (
+                    spec.enum_names[int(spec.default)]
+                    if spec.type == "switch" else spec.default
+                )
+                for spec in specs
+            })
         # Restore control order for display and exported metadata.
         training = [
             {spec.name: params[spec.name] for spec in specs} for params in training
@@ -1050,7 +1075,11 @@ def plan_captures(
         lhs_method=lhs_method,
         validation_method=validation_method,
         validation_exclude=corner_keys,
-        anchor={spec.name: spec.default for spec in specs},
+        anchor=(
+            {spec.name: spec.default for spec in specs}
+            if policy != "sample" else None
+        ),
+        anchor_policy=policy,
     )
     names = [spec.name for spec in specs]
     train = _planned_from_params(
