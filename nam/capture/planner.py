@@ -1445,7 +1445,7 @@ class _RuleGroup:
     validation_capacity: int
 
 
-def _rule_groups(controls, rules):
+def _rule_groups(controls, rules, anchor_policy="inside"):
     specs = tuple(c.to_param_spec() for c in controls)
     validate_plan_rules(specs, rules)
     switches_only = all(s.type == "switch" for s in specs)
@@ -1457,17 +1457,18 @@ def _rule_groups(controls, rules):
         s.name: s.enum_names[int(s.default)] if s.type == "switch" else
         s.max if s.clean_volume else s.default for s in specs
     }
-    if not allows(rules, defaults):
-        raise ValueError("Plan rules exclude the default setting. Change the rule or the default.")
-    for spec in active:
-        if spec.type == "switch":
-            continue
-        value = round(spec.default, 6)
-        if ((spec.avoid_zero and value == round(spec.min, 6))
-            or (spec.avoid_max and value == round(spec.max, 6))
-            or (spec.avoid_below is not None and value < spec.avoid_below)
-            or (spec.avoid_above is not None and value > spec.avoid_above)):
-            raise ValueError(f"Capture thresholds exclude the default for {spec.name}")
+    if anchor_policy in ("inside", "extra"):
+        if not allows(rules, defaults):
+            raise ValueError("Plan rules exclude the default setting. Change the rule or the default.")
+        for spec in active:
+            if spec.type == "switch":
+                continue
+            value = round(spec.default, 6)
+            if ((spec.avoid_zero and value == round(spec.min, 6))
+                or (spec.avoid_max and value == round(spec.max, 6))
+                or (spec.avoid_below is not None and value < spec.avoid_below)
+                or (spec.avoid_above is not None and value > spec.avoid_above)):
+                raise ValueError(f"Capture thresholds exclude the default for {spec.name}")
     fixed_axes = [s.enum_names if s.type == "switch" else (s.max,) for s in fixed_specs]
     allowed_corners = {}
     for params in corner_settings(specs, gain_index=_gain_knob_index(controls)):
@@ -1478,18 +1479,36 @@ def _rule_groups(controls, rules):
     for values in _itertools.product(*fixed_axes):
         fixed = dict(zip((s.name for s in fixed_specs), values))
         local_rules = bound_rules(rules, fixed)
-        capacity = _grid_capacity(active, _DEFAULT_KNOB_STEP, local_rules)
+        grid_capacity = _grid_capacity(active, _DEFAULT_KNOB_STEP, local_rules)
         anchor = {s.name: defaults[s.name] for s in active}
-        if not allows(local_rules, anchor):
+        is_default_group = all(defaults[s.name] == fixed[s.name] for s in fixed_specs)
+        if (anchor_policy in ("extra", "exclude") and not is_default_group
+                or anchor_policy == "sample"
+                or not allows(local_rules, anchor)):
             anchor = None
-        elif active and not settings_on_capture_grid(anchor, active):
-            capacity += 1
+        on_grid = (
+            settings_on_capture_grid(anchor, active) if anchor is not None and active
+            else False
+        )
+        if anchor_policy == "inside":
+            # Historical projects embed one default in each Complex Switch group.
+            capacity = grid_capacity + int(anchor is not None and not on_grid and bool(active))
+        else:
+            # New plans count only sampled settings. The optional extra default
+            # consumes a physical grid combination, not an LHS/Sobol slot.
+            capacity = grid_capacity - int(on_grid)
         if not capacity:
             continue
         corners = allowed_corners.get(values, set())
-        reserved = corners | ({_settings_key(anchor, active)} if anchor is not None else set())
+        reserved = set(corners)
+        if anchor is not None and (on_grid or anchor_policy in ("inside", "extra")):
+            reserved.add(_settings_key(anchor, active))
+        validation_capacity = grid_capacity - sum(
+            1 for key in reserved
+            if settings_on_capture_grid(dict(zip((s.name for s in active), key)), active)
+        ) if active else 0
         groups.append(_RuleGroup(fixed, local_rules, anchor, corners, capacity,
-                                 max(0, capacity - len(reserved))))
+                                 max(0, validation_capacity)))
     if not groups:
         raise ValueError("Plan rules leave no valid capture settings.")
     return specs, active, groups
@@ -1501,8 +1520,14 @@ def _group_quota_limit(capacities):
     return min(value * count + i for i, value in enumerate(capacities))
 
 
-def rule_capture_limits(controls, rules, n_train=0, n_validation=0):
-    _, active, groups = _rule_groups(controls, rules)
+def rule_capture_limits(controls, rules, n_train=0, n_validation=0,
+                        include_default_as_additional_capture=None):
+    policy = (
+        "inside" if include_default_as_additional_capture is None
+        else "extra" if include_default_as_additional_capture is True
+        else "exclude"
+    )
+    _, active, groups = _rule_groups(controls, rules, policy)
     count = len(groups)
     if not active:
         return count, count, count
@@ -1518,8 +1543,8 @@ def rule_capture_limits(controls, rules, n_train=0, n_validation=0):
     return count, max(0, train_max), max(0, validation_max)
 
 
-def _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method, validation_method, rules):
-    specs, active, groups = _rule_groups(knobs, rules)
+def _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method, validation_method, rules, anchor_policy="inside"):
+    specs, active, groups = _rule_groups(knobs, rules, anchor_policy)
     count = len(groups)
     if n_train < count or n_validation < 0 or (0 < n_validation < count):
         raise ValueError(f"Each enabled split needs at least {count} captures for the allowed switch states")
@@ -1536,6 +1561,7 @@ def _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method, validation_
                 seed=(seed + i * 104729) % (2**32), default_step=_DEFAULT_KNOB_STEP,
                 lhs_method=lhs_method, validation_method=validation_method,
                 anchor=group.anchor, validation_exclude=group.corners, rules=group.rules,
+                anchor_policy=anchor_policy if group.anchor is not None else "sample",
             )
         except ValueError as exc:
             context = f" for {group.fixed}" if group.fixed else ""
