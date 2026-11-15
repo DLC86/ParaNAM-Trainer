@@ -32,6 +32,90 @@ def _sort_keys(planned, specs):
     return [_settings_sort_key(capture.params, names) for capture in planned]
 
 
+@_pytest.mark.parametrize("method", ["standard", "sobol", "optimized"])
+def test_optional_default_is_one_extra_training_capture_not_a_sampler_point(method):
+    knobs = [
+        _KnobSpec("Gain", 0, 10, step=0.25, default=3),
+        _KnobSpec("Tone", 0, 10, step=0.25, default=7),
+    ]
+    common = dict(n_train=12, n_validation=0, seed=18, lhs_method=method)
+    extra_train, extra_val = _plan_captures(
+        knobs, **common, include_default_as_additional_capture=True,
+    )
+    only_train, only_val = _plan_captures(
+        knobs, **common, include_default_as_additional_capture=False,
+    )
+    assert not extra_val and not only_val
+    extra_keys = {tuple(row.params.values()) for row in extra_train}
+    sample_keys = {tuple(row.params.values()) for row in only_train}
+    assert len(extra_train) == 13 and len(extra_keys) == 13
+    assert len(only_train) == 12 and len(sample_keys) == 12
+    assert (3.0, 7.0) not in sample_keys
+    assert extra_keys == sample_keys | {(3.0, 7.0)}
+    assert _plan_captures(
+        knobs, **common, include_default_as_additional_capture=True
+    ) == (extra_train, extra_val)
+
+
+@_pytest.mark.parametrize("method", ["sobol", "optimized"])
+@_pytest.mark.parametrize("switch_mode", ["simple", "complex"])
+def test_optional_default_with_switches_is_once_global_and_held_out(method, switch_mode):
+    from nam.capture.params import SwitchSpec
+
+    knobs = [
+        _KnobSpec("Gain", 0, 10, step=0.5, default=3),
+        _KnobSpec("Tone", 0, 10, step=0.5, default=7),
+        SwitchSpec("Mode", ("A", "B"), default=1, planning_mode=switch_mode),
+    ]
+    common = dict(n_train=24, n_validation=12, seed=5, lhs_method=method)
+    train, val = _plan_captures(
+        knobs, **common, include_default_as_additional_capture=True
+    )
+    assert len(train) == 25 and len(val) == 12
+    keys = [tuple(p.params.values()) for p in train + val]
+    assert len(keys) == len(set(keys))
+    assert keys.count((3.0, 7.0, "B")) == 1
+    assert (3.0, 7.0, "B") not in {tuple(p.params.values()) for p in val}
+    without, without_val = _plan_captures(
+        knobs, **common, include_default_as_additional_capture=False,
+    )
+    assert len(without) == 24 and len(without_val) == 12
+    assert (3.0, 7.0, "B") not in {
+        tuple(p.params.values()) for p in without + without_val
+    }
+
+
+def test_extra_default_respects_small_grid_capacity_and_corners():
+    from nam.capture.project import new_project, add_corner_captures
+
+    knobs = [_KnobSpec("Gain", 0, 2, step=1, default=1)]
+    project = new_project(
+        knobs, n_train=2, n_validation=0,
+        include_default_as_additional_capture=True,
+    )
+    assert project.include_default_as_additional_capture is True
+    assert project.n_train_lhs == 2
+    assert len(project.entries) == 3
+    assert {e.params["Gain"] for e in project.entries} == {0.0, 1.0, 2.0}
+    added, skipped = add_corner_captures(project)
+    assert not added and skipped == 2
+    with _pytest.raises(ValueError, match="Cannot plan"):
+        new_project(
+            knobs, n_train=3, n_validation=0,
+            include_default_as_additional_capture=True,
+        )
+
+
+def test_no_default_capture_allows_muted_or_avoided_default_setting():
+    knobs = [_KnobSpec("Gain", 0, 10, step=1, default=0, mute_at_min=True)]
+    train, validation = _plan_captures(
+        knobs, n_train=3, n_validation=1, seed=19,
+        include_default_as_additional_capture=False,
+    )
+    assert len(train) == 3 and len(validation) == 1
+    assert all(p.params["Gain"] > 0 for p in train + validation)
+
+
 def test_plan_captures_counts_and_grid():
     train, validation = _plan_captures(_knobs(), n_train=8, n_validation=3, seed=0)
 
