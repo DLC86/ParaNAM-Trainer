@@ -729,10 +729,30 @@ class Workspace:
             **{key(p): "mute" for p in old_muted},
             **{key(p): "avoid" for p in old_avoided},
         }
-        for entry in list(replacement.entries):
-            kind = marked.get(key(entry.params))
-            if kind is not None:
-                replacement, _ = classify_capture(replacement, entry, kind)
+        # A replacement can itself land on *another* previously classified
+        # point. Keep resolving until no active entry matches any annotation.
+        for _ in range(max(32, len(replacement.entries) * 4)):
+            entry = next(
+                (row for row in replacement.entries
+                 if key(row.params) in marked),
+                None,
+            )
+            if entry is None:
+                break
+            kind = marked[key(entry.params)]
+            # If another replacement had temporarily populated this category,
+            # allow the classifier to remove the active row again.
+            row_list = (
+                replacement.muted_settings
+                if kind == "mute" else replacement.avoided_settings
+            )
+            if entry.params in row_list:
+                row_list.remove(entry.params)
+            replacement, _ = classify_capture(replacement, entry, kind)
+        else:
+            raise ValueError(
+                "Unable to avoid all previously marked mute/unstable combinations"
+            )
         present_muted = {key(p) for p in replacement.muted_settings}
         present_avoided = {key(p) for p in replacement.avoided_settings}
         replacement.muted_settings.extend(
