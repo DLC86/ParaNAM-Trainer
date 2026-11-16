@@ -304,3 +304,16 @@ def test_capture_view_marks_mute_and_avoid_dynamically(window, workspace):
     reopened = Workspace(workspace.directory)
     assert first.params in reopened.project.muted_settings
     assert second.params in reopened.project.avoided_settings
+
+
+def test_undo_mark_button_restores_original_capture_row(window, workspace):
+    window._attach(workspace)
+    window.refresh_captures()
+    original = window._capture_entries[window.capture_table.currentRow()]
+    window.classify_selected_capture("mute")
+    assert workspace.project.capture_mark_history
+    assert window.undo_capture_mark_button.isEnabled()
+    window.undo_last_capture_mark()
+    assert not workspace.project.muted_settings
+    assert not workspace.project.capture_mark_history
+    assert any(row.y_path == original.y_path for row in workspace.project.entries)
