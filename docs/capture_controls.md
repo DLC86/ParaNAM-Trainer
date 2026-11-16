@@ -24,8 +24,9 @@ project data but does not write this format into exported 0.7.3 models.
 **Sobol is the default for newly created projects.** Its recommended *training*
 captures depend on the number of non-Linear-Volume knobs: 2 knobs → 32, 3 → 32,
 4 → 64, 5 → 64, 6 → 64, 7–8 → 96, 9–10 → 128, adding another 32 every two knobs
-thereafter (1 knob → 16). The corresponding validation recommendations are
-8, 12, 16, 16 and 24 for 2–6 knobs, respectively, and 24 for more knobs.
+thereafter (1 knob → 16). For every sampling method, the suggested validation
+count is **one quarter of training**, rounded to the nearest whole capture
+(with half values rounded up): for example, 32/8, 64/16, 96/24, and 128/32.
 These are sampled captures, excluding the optional additional default and corners.
 
 Simple Switches do **not** increase this Sobol budget: with 2–4 joint states
@@ -38,10 +39,11 @@ captures). Each state uses a differently scrambled, reproducible Sobol design;
 when enough distinct knob settings exist the designs avoid repeating those
 settings across states. If the grid is too small, a valid plan may need overlap.
 
-Other LHS methods retain their previous recommendation: for K continuous
-knobs plus Simple Switch dimensions and S Complex Switch combinations,
-**16 × K × S** training and **min(max(8, 4 × K), 24) × S** validation.
-Previously saved projects retain their selected sampling method.
+Other LHS methods retain their previous **training** recommendation: for K
+continuous knobs plus Simple Switch dimensions and S Complex Switch
+combinations, **16 × K × S** training captures. Their recommended validation
+count is now likewise one quarter of training. Previously saved projects retain
+their selected sampling method and existing captured plans.
 
 The app now calculates the *actual* capture grid from each knob's min/max,
 step, automatically excluded mute endpoints, legacy Avoid min/max flags and any discrete switch positions. It reduces the
@@ -64,11 +66,17 @@ step or wider range to make held-out control validation possible.
 
 The **Training captures** and **Validation captures** numeric fields are
 bounded dynamically: they cannot exceed the realizable unique combinations.
-Raising either split reduces the permitted maximum of the other. The limit is
-checked per Complex Switch state, including uneven totals and corners, rather
-than merely multiplying the number of switch positions. Changing control
-settings updates these limits. An already generated plan is never silently
-regenerated, and its capture progress is preserved.
+**Editing Training captures automatically updates Validation captures to 25%**
+with round-half-up. Validation can still be edited independently; other
+settings changes do not override that manual value. Raising either split
+reduces the permitted maximum of the other. When corner/default exclusions,
+the available grid or Complex Switch state coverage prohibit the exact 25%
+ratio, feasibility takes priority and the suggested validation count is
+reduced. The limit is checked per Complex Switch state, including uneven
+totals and corners, rather than merely multiplying the number of switch
+positions. Changing control settings updates these limits. An already
+generated plan is never silently regenerated, and its capture progress is
+preserved.
 
 Corner captures repeat the existing continuous-knob corner design for **every**
 Complex Switch combination. Duplicates of existing training captures are
