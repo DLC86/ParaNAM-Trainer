@@ -130,15 +130,20 @@ def job_can_resume(workspace, job):
             mute_anchor_targets,
             mute_anchor_corner_targets,
             mute_anchor_point_targets,
+            mute_anchor_rule_targets,
         )
 
-        if mute_anchor_targets(workspace.project) or mute_anchor_point_targets(workspace.project):
+        if (mute_anchor_targets(workspace.project) or
+                mute_anchor_point_targets(workspace.project) or
+                mute_anchor_rule_targets(workspace.project)):
             saved_mute = spec.get("model", {}).get("loss", {}).get("mute_anchor")
             if saved_mute is None:
                 return False
             if (saved_mute.get("targets") != mute_anchor_targets(workspace.project)
                 or saved_mute.get("corner_targets", ()) != mute_anchor_corner_targets(workspace.project)
-                or saved_mute.get("point_targets", []) != mute_anchor_point_targets(workspace.project)):
+                or saved_mute.get("point_targets", []) != mute_anchor_point_targets(workspace.project)
+                or saved_mute.get("rule_targets", []) != mute_anchor_rule_targets(workspace.project)
+                or saved_mute.get("mode", "anchor") != options["mute_training_mode"]):
                 return False
             try:
                 current_mute = mute_anchor_settings(
@@ -422,7 +427,11 @@ def make_job(workspace, resume=False, job_directory=None):
         else:
             model = build_hyper_a2_model_config(workspace.project)
             mute = model["loss"].get("mute_anchor")
+            mute_mode = options["mute_training_mode"]
+            if mute_mode not in ("anchor", "virtual", "weight"):
+                raise ValueError(f"Unknown mute training method: {mute_mode!r}")
             if mute is not None:
+                mute["mode"] = mute_mode
                 mute.update(
                     mute_anchor_settings(
                         {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}

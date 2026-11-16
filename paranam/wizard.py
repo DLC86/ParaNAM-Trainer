@@ -1419,6 +1419,22 @@ class WizardWindow(
         self.advanced_fields["ny"].setToolTip(
             "Number of training output samples per window. Validation keeps its independent window."
         )
+        mute_training_mode = QComboBox()
+        mute_training_mode.addItem("Mute Anchor (audio forward)", "anchor")
+        mute_training_mode.addItem("Virtual mute captures (zero target)", "virtual")
+        mute_training_mode.addItem("Hypernetwork output-weight constraint", "weight")
+        mute_training_mode.setToolTip(
+            "Choose one training-only mute method. Virtual captures replace 5% of normal "
+            "training minibatches with zero-output targets, without an additional audio "
+            "forward. The Hypernetwork constraint penalizes the final output weights "
+            "without another audio forward. All methods preserve .pnam compatibility."
+        )
+        self.advanced_fields["mute_training_mode"] = mute_training_mode
+        advanced_form.addRow("Mute training method", mute_training_mode)
+        mute_training_mode.currentIndexChanged.connect(self.save_preferences)
+        mute_training_mode.currentIndexChanged.connect(
+            lambda *_: self.refresh_mute_training_controls()
+        )
         for key, caption, tooltip in (
             (
                 "mute_anchor_interval", "Mute Anchor Interval",
@@ -1639,10 +1655,10 @@ class WizardWindow(
         self.advanced_panel.layout().setRowVisible(
             self.advanced_fields["rms_loss_normalization_exponent"], parametric
         )
-        for key in MUTE_ANCHOR_OPTIONS:
-            self.advanced_panel.layout().setRowVisible(
-                self.advanced_fields[key], parametric
-            )
+        self.advanced_panel.layout().setRowVisible(
+            self.advanced_fields["mute_training_mode"], parametric
+        )
+        self.refresh_mute_training_controls(parametric)
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.advanced_fields["cudnn_benchmark"].setEnabled(
@@ -1656,6 +1672,17 @@ class WizardWindow(
         self.refresh_hypernetwork_controls(kind)
         self.refresh_checkpoint_controls()
         self.refresh_rate_preview(kind)
+
+    def refresh_mute_training_controls(self, parametric=None):
+        if parametric is None:
+            parametric = self.capture_kind.currentData() == "parametric"
+        enabled = (
+            parametric and
+            self.advanced_fields["mute_training_mode"].currentData() == "anchor"
+        )
+        for key in MUTE_ANCHOR_OPTIONS:
+            field = self.advanced_fields[key]
+            self.advanced_panel.layout().setRowVisible(field, parametric and enabled)
 
     def refresh_loss_normalization_controls(self, parametric=None):
         if parametric is None:

@@ -67,6 +67,7 @@ def training_preset(name):
         gradient_clipping=not hyper_a2,
         gradient_clip_val=1.0,
         check_nonfinite_gradients=not hyper_a2,
+        mute_training_mode="anchor",
         **MUTE_ANCHOR_OPTIONS,
     )
 

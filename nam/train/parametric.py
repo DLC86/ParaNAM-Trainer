@@ -651,6 +651,7 @@ class _MuteAnchorConfig:
     point_targets: tuple[dict[str, _Any], ...] = ()
     rule_targets: tuple[dict[str, _Any], ...] = ()
     weight: float = 0.25
+    mode: str = "anchor"
     batch_size: int = _MUTE_ANCHOR_DEFAULTS["batch_size"]
     ny: int = _MUTE_ANCHOR_DEFAULTS["ny"]
     interval: int = _MUTE_ANCHOR_DEFAULTS["interval"]
@@ -661,6 +662,8 @@ class _MuteAnchorConfig:
             for name, edge in self.targets
         ):
             raise ValueError("Mute Anchor requires named min/max control targets")
+        if self.mode not in ("anchor", "virtual", "weight"):
+            raise ValueError(f"Unknown mute training method: {self.mode!r}")
         if not _isfinite(self.weight) or self.weight <= 0:
             raise ValueError("Mute Anchor weight must be positive and finite")
         if any(not isinstance(row, dict) or not row for row in self.corner_targets + self.point_targets):
@@ -684,6 +687,7 @@ class _MuteAnchorConfig:
             point_targets=tuple(dict(item) for item in raw.get("point_targets", ())),
             rule_targets=tuple(dict(item) for item in raw.get("rule_targets", ())),
             weight=float(raw.get("weight", 0.25)),
+            mode=raw.get("mode", "anchor"),
             **_mute_anchor_settings(raw),
         )
 
@@ -769,6 +773,23 @@ class _ParametricLightningModule(_LightningModule):
                     for name, edge in mute.targets
                 ):
                     raise ValueError("Mute Anchor corner is not muted by any configured endpoint")
+        if mute is not None and mute.mode == "weight":
+            branches = (
+                [net.branch(size) for size in net.sizes]
+                if isinstance(net, _HyperA2) else [net]
+            )
+            if not all(isinstance(branch, _HyperWaveNet) for branch in branches):
+                raise ValueError("Hypernetwork weight mute requires HyperWaveNet/HyperA2")
+            for branch in branches:
+                names = [name for name in branch._template_parameters
+                         if name.startswith("_layer_arrays.0._head_rechannel.")]
+                if (branch._template._head is not None
+                        or len(branch._template._layer_arrays) != 1
+                        or not names
+                        or not all(name in branch._hypernet.target_names for name in names)):
+                    raise ValueError(
+                        "Weight mute requires a fully conditioned final output stage"
+                    )
         self._mel_mrstft = None
         # Fail here rather than on the first training step: a net that conditions on the
         # control vector as a whole has no meaning to give a control that moves within
@@ -801,6 +822,7 @@ class _ParametricLightningModule(_LightningModule):
         checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
         mute = self._loss_config.mute_anchor
         checkpoint["mute_anchor_settings"] = mute.settings() if mute is not None else None
+        checkpoint["mute_training_mode"] = mute.mode if mute is not None else "anchor"
         checkpoint["mute_anchor_corner_targets"] = (
             mute.corner_targets if mute is not None else None
         )
@@ -815,6 +837,9 @@ class _ParametricLightningModule(_LightningModule):
                 "Start a new training run to use the stabilized HyperA2 recipe."
             )
         mute = self._loss_config.mute_anchor
+        mode = mute.mode if mute is not None else "anchor"
+        if checkpoint.get("mute_training_mode", "anchor") != mode:
+            raise ValueError("Checkpoint uses a different mute training method.")
         settings = mute.settings() if mute is not None else None
         # Earlier checkpoints supported batch_size and ny, but did not record
         # either value. They always applied the anchor on every training step.
@@ -1159,76 +1184,61 @@ class _ParametricLightningModule(_LightningModule):
         loudness = x[:, -ny:].abs().mean(dim=1)
         indices = _torch.topk(loudness, k=count).indices
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
-        fixed_targets = config.corner_targets + config.point_targets
-        fixed_count = len(fixed_targets)
-        special_count = fixed_count + len(config.rule_targets)
-        # Sweep every fixed mute point and every conditional mute region before
-        # alternating with general single-knob endpoint anchors.
-        use_special = bool(special_count) and (
-            not config.targets or target_index < special_count
-            or (target_index - special_count) % 4 == 0
-        )
-        setting = _sample_raw_params(net.param_specs, 1, device=x.device)
-        if use_special:
-            special_index = (
-                target_index % special_count
-                if not config.targets or target_index < special_count
-                else (target_index - special_count) // 4 % special_count
-            )
-            if special_index < fixed_count:
-                row = fixed_targets[special_index]
-                for index, spec in enumerate(net.param_specs):
-                    value = row[spec.name]
-                    if spec.type == "switch":
-                        value = spec.enum_names.index(value)
-                    setting[0, index] = float(value)
-            else:
-                from ..capture.plan_rules import PlanRule
-                rule = PlanRule.model_validate(
-                    config.rule_targets[special_index - fixed_count]
-                )
-                for index, spec in enumerate(net.param_specs):
-                    if spec.name not in rule.controls:
-                        continue  # Unconstrained controls stay randomized.
-                    op, threshold = rule.condition_for(spec.name)
-                    if spec.type == "switch":
-                        setting[0, index] = spec.enum_names.index(threshold)
-                    elif op == "=":
-                        setting[0, index] = float(threshold)
-                    else:
-                        # Draw from the exact interval covered by the Mute
-                        # condition. Use nextafter in the tensor dtype to keep
-                        # strict comparisons strict even on float32 tensors.
-                        boundary = _torch.tensor(
-                            float(threshold), dtype=setting.dtype, device=x.device
-                        )
-                        direction = _torch.full_like(
-                            boundary, float("-inf") if op == "<" else float("inf")
-                        )
-                        bound = _torch.nextafter(boundary, direction)
-                        low = _torch.tensor(float(spec.min), dtype=setting.dtype, device=x.device)
-                        high = _torch.tensor(float(spec.max), dtype=setting.dtype, device=x.device)
-                        if op == "<":
-                            high = _torch.minimum(high, bound)
-                        else:
-                            low = _torch.maximum(low, bound)
-                        if bool((low > high).item()):
-                            raise ValueError(
-                                f"Mute rule has no valid neural values for {spec.name}"
-                            )
-                        setting[0, index] = low + (high - low) * _torch.rand_like(low)
-        else:
-            name, edge = config.targets[target_index % len(config.targets)]
-            index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
-            spec = net.param_specs[index]
-            setting[0, index] = spec.min if edge == "min" else spec.max
+        setting = self._mute_anchor_setting(net, config, target_index, x.device)
         setting = setting.expand(count, -1)
         if isinstance(net, _HyperA2):
             outputs = net.forward_sizes(audio, setting, pad_start=False)
             return outputs.abs().mean(dim=(0, 2))
         return net(audio, setting, pad_start=False).abs().mean().unsqueeze(0)
 
+    def _virtual_mute_step(self, batch, config, target_index):
+        """Replace an ordinary audio batch with a zero-target batch, not an extra pass.
+
+        Five percent of capture-homogeneous batches are substituted. No synthetic WAV
+        is needed: the same real guitar input is used and the mute output target is
+        exactly zero. This loss intentionally bypasses RMS, SNR and MRSTFT.
+        """
+        net = _get_parametric_net(self)
+        x = batch[0]
+        setting = self._mute_anchor_setting(net, config, target_index, x.device)
+        settings = setting.expand(x.shape[0], -1)
+        if isinstance(net, _HyperA2):
+            outputs = net.forward_sizes(x, settings, pad_start=False)
+            errors = outputs.square().mean(dim=(0, 2))
+            reduced = (errors.sum() if self._loss_config.training_recipe == "a2"
+                       else errors.mean())
+        else:
+            reduced = net(x, settings, pad_start=False).square().mean()
+        # With 5% synthetic batches, a plain 0.25*MSE term is far too weak.
+        # This finite, fixed factor has no dependency on the capture's zero RMS.
+        return (config.weight * 64.0) * reduced
+
+    def _mute_weight_losses(self, config, target_index):
+        """Constrain conditioned final-stage weights, without an audio forward."""
+        net = _get_parametric_net(self)
+        device = next(net.parameters()).device
+        setting = self._mute_anchor_setting(net, config, target_index, device)[0]
+        branches = (
+            [net.branch(size) for size in net.sizes]
+            if isinstance(net, _HyperA2) else [net]
+        )
+        values = []
+        for branch in branches:
+            encoded = branch._encode_params(setting)
+            weights = branch._conditioned_weight_dict(encoded)
+            final = [weight.square().mean()
+                     for name, weight in weights.items()
+                     if name.startswith("_layer_arrays.0._head_rechannel.")]
+            if not final:
+                raise RuntimeError("No conditioned output-stage weights for mute")
+            values.append(_torch.stack(final).sum())
+        return _torch.stack(values)
+
     def training_step(self, batch, batch_idx):
+        mute = self._loss_config.mute_anchor
+        if mute is not None and mute.mode == "virtual" and batch_idx % 20 == 0:
+            epoch = self._trainer.current_epoch if self._trainer is not None else 0
+            return self._virtual_mute_step(batch, mute, epoch * 1000003 + batch_idx // 20)
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
         mse_scale = (
             self._capture_mse_scales[capture_index]
@@ -1263,8 +1273,9 @@ class _ParametricLightningModule(_LightningModule):
                     preds, targets, means, capture_index
                 )
         stacked = _torch.stack(losses)
-        mute = self._loss_config.mute_anchor
-        if mute is not None:
+        if mute is not None and mute.mode == "weight":
+            stacked = stacked + mute.weight * self._mute_weight_losses(mute, self.global_step)
+        if mute is not None and mute.mode == "anchor":
             # All microbatches in an accumulated update share the same cadence
             # and target. Lightning averages their losses. global_step persists
             # across checkpoints and keeps the rotation independent of the epoch.

@@ -936,6 +936,7 @@ class Workspace:
             gradient_clip_val=1.0,
             check_nonfinite_gradients=(kind == "parametric"),
             hypernetwork_recipe="HyperA2",
+            mute_training_mode="anchor",
             **MUTE_ANCHOR_OPTIONS,
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
@@ -1042,6 +1043,8 @@ class Workspace:
             for key, default in MUTE_ANCHOR_OPTIONS.items():
                 if not uses_mute_anchor or options[key] == default:
                     options.pop(key)
+            if not uses_mute_anchor or options["mute_training_mode"] == "anchor":
+                options.pop("mute_training_mode")
             static = self.project.capture_type == "static"
             rms_enabled = options["rms_loss_normalization"]
             if static or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
