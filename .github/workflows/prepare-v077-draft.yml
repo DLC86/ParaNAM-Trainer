@@ -1,4 +1,4 @@
-name: Prepare and build ParaNAM Trainer 0.7.7 draft
+name: Prepare and build ParaNAM Trainer 0.8.0 draft
 on:
   workflow_dispatch:
   push:
@@ -16,7 +16,7 @@ on:
       - 'paranam/widgets.py'
       - 'nam/capture/session.py'
       - 'tests/capture/test_lhs_methods.py'
-      - 'docs/release-0.7.7.md'
+      - 'docs/release-0.8.0.md'
       # Rebuild the draft when Plan/default sampling or frozen Retrain changes.
       # Missing these paths previously left the newest passing main commit
       # without a corresponding installer dispatch.
@@ -31,11 +31,24 @@ on:
       - 'tests/capture/test_planner.py'
       - 'docs/capture_controls.md'
       - 'docs/training-controls.md'
+      - 'paranam/recipes.py'
+      - 'paranam/plan_rules_ui.py'
+      - 'paranam/queue_ui.py'
+      - 'paranam/project_files.py'
+      - 'nam/capture/plan_rules.py'
+      - 'nam/capture/export.py'
+      - 'nam/train/parametric.py'
+      - 'tests/paranam/test_advanced_training.py'
+      - 'tests/paranam/test_hypera2_defaults059.py'
+      - 'tests/parametric/test_train.py'
+      - 'packaging/publish_native.py'
+      - 'pyproject.toml'
+      - 'paranam/__init__.py'
 permissions:
   contents: write
   actions: write
 concurrency:
-  group: paranam-draft-v0.7.7
+  group: paranam-draft-v0.8.0
   cancel-in-progress: true
 jobs:
   prepare:
@@ -51,8 +64,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -qx '__version__ = "0.7.7"' paranam/__init__.py
-          grep -qx 'version = "0.7.7"' pyproject.toml
+          grep -qx '__version__ = "0.8.0"' paranam/__init__.py
+          grep -qx 'version = "0.8.0"' pyproject.toml
           # The draft must include the focused RMS-exponent regression coverage.
           grep -q 'test_rms_loss_exponent_adjusts_capture_weight' .github/workflows/paranam-tests.yml
           # Older release preparations can otherwise finish later, overwrite
@@ -64,7 +77,7 @@ jobs:
             [[ -n "$stale" ]] || break
             while IFS= read -r old_run; do
               [[ -n "$old_run" ]] || continue
-              echo "Cancelling stale v0.7.7 preparation $old_run"
+              echo "Cancelling stale v0.8.0 preparation $old_run"
               gh api --method POST "repos/$GH_REPO/actions/runs/$old_run/cancel" || true
             done <<< "$stale"
             sleep 5
@@ -74,21 +87,16 @@ jobs:
             echo "::error::Refusing to publish an obsolete commit ($GITHUB_SHA; current $latest)"
             exit 1
           }
-          existing="$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.7.7" or .name == "ParaNAM Trainer 0.7.7") | .id' | head -n 1)"
-          if [[ -z "$existing" ]]; then
-            gh api --method POST "repos/$GH_REPO/releases" \
-              -f tag_name="v0.7.7" \
-              -f target_commitish="$GITHUB_SHA" \
-              -f name="ParaNAM Trainer 0.7.7" \
-              -f body="$(cat docs/release-0.7.7.md)" \
-              -F draft=true -F prerelease=true > release.json
-          else
-            test "$(gh api "repos/$GH_REPO/releases/$existing" --jq .draft)" = true
-            gh api --method PATCH "repos/$GH_REPO/releases/$existing" \
-              -f target_commitish="$GITHUB_SHA" \
-              -f body="$(cat docs/release-0.7.7.md)" \
-              -F draft=true -F prerelease=true > release.json
-          fi
+          # Retag and rename the *existing* 0.7.7 draft. Never create a
+          # second release: the requested migration must preserve its ID.
+          existing=445637123
+          test "$(gh api "repos/$GH_REPO/releases/$existing" --jq .draft)" = true
+          gh api --method PATCH "repos/$GH_REPO/releases/$existing" \
+            -f tag_name="v0.8.0" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="ParaNAM Trainer 0.8.0" \
+            -f body="$(cat docs/release-0.8.0.md)" \
+            -F draft=true -F prerelease=true > release.json
           jq -e --arg sha "$GITHUB_SHA" '.draft == true and .target_commitish == $sha' release.json
           release_id="$(jq -r '.id' release.json)"
           echo "Draft ID: $release_id"
@@ -174,4 +182,4 @@ jobs:
           }
           gh workflow run paranam-installers.yml --ref main \
             -f target=all -f keep_draft=true -f release_id="$release_id"
-          echo "Native installers dispatched for draft v0.7.7"
+          echo "Native installers dispatched for draft v0.8.0"
