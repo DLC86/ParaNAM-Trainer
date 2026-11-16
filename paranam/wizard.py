@@ -1239,11 +1239,12 @@ class WizardWindow(
         self.advanced_fields["rms_loss_normalization_exponent"] = exponent
         advanced_form.addRow("RMS loss normalization exponent", exponent)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
-        snr_weighted.setChecked(False)
+        snr_weighted.setChecked(True)
         snr_weighted.setToolTip(
-            "Independently reduce the MSE weight of low-SNR captures using the "
-            "pre-blip silence in their raw recordings. Can be enabled without RMS "
-            "normalization; requires raw recordings to estimate noise."
+            "Use measured pre-blip noise to scale training MSE by a capped linear "
+            "reliability (minimum 10%) and MRSTFT by a gentler square-root "
+            "reliability (minimum 20%). RMS scaling applies only to MSE. "
+            "Legacy captures without raw recordings use unweighted SNR."
         )
         self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
         advanced_form.addRow(snr_weighted)
