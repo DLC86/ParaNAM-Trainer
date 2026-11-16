@@ -465,6 +465,7 @@ def plan_unique_splits(
     anchor: _Optional[dict[str, _Any]] = None,
     rules=(),
     anchor_policy: str = "inside",
+    external_exclude: _Optional[set[tuple[_Any, ...]]] = None,
 ) -> tuple[list[dict[str, _Any]], list[dict[str, _Any]]]:
     """
     Draw ``n_train`` + ``n_validation`` distinct on-grid settings, with the validation
@@ -488,11 +489,12 @@ def plan_unique_splits(
         raise ValueError("Unknown validation selection method")
     # The reservation only constrains the validation draw, so it costs nothing when there
     # is no validation split.
+    outside = set(external_exclude or ())
     reserved = (
         set()
         if validation_exclude is None or n_validation == 0
         else set(validation_exclude)
-    )
+    ) | outside
     if anchor_policy not in ("inside", "extra", "exclude", "sample"):
         raise ValueError(f"Unknown default capture policy: {anchor_policy}")
     if anchor_policy == "sample":
@@ -509,7 +511,7 @@ def plan_unique_splits(
     # appended as an additional training capture, or completely excluded.
     if default_key is not None and (default_on_grid or anchor_policy != "exclude"):
         reserved.add(default_key)
-    sampled_exclusions = (
+    sampled_exclusions = outside | (
         {default_key}
         if default_key is not None and anchor_policy in ("extra", "exclude")
         else set()
@@ -527,6 +529,14 @@ def plan_unique_splits(
         # consume one of the requested LHS/Sobol sample positions.
         required += 1
     capacity = _grid_capacity(specs, default_step, rules)
+    # Complex Switch groups may request complementary knob settings. Exclude
+    # points used by earlier groups only when the joint grid can afford them.
+    capacity -= sum(
+        1 for key in outside
+        if settings_on_capture_grid(
+            dict(zip((spec.name for spec in specs), key)), specs, default_step
+        ) and allows(rules, dict(zip((spec.name for spec in specs), key)))
+    )
     if anchor is not None and not default_on_grid and anchor_policy in ("inside", "extra"):
         # Explicit defaults may fall between the ordinary capture-grid positions.
         capacity += 1
@@ -563,6 +573,7 @@ def plan_unique_splits(
                 validation_method="independent",
                 validation_exclude=validation_exclude, anchor=anchor,
                 rules=rules, anchor_policy=anchor_policy,
+                external_exclude=outside,
             )
             if anchor_policy == "extra":
                 train = train[:-1]  # the fallback already appended this extra capture
@@ -994,6 +1005,7 @@ def _plan_captures_unadjusted(
     validation_method: str = "independent",
     rules=(),
     include_default_as_additional_capture: bool | None | str = None,
+    external_exclude: _Optional[set[tuple[_Any, ...]]] = None,
 ) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
     """
     Generate the full capture plan: ``n_train`` Latin-Hypercube training settings and
@@ -1041,6 +1053,7 @@ def _plan_captures_unadjusted(
             inner, n_train=n_train, n_validation=n_validation, seed=seed,
             lhs_method=lhs_method, validation_method=validation_method,
             include_default_as_additional_capture=include_default_as_additional_capture,
+            external_exclude=external_exclude,
         )
         fixed = {clean[0].name: clean[0].max}
         merged = lambda entries: [
@@ -1073,7 +1086,7 @@ def _plan_captures_unadjusted(
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
         return _plan_simple_switches(
             knobs, specs, n_train, n_validation, seed, lhs_method,
-            validation_method, policy,
+            validation_method, policy, external_exclude=external_exclude,
         )
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
@@ -1092,6 +1105,8 @@ def _plan_captures_unadjusted(
                 "and set validation to 0: no unseen settings remain for validation."
             )
         training, validation = [], []
+        used_settings = set(external_exclude or ())
+        complementary = lhs_method == "sobol" and policy != "inside"
         default_combo = tuple(spec.enum_names[int(spec.default)] for spec in switches)
         for i, combo in enumerate(
             _itertools.product(*(spec.enum_names for spec in switches))
@@ -1102,18 +1117,36 @@ def _plan_captures_unadjusted(
                     None if policy == "inside" else
                     False if combo == default_combo else "sample"
                 )
+                arguments = dict(
+                    n_train=n_train // count + (i < n_train % count),
+                    n_validation=n_validation // count + (i < n_validation % count),
+                    seed=(seed + i * 104729) % (2**32),
+                    lhs_method=lhs_method,
+                    validation_method=validation_method,
+                    include_default_as_additional_capture=inner_default,
+                )
                 try:
-                    train_part, val_part = _plan_captures_unadjusted(
-                        continuous,
-                        n_train=n_train // count + (i < n_train % count),
-                        n_validation=n_validation // count + (i < n_validation % count),
-                        seed=(seed + i * 104729) % (2**32),
-                        lhs_method=lhs_method,
-                        validation_method=validation_method,
-                        include_default_as_additional_capture=inner_default,
-                    )
+                    try:
+                        train_part, val_part = _plan_captures_unadjusted(
+                            continuous, **arguments,
+                            external_exclude=used_settings if complementary else None,
+                        )
+                    except ValueError:
+                        if not complementary:
+                            raise
+                        # A coarse grid may not have enough distinct knob values
+                        # for every switch state. Reuse across states only then.
+                        train_part, val_part = _plan_captures_unadjusted(
+                            continuous, **arguments
+                        )
                 except ValueError as exc:
                     raise ValueError(f"Switch combination {fixed}: {exc}") from exc
+                if complementary:
+                    inner_specs = tuple(c.to_param_spec() for c in continuous)
+                    used_settings.update(
+                        _settings_key(capture.params, inner_specs)
+                        for capture in train_part + val_part
+                    )
                 training.extend({**capture.params, **fixed} for capture in train_part)
                 validation.extend({**capture.params, **fixed} for capture in val_part)
             else:
@@ -1160,6 +1193,7 @@ def _plan_captures_unadjusted(
             if policy != "sample" else None
         ),
         anchor_policy=policy,
+        external_exclude=external_exclude,
     )
     names = [spec.name for spec in specs]
     train = _planned_from_params(
@@ -1589,6 +1623,7 @@ def _inverse_bias(unit, spec):
 def _plan_simple_switches(
     controls, specs, n_train, n_validation, seed, lhs_method,
     validation_method="independent", anchor_policy="inside",
+    external_exclude=None,
 ):
     complex_specs = tuple(
         s for s in specs if s.type == "switch" and not s.simple_switch
@@ -1605,6 +1640,8 @@ def _plan_simple_switches(
                 f"Cover all {count} Complex Switch combinations in each split"
             )
         train, val = [], []
+        used_settings = set(external_exclude or ())
+        complementary = lhs_method == "sobol" and anchor_policy != "inside"
         default_combo = tuple(s.enum_names[int(s.default)] for s in complex_specs)
         for i, combo in enumerate(combinations):
             fixed = dict(zip((s.name for s in complex_specs), combo))
@@ -1612,8 +1649,7 @@ def _plan_simple_switches(
                 None if anchor_policy == "inside" else
                 False if combo == default_combo else "sample"
             )
-            t, v = _plan_captures_unadjusted(
-                inner,
+            arguments = dict(
                 n_train=n_train // count + (i < n_train % count),
                 n_validation=n_validation // count + (i < n_validation % count),
                 seed=(seed + i * 104729) % 2**32,
@@ -1621,6 +1657,20 @@ def _plan_simple_switches(
                 validation_method=validation_method,
                 include_default_as_additional_capture=inner_default,
             )
+            try:
+                t, v = _plan_captures_unadjusted(
+                    inner, **arguments,
+                    external_exclude=used_settings if complementary else None,
+                )
+            except ValueError:
+                if not complementary:
+                    raise
+                t, v = _plan_captures_unadjusted(inner, **arguments)
+            if complementary:
+                inner_specs = tuple(c.to_param_spec() for c in inner)
+                used_settings.update(
+                    _settings_key(entry.params, inner_specs) for entry in t + v
+                )
             train.extend(
                 {name: ({**e.params, **fixed})[name] for name in names} for e in t
             )
@@ -1653,6 +1703,7 @@ def _plan_simple_switches(
             validation_exclude=corners,
             anchor=anchor if anchor_policy != "sample" else None,
             anchor_policy=anchor_policy,
+            external_exclude=external_exclude,
         )
     return (
         _planned_from_params("lhs", "train", specs, sort_settings(train, names)),
