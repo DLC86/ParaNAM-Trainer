@@ -14,6 +14,7 @@ from nam.models.parametric import ParametricDataset as _ParametricDataset
 from nam.models._from_nam import init_from_nam as _init_from_nam
 from nam.models.wavenet import WaveNet as _WaveNet
 from nam.train.core import _ValidationStopping as _ValidationStopping
+from nam.train.lightning_module import _LossItem
 from nam.train.parametric import _CaptureBatchSampler as _CaptureBatchSampler
 from nam.train.parametric import (
     _enable_training_fast_paths as _enable_training_fast_paths,
@@ -548,6 +549,30 @@ def test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio(tmp_path):
         module.set_capture_mse_normalization(dataset, snr_weighted=True)
     module.set_capture_mse_normalization(dataset)
     assert module._capture_mse_scales == (rms_scale,)
+
+
+def test_snr_weights_mrstft_separately_without_scaling_other_losses(mocker):
+    """RMS changes MSE only; SNR also attenuates the relative STFT term."""
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    sampler = _CaptureBatchSampler((1,), batch_size=1, shuffle=False, drop_last=False)
+    list(sampler)
+    module.set_capture_batch_samplers(train_sampler=sampler)
+    module._capture_mse_scales = (0.1,)
+    module._capture_mrstft_scales = (0.5,)
+    preds = _torch.zeros(1, 8)
+    targets = _torch.ones(1, 8)
+    loss_items = {
+        "MSE": _LossItem(1.0, _torch.tensor(4.0)),
+        "MRSTFT": _LossItem(1.0, _torch.tensor(8.0)),
+        "Mel": _LossItem(1.0, _torch.tensor(2.0)),
+    }
+    mocker.patch.object(
+        module, "_size_steps",
+        return_value=[(None, (preds, targets, loss_items))],
+    )
+    module.on_train_epoch_start()
+    loss = module.training_step((preds, targets), 0)
+    assert loss.item() == _pytest.approx(0.1 * 4.0 + 0.5 * 8.0 + 2.0)
 
 
 def test_parametric_lightning_training_logs_seen_audio_seen_params_bucket(monkeypatch):
