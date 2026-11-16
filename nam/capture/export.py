@@ -408,6 +408,23 @@ def mute_anchor_corner_targets(project: CaptureProject) -> list[dict[str, _Any]]
     ]
 
 
+def mute_anchor_point_targets(project: CaptureProject) -> list[dict[str, _Any]]:
+    """Exactly classified mute settings, never generalized to other controls."""
+    names = {
+        knob.name for knob in project.knob_specs()
+        if not getattr(knob, "clean_volume", False)
+    }
+    seen = set()
+    out = []
+    for point in project.muted_settings:
+        reduced = {name: value for name, value in point.items() if name in names}
+        identity = tuple(sorted(reduced.items()))
+        if identity not in seen:
+            seen.add(identity)
+            out.append(reduced)
+    return out
+
+
 def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     # input_size/condition_size are omitted on purpose: ConcatWaveNet derives them from
     # the param specs.
@@ -429,6 +446,7 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
     mute_targets = mute_anchor_targets(project)
+    mute_points = mute_anchor_point_targets(project)
     loss = {
         "val_loss": "esr",
         "mrstft_weight": 0.0005,
@@ -437,10 +455,11 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
         "silence_anchor": {"weight": 1.0, "batch_size": 8, "ny": 512},
         "silence_anchor_ramp": {"weight": 1.0, "batch_size": 8, "ny": 512},
     }
-    if mute_targets:
+    if mute_targets or mute_points:
         loss["mute_anchor"] = {
             "targets": mute_targets,
             "corner_targets": mute_anchor_corner_targets(project),
+            **({"point_targets": mute_points} if mute_points else {}),
             "weight": 0.25,
             **MUTE_ANCHOR_DEFAULTS,
         }
@@ -505,12 +524,14 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
     mute_targets = mute_anchor_targets(project)
+    mute_points = mute_anchor_point_targets(project)
     loss = {"val_loss": "esr", "mrstft_weight": 0.0005}
-    if mute_targets:
+    if mute_targets or mute_points:
         # Training-only targets: never add player-facing model fields.
         loss["mute_anchor"] = {
             "targets": mute_targets,
             "corner_targets": mute_anchor_corner_targets(project),
+            **({"point_targets": mute_points} if mute_points else {}),
             "weight": 0.25,
             **MUTE_ANCHOR_DEFAULTS,
         }
