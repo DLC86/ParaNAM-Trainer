@@ -20,6 +20,7 @@ class PlanRule(BaseModel):
     operator: Literal["<", ">", "="]
     value: float | str
     kind: Literal["avoid", "mute"] = "avoid"
+    kind: Literal["avoid", "mute"] = "avoid"
     # Optional per-control overrides preserve backwards compatibility with
     # existing single-threshold rules and their JSON representation.
     operators: dict[str, Literal["<", ">", "="]] = Field(default_factory=dict)
