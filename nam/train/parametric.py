@@ -781,6 +781,7 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._capture_mse_scales: tuple[float, ...] = ()
+        self._capture_mrstft_scales: tuple[float, ...] = ()
 
     @classmethod
     def parse_config(cls, config):
@@ -848,7 +849,7 @@ class _ParametricLightningModule(_LightningModule):
         self, dataset, snr_weighted: bool = False, snr_noise_powers=None,
         rms_exponent: float = 2.0, rms_enabled: bool = True,
     ) -> None:
-        """Set per-capture MSE weights from independently enabled RMS and SNR criteria."""
+        """RMS-normalize MSE and independently attenuate low-SNR spectral losses."""
         from ..capture.session import pre_blip_noise_power
 
         if not isinstance(rms_enabled, bool):
@@ -861,6 +862,7 @@ class _ParametricLightningModule(_LightningModule):
         target_power = 10.0 ** (-18.0 / 10.0)
         floor_power = 10.0 ** (-60.0 / 10.0)
         scales = []
+        spectral_scales = []
         for capture in _iter_inner_datasets(dataset):
             y = capture.y
             total_power = _torch.mean(y.double().square()).item()
@@ -875,36 +877,55 @@ class _ParametricLightningModule(_LightningModule):
                     )
                 path = _Path(capture._y_path)
                 if snr_noise_powers is None:
-                    raw_noise = pre_blip_noise_power(path, capture.sample_rate)
+                    try:
+                        raw_noise = pre_blip_noise_power(path, capture.sample_rate)
+                    except ValueError as exc:
+                        # Legacy/imported WAVs can have no raw recording; keep
+                        # their loss unchanged rather than blocking a default-on
+                        # SNR training job. Corrupt existing manifests still fail.
+                        from warnings import warn
+                        if any((parent / "captures_raw" / "manifest.json").exists()
+                               for parent in path.parents):
+                            raise
+                        warn(f"SNR unavailable for {path.name}: {exc}. Using unity SNR weights.")
+                        raw_noise = None
                 else:
-                    raw_noise = snr_noise_powers.get(path.as_posix())
-                    if (
+                    if path.as_posix() not in snr_noise_powers:
+                        raise ValueError(f"Missing frozen noise record for {path}")
+                    raw_noise = snr_noise_powers[path.as_posix()]
+                    # None explicitly denotes a legacy WAV with no raw
+                    # preamble. It must not be mistaken for measured zero noise.
+                    if raw_noise is not None and (
                         type(raw_noise) not in (int, float)
                         or not _isfinite(raw_noise)
                         or raw_noise < 0
                     ):
-                        raise ValueError(f"Missing or invalid frozen noise power for {path}")
-                noise_power = raw_noise * capture.output_gain**2
-                if not _isfinite(noise_power):
-                    raise ValueError(f"Invalid scaled noise power for {capture._y_path}")
-            # The SNR factor works independently of RMS, including when the
-            # latter is completely disabled. Preserve the previous formula
-            # for the combined RMS + SNR case (including signal-power correction).
+                        raise ValueError(f"Invalid frozen noise power for {path}")
+                if raw_noise is not None:
+                    noise_power = raw_noise * capture.output_gain**2
+                    if not _isfinite(noise_power):
+                        raise ValueError(f"Invalid scaled noise power for {capture._y_path}")
+            # Keep RMS normalization based on total measured capture power.
+            # Noise-subtracted RMS can become unstable when signal approaches
+            # zero; reliability instead limits the training contribution.
             scale = (
                 (target_power / max(total_power, floor_power)) ** (rms_exponent / 2.0)
                 if rms_enabled else 1.0
             )
-            if noise_power > 0.0:
-                signal_power = max(total_power - noise_power, 0.0)
-                reliability = signal_power / total_power if total_power > 0.0 else 0.0
-                if rms_enabled:
-                    scale = (
-                        (target_power / max(signal_power, floor_power))
-                        ** (rms_exponent / 2.0)
-                    )
-                scale *= reliability**2
-            scales.append(scale)
+            reliability = (
+                max(0.0, 1.0 - noise_power / total_power)
+                if snr_weighted and total_power > 0.0 else 1.0
+            )
+            # Compared with old reliability**2, a linear factor protects
+            # low-level captures from being effectively discarded.
+            # A 10% MSE floor still lets quiet, imperfect recordings teach
+            # gain/volume, while limiting highly unreliable data.
+            scales.append(scale * max(0.1, reliability))
+            # STFT convergence/log-magnitude are already relative in level;
+            # they need only a gentle reliability factor, never RMS scaling.
+            spectral_scales.append(max(0.2, reliability**0.5))
         self._capture_mse_scales = tuple(scales)
+        self._capture_mrstft_scales = tuple(spectral_scales)
 
     @staticmethod
     def _capture_index(sampler: _Optional[_Sampler], batch_idx: int) -> _Optional[int]:
@@ -1214,6 +1235,11 @@ class _ParametricLightningModule(_LightningModule):
             if capture_index is not None and self._capture_mse_scales
             else 1.0
         )
+        mrstft_scale = (
+            self._capture_mrstft_scales[capture_index]
+            if capture_index is not None and self._capture_mrstft_scales
+            else 1.0
+        )
         losses = []
         for size, (preds, targets, loss_dict) in self._size_steps(batch):
             loss = _torch.zeros((), device=preds.device)
@@ -1226,6 +1252,8 @@ class _ParametricLightningModule(_LightningModule):
                     weight = v.weight
                     if name in ("MSE", "MSE_FFT"):
                         weight *= mse_scale
+                    elif name in ("MRSTFT", "Pre-emphasized MRSTFT"):
+                        weight *= mrstft_scale
                     loss = loss + weight * v.value
             losses.append(loss)
             means = _bucket_means(loss_dict)
