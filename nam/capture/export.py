@@ -412,17 +412,26 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     }
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
+    mute_targets = mute_anchor_targets(project)
+    loss = {
+        "val_loss": "esr",
+        "mrstft_weight": 0.0005,
+        # Both anchors together: the held one wins parked-param silence outright, and the
+        # moving one is what keeps a knob turn from clicking.
+        "silence_anchor": {"weight": 1.0, "batch_size": 8, "ny": 512},
+        "silence_anchor_ramp": {"weight": 1.0, "batch_size": 8, "ny": 512},
+    }
+    if mute_targets:
+        loss["mute_anchor"] = {
+            "targets": mute_targets,
+            "corner_targets": _mute_corner_settings(project.knob_specs(), rules=project.plan_rules),
+            "weight": 0.25,
+            **MUTE_ANCHOR_DEFAULTS,
+        }
     return {
         **_calibration_metadata(project),
         "net": {"name": "ConcatWaveNet", "config": config},
-        "loss": {
-            "val_loss": "esr",
-            "mrstft_weight": 0.0005,
-            # Both anchors together: the held one wins parked-param silence outright, and the
-            # moving one is what keeps a knob turn from clicking.
-            "silence_anchor": {"weight": 1.0, "batch_size": 8, "ny": 512},
-            "silence_anchor_ramp": {"weight": 1.0, "batch_size": 8, "ny": 512},
-        },
+        "loss": loss,
         "optimizer": {"lr": 0.003, "weight_decay": 3.17e-07},
         "lr_scheduler": {"class": "ExponentialLR", "kwargs": {"gamma": 0.994}},
     }
