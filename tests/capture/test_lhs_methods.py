@@ -148,3 +148,84 @@ def test_new_samplers_support_categorical_switches(method, planning_mode):
     validation_keys = {tuple(p.params.values()) for p in validation}
     assert len(train_keys) == 24 and len(validation_keys) == 12
     assert train_keys.isdisjoint(validation_keys)
+
+
+@pytest.mark.parametrize("states,requested", [(2, 32), (3, 30), (4, 32)])
+def test_simple_switch_sobol_uses_nonoverlapping_power_of_two_blocks(states, requested):
+    """Simple states partition one long design, without multiplying captures."""
+    from nam.capture.planner import sample_raw_settings, latin_hypercube_unit
+
+    controls = [
+        KnobSpec("Gain", 0, 1, step=0.001),
+        KnobSpec("Tone", 0, 1, step=0.001),
+        SwitchSpec("Mode", tuple(f"S{i}" for i in range(states)),
+                   planning_mode="simple"),
+    ]
+    specs = tuple(control.to_param_spec() for control in controls)
+    samples = np.asarray(sample_raw_settings(
+        specs, requested, seed=17, lhs_method="sobol"
+    ))
+    per_state = (requested + states - 1) // states
+    block = 1 << (per_state - 1).bit_length()
+    source = latin_hypercube_unit(
+        states * block, 2, seed=17, lhs_method="sobol"
+    )
+    assert len(samples) == requested
+    for state in range(states):
+        selected = samples[samples[:, 2] == state, :2]
+        count = requested // states + (state < requested % states)
+        np.testing.assert_array_equal(
+            selected, source[state * block:state * block + count]
+        )
+
+
+def test_many_simple_switch_states_are_balanced_and_cover_pairs():
+    from collections import Counter
+    from nam.capture.planner import sample_raw_settings
+
+    controls = [
+        KnobSpec("Tone", 0, 1, step=0.001),
+        SwitchSpec("Mode", tuple(str(i) for i in range(5)),
+                   planning_mode="simple"),
+        SwitchSpec("Bright", ("A", "B", "C"),
+                   planning_mode="simple"),
+    ]
+    specs = tuple(control.to_param_spec() for control in controls)
+    samples = np.asarray(sample_raw_settings(specs, 45, seed=31, lhs_method="sobol"))
+    assert len(samples) == 45
+    for column in (1, 2):
+        counts = Counter(int(value) for value in samples[:, column])
+        assert len(counts) == specs[column].num_inputs
+        assert max(counts.values()) - min(counts.values()) <= 1
+    assert len({tuple(int(v) for v in row[1:]) for row in samples}) == 15
+    np.testing.assert_array_equal(
+        samples,
+        np.asarray(sample_raw_settings(specs, 45, seed=31, lhs_method="sobol")),
+    )
+
+
+def test_complex_switch_sobol_sets_are_complementary_when_grid_permits():
+    controls = [
+        KnobSpec("Gain", 0, 10, step=0.25, default=5),
+        KnobSpec("Tone", 0, 10, step=0.25, default=5),
+        SwitchSpec("Mode", ("A", "B"), planning_mode="complex"),
+    ]
+    plans = plan_captures(
+        controls, n_train=48, n_validation=16, lhs_method="sobol",
+        seed=29, include_default_as_additional_capture=True,
+    )
+    captures = plans[0] + plans[1]
+    assert len(plans[0]) == 49 and len(plans[1]) == 16
+    assert {entry.params["Mode"] for entry in captures} == {"A", "B"}
+    by_state = {
+        state: {
+            (entry.params["Gain"], entry.params["Tone"])
+            for entry in captures if entry.params["Mode"] == state
+        }
+        for state in ("A", "B")
+    }
+    assert by_state["A"].isdisjoint(by_state["B"])
+    assert plans == plan_captures(
+        controls, n_train=48, n_validation=16, lhs_method="sobol",
+        seed=29, include_default_as_additional_capture=True,
+    )
