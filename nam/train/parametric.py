@@ -648,21 +648,22 @@ class _MuteAnchorConfig:
 
     targets: tuple[_Tuple[str, str], ...]
     corner_targets: tuple[dict[str, _Any], ...] = ()
+    point_targets: tuple[dict[str, _Any], ...] = ()
     weight: float = 0.25
     batch_size: int = _MUTE_ANCHOR_DEFAULTS["batch_size"]
     ny: int = _MUTE_ANCHOR_DEFAULTS["ny"]
     interval: int = _MUTE_ANCHOR_DEFAULTS["interval"]
 
     def __post_init__(self):
-        if not self.targets or any(
+        if not (self.targets or self.corner_targets or self.point_targets) or any(
             not isinstance(name, str) or not name or edge not in ("min", "max")
             for name, edge in self.targets
         ):
             raise ValueError("Mute Anchor requires named min/max control targets")
         if not _isfinite(self.weight) or self.weight <= 0:
             raise ValueError("Mute Anchor weight must be positive and finite")
-        if any(not isinstance(row, dict) or not row for row in self.corner_targets):
-            raise ValueError("Mute Anchor corner targets must be non-empty parameter mappings")
+        if any(not isinstance(row, dict) or not row for row in self.corner_targets + self.point_targets):
+            raise ValueError("Mute Anchor fixed targets must be non-empty parameter mappings")
         _mute_anchor_settings(self.settings())
 
     def settings(self):
@@ -673,8 +674,9 @@ class _MuteAnchorConfig:
         if raw is None:
             return None
         return cls(
-            targets=tuple((item["name"], item["edge"]) for item in raw["targets"]),
+            targets=tuple((item["name"], item["edge"]) for item in raw.get("targets", ())),
             corner_targets=tuple(dict(item) for item in raw.get("corner_targets", ())),
+            point_targets=tuple(dict(item) for item in raw.get("point_targets", ())),
             weight=float(raw.get("weight", 0.25)),
             **_mute_anchor_settings(raw),
         )
@@ -742,7 +744,7 @@ class _ParametricLightningModule(_LightningModule):
             for name, edge in mute.targets:
                 if name not in specs or specs[name].type != "continuous":
                     raise ValueError(f"Mute Anchor requires a continuous control: {name!r}")
-            for row in mute.corner_targets:
+            for row in mute.corner_targets + mute.point_targets:
                 if set(row) != set(specs):
                     raise ValueError("Mute Anchor corner requires every model parameter")
                 for name, value in row.items():
@@ -752,6 +754,7 @@ class _ParametricLightningModule(_LightningModule):
                             raise ValueError(f"Mute Anchor corner has invalid switch state: {name}")
                     elif not _isfinite(value) or not spec.min <= float(value) <= spec.max:
                         raise ValueError(f"Mute Anchor corner has invalid knob value: {name}")
+            for row in mute.corner_targets:
                 if not any(
                     row[name] == (specs[name].min if edge == "min" else specs[name].max)
                     for name, edge in mute.targets
@@ -791,6 +794,9 @@ class _ParametricLightningModule(_LightningModule):
         checkpoint["mute_anchor_corner_targets"] = (
             mute.corner_targets if mute is not None else None
         )
+        checkpoint["mute_anchor_point_targets"] = (
+            mute.point_targets if mute is not None else None
+        )
 
     def on_load_checkpoint(self, checkpoint):
         if checkpoint.get("hypernet_lr_scale", 1.0) != self._hypernet_lr_scale:
@@ -809,6 +815,10 @@ class _ParametricLightningModule(_LightningModule):
         current_corners = mute.corner_targets if mute is not None else ()
         if old_corners not in (current_corners, None if not current_corners else ()): 
             raise ValueError("Checkpoint uses different Mute Anchor corner constraints.")
+        old_points = checkpoint.get("mute_anchor_point_targets", ())
+        current_points = mute.point_targets if mute is not None else ()
+        if old_points not in (current_points, None if not current_points else ()):
+            raise ValueError("Checkpoint uses different Mute Anchor point constraints.")
         super().on_load_checkpoint(checkpoint)
 
     def set_capture_batch_samplers(
@@ -1119,18 +1129,23 @@ class _ParametricLightningModule(_LightningModule):
         loudness = x[:, -ny:].abs().mean(dim=1)
         indices = _torch.topk(loudness, k=count).indices
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
-        corner_count = len(config.corner_targets)
-        # Cover *every* muted corner first, regardless of the nominal 25% ratio.
-        # Afterwards repeat the complete corner cycle in one quarter of anchor
-        # applications, using random other controls in the remaining three quarters.
-        if corner_count and (
-            target_index < corner_count or (target_index - corner_count) % 4 == 0
-        ):
-            corner_index = (
-                target_index if target_index < corner_count
-                else (target_index - corner_count) // 4 % corner_count
+        fixed_targets = config.corner_targets + config.point_targets
+        fixed_count = len(fixed_targets)
+        # Every explicitly mute-marked point and nominal mute corner receives
+        # a silence constraint; the first complete sweep takes precedence over
+        # the usual 25% corner share. If no general endpoint target exists,
+        # ALWAYS choose fixed points (never invent a generalized mute region).
+        use_fixed = bool(fixed_count) and (
+            not config.targets or target_index < fixed_count
+            or (target_index - fixed_count) % 4 == 0
+        )
+        if use_fixed:
+            fixed_index = (
+                target_index % fixed_count
+                if not config.targets or target_index < fixed_count
+                else (target_index - fixed_count) // 4 % fixed_count
             )
-            row = config.corner_targets[corner_index]
+            row = fixed_targets[fixed_index]
             setting = _sample_raw_params(net.param_specs, 1, device=x.device)
             for index, spec in enumerate(net.param_specs):
                 value = row[spec.name]
