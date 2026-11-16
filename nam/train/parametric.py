@@ -914,8 +914,8 @@ class _ParametricLightningModule(_LightningModule):
             )
             reliability = (
                 max(0.0, 1.0 - noise_power / total_power)
-                if snr_weighted and total_power > 0.0 else 1.0
-            )
+                if total_power > 0.0 else (0.0 if noise_power > 0.0 else 1.0)
+            ) if snr_weighted else 1.0
             # Compared with old reliability**2, a linear factor protects
             # low-level captures from being effectively discarded.
             # A 10% MSE floor still lets quiet, imperfect recordings teach
