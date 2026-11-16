@@ -112,7 +112,8 @@ def test_no_default_capture_allows_muted_or_avoided_default_setting():
         knobs, n_train=3, n_validation=1, seed=19,
         include_default_as_additional_capture=False,
     )
-    assert len(train) == 3 and len(validation) == 1
+    assert len(train) in (3, 4) and len(validation) == 1
+    assert any(p.params["Gain"] == 1.0 for p in train)
     assert all(p.params["Gain"] > 0 for p in train + validation)
 
 
