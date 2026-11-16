@@ -1516,6 +1516,8 @@ class WizardWindow(
         for column, width in enumerate((140, 120, 110, 90, 100, 65, 85)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
+        self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.queue_table.customContextMenuRequested.connect(self.show_queue_context_menu)
         layout.addWidget(self.queue_table, 1)
         actions = QHBoxLayout()
         self.resume_button = button("Resume", self.resume_training)
