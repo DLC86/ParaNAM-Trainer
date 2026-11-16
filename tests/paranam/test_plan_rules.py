@@ -370,3 +370,31 @@ def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
     updated, added = classify_capture(project, corner, "avoid")
     assert not added and not updated.muted_settings
     assert updated.avoided_settings == [corner.params]
+
+
+def test_undo_last_mute_mark_restores_original_and_removes_adjacent_captures():
+    from nam.capture.project import classify_capture, undo_last_capture_mark
+
+    knobs = [KnobSpec("Gain I", 0, 10, 1, 5),
+             KnobSpec("Gain II", 0, 10, 1, 5)]
+    project = new_project(knobs, n_train=1, n_validation=0)
+    add_corner_captures(project)
+    original = next(
+        e for e in project.entries
+        if e.is_corner and e.params == {"Gain I": 0.0, "Gain II": 0.0}
+    )
+    classified, added = classify_capture(project, original, "mute")
+    assert classified.capture_mark_history
+    assert len(added) == 2
+    restored = undo_last_capture_mark(classified)
+    assert not restored.muted_settings
+    assert not restored.capture_mark_history
+    assert {(e.y_path, tuple(e.params.items())) for e in restored.entries} == {
+        (e.y_path, tuple(e.params.items())) for e in project.entries
+    }
+    classified.entries[-1].status = "captured"
+    # Marked-generated audio must never be silently discarded by Undo.
+    generated = next(e for e in classified.entries if e.y_path == added[0].y_path)
+    generated.status = "captured"
+    with pytest.raises(ValueError, match="Cannot undo after recording"):
+        undo_last_capture_mark(classified)
