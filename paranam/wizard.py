@@ -860,8 +860,12 @@ class WizardWindow(
         editor.addWidget(self.control_error)
         self.control_error.hide()
         box.addWidget(self.control_editor)
-        rules_card, rules_box = card("Plan rules")
-        rules_box.addWidget(label("Skip settings when all selected controls meet a rule.", "muted"))
+        self.rules_card, rules_box = card("Avoid rules")
+        rules_box.addWidget(label(
+            "Exclude unsafe combinations from the capture plan. Each knob can use "
+            "a different comparison and threshold (for example, Gain > 8 AND Bias > 7).",
+            "muted",
+        ))
         self.plan_rule_list = QListWidget()
         self.plan_rule_list.setAccessibleName("Plan rules")
         self.plan_rule_list.setMaximumHeight(120)
@@ -876,8 +880,8 @@ class WizardWindow(
         rule_buttons.addStretch()
         rules_box.addLayout(rule_buttons)
         self.plan_rule_list.currentRowChanged.connect(self._update_plan_rule_buttons)
-        box.addWidget(rules_card)
         layout.addWidget(self.control_card)
+        layout.addWidget(self.rules_card)
         self.signal_card, box = card("Input signal")
         signal_form = QFormLayout()
         self.signal_mode = QComboBox()
@@ -3153,6 +3157,7 @@ class WizardWindow(
         )
         self.control_card.setVisible(not static)
         self.plan_card.setVisible(not static)
+        self.rules_card.setVisible(not static)
         self.model_format.setText(
             "A2 Full + Lite nested · one standard .nam per named capture"
             if static
