@@ -118,3 +118,49 @@ def test_queue_epoch_change_rejects_live_worker(workspace, tmp_path):
     queue.update(entry["id"], state="running")
     with pytest.raises(ValueError, match="Pause or stop"):
         queue.set_total_epochs(entry["id"], 20)
+
+
+def test_installer_frozen_queue_retains_snr_metadata(workspace, tmp_path):
+    """The installer smoke test must not erase the queue's frozen SNR map."""
+    import copy
+    import importlib.util
+
+    script = Path(__file__).resolve().parents[2] / "packaging" / "validate_bundle.py"
+    loader = importlib.util.spec_from_file_location("paranam_validate_bundle", script)
+    module = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(module)
+
+    small_ready(workspace)
+    workspace.preferences["advanced_parametric"]["snr_weighted_loss_normalization"] = True
+    workspace.save()
+    queue = TrainingQueue(tmp_path / "installer-queue")
+    entry = queue.add(workspace)
+    frozen = read_json(Path(entry["job"]) / "spec.json")
+    assert frozen["learning"]["snr_noise_powers"]
+    assert all(v is None for v in frozen["learning"]["snr_noise_powers"].values())
+
+    original = copy.deepcopy(frozen)
+    original["data"]["train"][0]["y_path"] = "not-the-frozen-audio.wav"
+    original["learning"].pop("snr_noise_powers")
+
+    diagnostic = module._frozen_queue_diagnostic_spec(frozen, original)
+    assert diagnostic["data"]["train"] != original["data"]["train"]
+    assert diagnostic["data"]["train"][0]["y_path"] == frozen["data"]["train"][0]["y_path"]
+    assert diagnostic["data"]["common"]["require_input_pre_silence"] is None
+    assert all(
+        capture["start_seconds"] == 0 and capture["stop_seconds"] is None
+        for split in ("train", "train_evaluation")
+        for capture in diagnostic["data"][split]
+    )
+    assert diagnostic["learning"]["snr_noise_powers"] == frozen["learning"]["snr_noise_powers"]
+    assert "snr_noise_powers" not in original["learning"]
+    # Preserve measured values as well as the explicit unavailable markers.
+    measured = copy.deepcopy(frozen)
+    key = next(iter(measured["learning"]["snr_noise_powers"]))
+    measured["learning"]["snr_noise_powers"][key] = 0.001
+    assert module._frozen_queue_diagnostic_spec(measured, original)[
+        "learning"
+    ]["snr_noise_powers"][key] == 0.001
+    measured["learning"]["snr_noise_powers"].pop(key)
+    with pytest.raises(ValueError, match="no SNR record"):
+        module._frozen_queue_diagnostic_spec(measured, original)
