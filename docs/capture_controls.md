@@ -21,10 +21,27 @@ project data but does not write this format into exported 0.7.3 models.
 
 ## Capture counts
 
-Let K be the number of continuous knobs plus Simple Switch dimensions, and S be
-the number of distinct Complex Switch combinations. The baseline heuristics are
-**16 × K × S** training captures and
-**min(max(8, 4 × K), 24) × S** validation captures.
+**Sobol is the default for newly created projects.** Its recommended *training*
+captures depend on the number of non-Linear-Volume knobs: 2 knobs → 32, 3 → 32,
+4 → 64, 5 → 64, 6 → 64, 7–8 → 96, 9–10 → 128, adding another 32 every two knobs
+thereafter (1 knob → 16). The corresponding validation recommendations are
+8, 12, 16, 16 and 24 for 2–6 knobs, respectively, and 24 for more knobs.
+These are sampled captures, excluding the optional additional default and corners.
+
+Simple Switches do **not** increase this Sobol budget: with 2–4 joint states
+the trainer divides a larger continuous-knob Sobol sequence into equal
+power-of-two blocks, assigning a block to each state. With 5+ joint states it
+uses balanced categorical assignments, favoring pairwise coverage while
+sampling the knobs from one Sobol stream. Complex Switches do multiply both
+budgets by the number of joint Complex states (two states → twice the
+captures). Each state uses a differently scrambled, reproducible Sobol design;
+when enough distinct knob settings exist the designs avoid repeating those
+settings across states. If the grid is too small, a valid plan may need overlap.
+
+Other LHS methods retain their previous recommendation: for K continuous
+knobs plus Simple Switch dimensions and S Complex Switch combinations,
+**16 × K × S** training and **min(max(8, 4 × K), 24) × S** validation.
+Previously saved projects retain their selected sampling method.
 
 The app now calculates the *actual* capture grid from each knob's min/max,
 step, automatically excluded mute endpoints, legacy Avoid min/max flags and any discrete switch positions. It reduces the
@@ -72,14 +89,16 @@ names, types or switch positions, regenerate the plan before adding corners.
 ## Discovering mute and unstable settings during capture
 
 In the **Capture** screen, select a pending or already recorded parametric
-training/validation setting and use **Mark as mute** or **Avoid this setting**.
-These are the only two classifications: *Avoid* includes unstable, dangerous
-or otherwise unwanted combinations. The selected point is removed from the
-active training/validation set and stored in the project; its WAV, if recorded,
-is retained on disk but excluded from training. A discarded sampled
-LHS/Sobol point is replaced with a fresh, distinct setting in the same split.
-Other recorded settings and the original sampled points are not regenerated.
-Complex Switch states remain fixed when replacing a sampled setting.
+training/validation setting and use **Mark as mute** or **Mark as unstable**.
+Both classifications are exact combinations; Unstable includes dangerous or
+otherwise unwanted settings. **The marked row stays in the Capture list** and
+shows **Mute** or **Unstable** in its **Warnings** column. Even if its WAV was
+already recorded, it is excluded from training and validation while marked.
+A rejected sampled LHS/Sobol point receives a replacement setting in the same
+split. Recorded settings are preserved, and Complex Switch states remain
+fixed for replacement points. Selecting the marked row and recording it again
+clears its classification **only after a successful capture**. There is no
+Undo control; legacy Undo-marked projects recover their original rows when opened.
 
 A point marked **Mute** becomes an **exact virtual silence anchor**. The
 training network learns that *complete* setting without a WAV; marking
@@ -93,12 +112,11 @@ each continuous control presently at a range endpoint. If no training
 capture already covers the step along that axis, it adds the corner setting
 with that one control moved to the adjacent step. This creates a small
 boundary set for mute transitions, without blindly filling the entire
-corner grid. A marked *Avoid* Corner is replaced by a fresh sampled
-training point; no adjacent Corner is presumed safe. The conditions and replacements survive saving, reopening
-and plan regeneration. **Undo last mark** restores the most recent annotation
-and any still-unrecorded additions; it refuses to remove audio acquired in
-those additions. Switch-only projects cannot apply this replacement workflow
-because there are no distinct spare states to select.
+corner grid. A marked *Unstable* Corner is replaced by a fresh sampled
+training point; no adjacent Corner is presumed safe. These annotations and
+their replacement points survive saving, reopening and plan regeneration.
+Switch-only projects cannot apply this replacement workflow because there
+are no distinct spare states to select.
 
 ## Project and model files
 
