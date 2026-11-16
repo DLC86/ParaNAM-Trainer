@@ -368,7 +368,9 @@ def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
     add_corner_captures(project)
     corner = next(row for row in project.entries if row.is_corner)
     updated, added = classify_capture(project, corner, "avoid")
-    assert not added and not updated.muted_settings
+    assert len(added) == 1 and not updated.muted_settings
+    assert added[0].split == "train"
+    assert added[0].params != corner.params
     assert updated.avoided_settings == [corner.params]
 
 
