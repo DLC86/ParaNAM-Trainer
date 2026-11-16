@@ -646,6 +646,7 @@ class _MuteAnchorConfig:
     """Training-only audio-in / knob-muted / silence-out constraint."""
 
     targets: tuple[_Tuple[str, str], ...]
+    corner_targets: tuple[dict[str, _Any], ...] = ()
     weight: float = 0.25
     batch_size: int = _MUTE_ANCHOR_DEFAULTS["batch_size"]
     ny: int = _MUTE_ANCHOR_DEFAULTS["ny"]
@@ -659,6 +660,8 @@ class _MuteAnchorConfig:
             raise ValueError("Mute Anchor requires named min/max control targets")
         if not _isfinite(self.weight) or self.weight <= 0:
             raise ValueError("Mute Anchor weight must be positive and finite")
+        if any(not isinstance(row, dict) or not row for row in self.corner_targets):
+            raise ValueError("Mute Anchor corner targets must be non-empty parameter mappings")
         _mute_anchor_settings(self.settings())
 
     def settings(self):
@@ -670,6 +673,7 @@ class _MuteAnchorConfig:
             return None
         return cls(
             targets=tuple((item["name"], item["edge"]) for item in raw["targets"]),
+            corner_targets=tuple(dict(item) for item in raw.get("corner_targets", ())),
             weight=float(raw.get("weight", 0.25)),
             **_mute_anchor_settings(raw),
         )
@@ -737,6 +741,21 @@ class _ParametricLightningModule(_LightningModule):
             for name, edge in mute.targets:
                 if name not in specs or specs[name].type != "continuous":
                     raise ValueError(f"Mute Anchor requires a continuous control: {name!r}")
+            for row in mute.corner_targets:
+                if set(row) != set(specs):
+                    raise ValueError("Mute Anchor corner requires every model parameter")
+                for name, value in row.items():
+                    spec = specs[name]
+                    if spec.type == "switch":
+                        if value not in spec.enum_names:
+                            raise ValueError(f"Mute Anchor corner has invalid switch state: {name}")
+                    elif not _isfinite(value) or not spec.min <= float(value) <= spec.max:
+                        raise ValueError(f"Mute Anchor corner has invalid knob value: {name}")
+                if not any(
+                    row[name] == (specs[name].min if edge == "min" else specs[name].max)
+                    for name, edge in mute.targets
+                ):
+                    raise ValueError("Mute Anchor corner is not muted by any configured endpoint")
         self._mel_mrstft = None
         # Fail here rather than on the first training step: a net that conditions on the
         # control vector as a whole has no meaning to give a control that moves within
@@ -768,6 +787,9 @@ class _ParametricLightningModule(_LightningModule):
         checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
         mute = self._loss_config.mute_anchor
         checkpoint["mute_anchor_settings"] = mute.settings() if mute is not None else None
+        checkpoint["mute_anchor_corner_targets"] = (
+            mute.corner_targets if mute is not None else None
+        )
 
     def on_load_checkpoint(self, checkpoint):
         if checkpoint.get("hypernet_lr_scale", 1.0) != self._hypernet_lr_scale:
@@ -782,6 +804,10 @@ class _ParametricLightningModule(_LightningModule):
         legacy = {**settings, "interval": 1} if settings is not None else None
         if checkpoint.get("mute_anchor_settings", legacy) != settings:
             raise ValueError("Checkpoint uses different Mute Anchor settings.")
+        old_corners = checkpoint.get("mute_anchor_corner_targets", ())
+        current_corners = mute.corner_targets if mute is not None else ()
+        if old_corners not in (current_corners, None if not current_corners else ()): 
+            raise ValueError("Checkpoint uses different Mute Anchor corner constraints.")
         super().on_load_checkpoint(checkpoint)
 
     def set_capture_batch_samplers(
@@ -1092,11 +1118,30 @@ class _ParametricLightningModule(_LightningModule):
         loudness = x[:, -ny:].abs().mean(dim=1)
         indices = _torch.topk(loudness, k=count).indices
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
-        name, edge = config.targets[target_index % len(config.targets)]
-        setting = _sample_raw_params(net.param_specs, 1, device=x.device)
-        index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
-        spec = net.param_specs[index]
-        setting[0, index] = spec.min if edge == "min" else spec.max
+        corner_count = len(config.corner_targets)
+        # Cover *every* muted corner first, regardless of the nominal 25% ratio.
+        # Afterwards repeat the complete corner cycle in one quarter of anchor
+        # applications, using random other controls in the remaining three quarters.
+        if corner_count and (
+            target_index < corner_count or (target_index - corner_count) % 4 == 0
+        ):
+            corner_index = (
+                target_index if target_index < corner_count
+                else (target_index - corner_count) // 4 % corner_count
+            )
+            row = config.corner_targets[corner_index]
+            setting = _sample_raw_params(net.param_specs, 1, device=x.device)
+            for index, spec in enumerate(net.param_specs):
+                value = row[spec.name]
+                if spec.type == "switch":
+                    value = spec.enum_names.index(value)
+                setting[0, index] = float(value)
+        else:
+            name, edge = config.targets[target_index % len(config.targets)]
+            setting = _sample_raw_params(net.param_specs, 1, device=x.device)
+            index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
+            spec = net.param_specs[index]
+            setting[0, index] = spec.min if edge == "min" else spec.max
         setting = setting.expand(count, -1)
         if isinstance(net, _HyperA2):
             outputs = net.forward_sizes(audio, setting, pad_start=False)
