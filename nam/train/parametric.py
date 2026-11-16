@@ -649,13 +649,14 @@ class _MuteAnchorConfig:
     targets: tuple[_Tuple[str, str], ...]
     corner_targets: tuple[dict[str, _Any], ...] = ()
     point_targets: tuple[dict[str, _Any], ...] = ()
+    rule_targets: tuple[dict[str, _Any], ...] = ()
     weight: float = 0.25
     batch_size: int = _MUTE_ANCHOR_DEFAULTS["batch_size"]
     ny: int = _MUTE_ANCHOR_DEFAULTS["ny"]
     interval: int = _MUTE_ANCHOR_DEFAULTS["interval"]
 
     def __post_init__(self):
-        if not (self.targets or self.corner_targets or self.point_targets) or any(
+        if not (self.targets or self.corner_targets or self.point_targets or self.rule_targets) or any(
             not isinstance(name, str) or not name or edge not in ("min", "max")
             for name, edge in self.targets
         ):
@@ -664,6 +665,10 @@ class _MuteAnchorConfig:
             raise ValueError("Mute Anchor weight must be positive and finite")
         if any(not isinstance(row, dict) or not row for row in self.corner_targets + self.point_targets):
             raise ValueError("Mute Anchor fixed targets must be non-empty parameter mappings")
+        from ..capture.plan_rules import PlanRule
+        for rule in self.rule_targets:
+            if PlanRule.model_validate(rule).kind != "mute":
+                raise ValueError("Mute Anchor rule targets must be Mute rules")
         _mute_anchor_settings(self.settings())
 
     def settings(self):
@@ -677,6 +682,7 @@ class _MuteAnchorConfig:
             targets=tuple((item["name"], item["edge"]) for item in raw.get("targets", ())),
             corner_targets=tuple(dict(item) for item in raw.get("corner_targets", ())),
             point_targets=tuple(dict(item) for item in raw.get("point_targets", ())),
+            rule_targets=tuple(dict(item) for item in raw.get("rule_targets", ())),
             weight=float(raw.get("weight", 0.25)),
             **_mute_anchor_settings(raw),
         )
@@ -744,6 +750,9 @@ class _ParametricLightningModule(_LightningModule):
             for name, edge in mute.targets:
                 if name not in specs or specs[name].type != "continuous":
                     raise ValueError(f"Mute Anchor requires a continuous control: {name!r}")
+            from ..capture.plan_rules import PlanRule, validate_plan_rules
+            for raw_rule in mute.rule_targets:
+                validate_plan_rules(tuple(specs.values()), (PlanRule.model_validate(raw_rule),))
             for row in mute.corner_targets + mute.point_targets:
                 if set(row) != set(specs):
                     raise ValueError("Mute Anchor corner requires every model parameter")
@@ -1131,30 +1140,64 @@ class _ParametricLightningModule(_LightningModule):
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
         fixed_targets = config.corner_targets + config.point_targets
         fixed_count = len(fixed_targets)
-        # Every explicitly mute-marked point and nominal mute corner receives
-        # a silence constraint; the first complete sweep takes precedence over
-        # the usual 25% corner share. If no general endpoint target exists,
-        # ALWAYS choose fixed points (never invent a generalized mute region).
-        use_fixed = bool(fixed_count) and (
-            not config.targets or target_index < fixed_count
-            or (target_index - fixed_count) % 4 == 0
+        special_count = fixed_count + len(config.rule_targets)
+        # Sweep every fixed mute point and every conditional mute region before
+        # alternating with general single-knob endpoint anchors.
+        use_special = bool(special_count) and (
+            not config.targets or target_index < special_count
+            or (target_index - special_count) % 4 == 0
         )
-        if use_fixed:
-            fixed_index = (
-                target_index % fixed_count
-                if not config.targets or target_index < fixed_count
-                else (target_index - fixed_count) // 4 % fixed_count
+        setting = _sample_raw_params(net.param_specs, 1, device=x.device)
+        if use_special:
+            special_index = (
+                target_index % special_count
+                if not config.targets or target_index < special_count
+                else (target_index - special_count) // 4 % special_count
             )
-            row = fixed_targets[fixed_index]
-            setting = _sample_raw_params(net.param_specs, 1, device=x.device)
-            for index, spec in enumerate(net.param_specs):
-                value = row[spec.name]
-                if spec.type == "switch":
-                    value = spec.enum_names.index(value)
-                setting[0, index] = float(value)
+            if special_index < fixed_count:
+                row = fixed_targets[special_index]
+                for index, spec in enumerate(net.param_specs):
+                    value = row[spec.name]
+                    if spec.type == "switch":
+                        value = spec.enum_names.index(value)
+                    setting[0, index] = float(value)
+            else:
+                from ..capture.plan_rules import PlanRule
+                rule = PlanRule.model_validate(
+                    config.rule_targets[special_index - fixed_count]
+                )
+                for index, spec in enumerate(net.param_specs):
+                    if spec.name not in rule.controls:
+                        continue  # Unconstrained controls stay randomized.
+                    op, threshold = rule.condition_for(spec.name)
+                    if spec.type == "switch":
+                        setting[0, index] = spec.enum_names.index(threshold)
+                    elif op == "=":
+                        setting[0, index] = float(threshold)
+                    else:
+                        # Draw from the exact interval covered by the Mute
+                        # condition. Use nextafter in the tensor dtype to keep
+                        # strict comparisons strict even on float32 tensors.
+                        boundary = _torch.tensor(
+                            float(threshold), dtype=setting.dtype, device=x.device
+                        )
+                        direction = _torch.full_like(
+                            boundary, float("-inf") if op == "<" else float("inf")
+                        )
+                        bound = _torch.nextafter(boundary, direction)
+                        low = _torch.tensor(float(spec.min), dtype=setting.dtype, device=x.device)
+                        high = _torch.tensor(float(spec.max), dtype=setting.dtype, device=x.device)
+                        if op == "<":
+                            high = _torch.minimum(high, bound)
+                        else:
+                            low = _torch.maximum(low, bound)
+                        if bool((low > high).item()):
+                            raise ValueError(
+                                f"Mute rule has no valid neural values for {spec.name}"
+                            )
+                        setting[0, index] = low + (high - low) * _torch.rand_like(low)
         else:
             name, edge = config.targets[target_index % len(config.targets)]
-            setting = _sample_raw_params(net.param_specs, 1, device=x.device)
             index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
             spec = net.param_specs[index]
             setting[0, index] = spec.min if edge == "min" else spec.max
