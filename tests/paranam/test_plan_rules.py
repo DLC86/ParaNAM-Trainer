@@ -256,3 +256,117 @@ def test_sobol_reserves_only_missing_mute_transition_without_changing_sampled_po
     assert any(row.params["Gain"] == 1.0 for row in train)
     assert len({tuple(row.params.values()) for row in train + val}) == len(train) + len(val)
     assert all(row.params["Gain"] != 0.0 for row in train + val)
+
+
+def test_marked_mute_corner_gets_exact_virtual_target_and_adjacent_steps():
+    """Two bridged gains are silent only *together*, never as separate mute knobs."""
+    from nam.capture.export import build_hyper_a2_model_config
+    from nam.capture.project import classify_capture
+
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+        KnobSpec("Tone", 0, 10, 1, 5),
+    ]
+    project = new_project(
+        controls, n_train=1, n_validation=0, lhs_method="sobol"
+    )
+    add_corner_captures(project)
+    corner = next(
+        row for row in project.entries if row.is_corner
+        and row.params == {"Gain I": 0.0, "Gain II": 0.0, "Tone": 0.0}
+    )
+    marked, added = classify_capture(project, corner, "mute")
+    assert not project.muted_settings  # original not mutated on success
+    assert marked.muted_settings == [corner.params]
+    assert len(added) == 3
+    assert {tuple(row.params.values()) for row in added} == {
+        (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
+    }
+    assert all(row.status == "pending" for row in added)
+    model = build_hyper_a2_model_config(marked)
+    anchors = model["loss"]["mute_anchor"]
+    assert anchors["targets"] == []
+    assert anchors["corner_targets"] == []
+    assert anchors["point_targets"] == [corner.params]
+    assert not any(row.params == corner.params for row in marked.entries)
+
+
+def test_mute_corner_does_not_duplicate_an_already_planned_adjacent_step():
+    from nam.capture.project import classify_capture
+
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+    ]
+    project = new_project(controls, n_train=1, n_validation=0)
+    add_corner_captures(project)
+    first = project.entries_for_split("train")[0]
+    first.params = {"Gain I": 1.0, "Gain II": 5.0}
+    corner = next(
+        row for row in project.entries if row.is_corner
+        and row.params == {"Gain I": 0.0, "Gain II": 0.0}
+    )
+    new, adjacent = classify_capture(project, corner, "mute")
+    assert len(adjacent) == 1
+    assert adjacent[0].params == {"Gain I": 0.0, "Gain II": 1.0}
+    assert new.muted_settings == [corner.params]
+
+
+@pytest.mark.parametrize("classification", ["mute", "avoid"])
+def test_dynamic_replacement_preserves_held_out_counts_and_existing_audio(classification):
+    from nam.capture.project import classify_capture, CaptureProject
+
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+    ]
+    project = new_project(
+        controls, n_train=16, n_validation=8, seed=11,
+        lhs_method="sobol", include_default_as_additional_capture=True,
+    )
+    original = project.entries_for_split("train")[0]
+    separate = project.entries_for_split("train")[1]
+    separate.status = "captured"
+    count = len(project.entries)
+    updated, added = classify_capture(project, original, classification)
+    assert len(updated.entries) == count
+    assert len(added) == 1
+    assert updated.entries_for_split("validation") == project.entries_for_split("validation")
+    assert any(e.y_path == separate.y_path and e.status == "captured"
+               for e in updated.entries)
+    assert not any(e.params == original.params for e in updated.entries)
+    assert updated.muted_settings == ([original.params] if classification == "mute" else [])
+    assert updated.avoided_settings == ([original.params] if classification == "avoid" else [])
+    assert CaptureProject.model_validate(
+        updated.model_dump(mode="json")
+    ).model_dump(mode="json") == updated.model_dump(mode="json")
+
+
+def test_classifying_already_captured_entry_keeps_wav_as_unused_recording():
+    from nam.capture.project import classify_capture
+
+    project = new_project(
+        [KnobSpec("Gain", 0, 10, 1, 5),
+         KnobSpec("Tone", 0, 10, 1, 5)],
+        n_train=8, n_validation=2,
+    )
+    captured = project.entries_for_split("train")[0]
+    captured.status = "captured"
+    updated, _ = classify_capture(project, captured, "avoid")
+    assert captured.y_path in updated.unused_recordings
+    assert updated.unused_recordings[captured.y_path]["context"] is None
+    assert not any(row.y_path == captured.y_path for row in updated.entries)
+
+
+def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
+    from nam.capture.project import classify_capture
+
+    controls = [KnobSpec("Gain", 0, 10, 1, 5),
+                KnobSpec("Tone", 0, 10, 1, 5)]
+    project = new_project(controls, n_train=1, n_validation=0)
+    add_corner_captures(project)
+    corner = next(row for row in project.entries if row.is_corner)
+    updated, added = classify_capture(project, corner, "avoid")
+    assert not added and not updated.muted_settings
+    assert updated.avoided_settings == [corner.params]
