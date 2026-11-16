@@ -117,16 +117,16 @@ def test_switch_only_retains_separate_audio_validation_policy():
 
 def test_sobol_recommendations_follow_smaller_dimension_budgets():
     expected = {
-        1: (16, 8),
+        1: (16, 4),
         2: (32, 8),
-        3: (32, 12),
+        3: (32, 8),
         4: (64, 16),
         5: (64, 16),
-        6: (64, 24),
+        6: (64, 16),
         7: (96, 24),
         8: (96, 24),
-        9: (128, 24),
-        10: (128, 24),
+        9: (128, 32),
+        10: (128, 32),
     }
     for count, (train, validation) in expected.items():
         controls = [KnobSpec(f"K{i}", 0, 10, step=0.1) for i in range(count)]
@@ -153,3 +153,49 @@ def test_simple_switch_never_increases_sobol_budget_but_complex_replicates_it():
         SwitchSpec("Channel", ("A", "B"), planning_mode="complex")
     ]
     assert capture_recommendations(complex_, lhs_method="sobol") == (64, 16, 2)
+
+
+def test_validation_quarter_rounding_for_every_sampler():
+    from nam.capture.params import validation_for_training
+
+    assert [(n, validation_for_training(n)) for n in
+            (0, 1, 2, 3, 4, 31, 32, 33, 34, 35, 36, 64)] == [
+        (0, 0), (1, 0), (2, 1), (3, 1), (4, 1),
+        (31, 8), (32, 8), (33, 8), (34, 9),
+        (35, 9), (36, 9), (64, 16),
+    ]
+
+    controls = [KnobSpec(f"K{i}", 0, 10, step=0.1) for i in range(9)]
+    for method in ("standard", "maximin", "orthogonal",
+                   "near_orthogonal", "sobol", "optimized"):
+        train, validation, combinations = capture_recommendations(
+            controls, lhs_method=method,
+        )
+        assert combinations == 1
+        assert validation == validation_for_training(train)
+
+
+def test_validation_quarter_scales_with_complex_states():
+    controls = [
+        KnobSpec("Gain", 0, 10, step=0.1),
+        KnobSpec("Tone", 0, 10, step=0.1),
+        SwitchSpec("Channel", ("A", "B", "C"), planning_mode="complex"),
+    ]
+    for method in ("standard", "sobol", "optimized"):
+        train, val, states = capture_recommendations(
+            controls, lhs_method=method,
+        )
+        assert states == 3
+        assert train == 96
+        assert val == 24
+
+
+def test_quarter_recommendation_respects_capture_grid_capacity():
+    controls = [KnobSpec("Tone", 0, 1, step=0.5)]
+    for method in ("standard", "sobol", "optimized"):
+        train, val, states = capture_recommendations(
+            controls, lhs_method=method,
+        )
+        assert (train, val, states) == (3, 0, 1)
+        # There is no room for held-out validation once default/corners
+        # are reserved; feasibility takes precedence over 25%.
