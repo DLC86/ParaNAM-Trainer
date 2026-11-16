@@ -805,7 +805,39 @@ def classify_capture(
             params[knob.name] = step
             if acceptable(params):
                 append_point(params, split="train", prefix="mute_edge", corner=False)
+    draft.capture_mark_history[-1]["added_paths"] = [row.y_path for row in added]
     return draft, added
+
+
+def undo_last_capture_mark(project: CaptureProject) -> CaptureProject:
+    """Undo the most recent mute/avoid classification without losing any WAVs."""
+    if not project.capture_mark_history:
+        raise ValueError("No classified capture is available to undo")
+    draft = project.model_copy(deep=True)
+    item = draft.capture_mark_history[-1]
+    inserted = set(item.get("added_paths", ()))
+    to_remove = [entry for entry in draft.entries if entry.y_path in inserted]
+    if len(to_remove) != len(inserted):
+        raise ValueError("Cannot undo: the additional captures have changed")
+    if any(entry.status == "captured" for entry in to_remove):
+        raise ValueError(
+            "Cannot undo after recording an added capture; the recording is preserved."
+        )
+    for entry in to_remove:
+        draft.entries.remove(entry)
+    old = CaptureEntryModel.model_validate(item["entry"])
+    if any(entry.params == old.params for entry in draft.entries):
+        raise ValueError("Cannot restore a setting already occupied in the plan")
+    attr = "muted_settings" if item["classification"] == "mute" else "avoided_settings"
+    marked = getattr(draft, attr)
+    if old.params not in marked:
+        raise ValueError("The classification to undo has changed")
+    marked.remove(old.params)
+    draft.entries.insert(min(item["position"], len(draft.entries)), old)
+    if old.status == "captured":
+        draft.unused_recordings.pop(old.y_path, None)
+    draft.capture_mark_history.pop()
+    return draft
 
 
 def save_project(project: CaptureProject, project_dir: _Path) -> _Path:
