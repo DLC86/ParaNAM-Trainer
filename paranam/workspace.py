@@ -969,6 +969,7 @@ class Workspace:
         """Reject checkpoints when captures, controls, calibration or training choices change."""
         from nam.capture.export import (
             build_data_config, mute_anchor_targets, mute_anchor_point_targets,
+            mute_anchor_rule_targets,
         )
 
         data = {
@@ -1034,6 +1035,7 @@ class Workspace:
                 and bool(
                     mute_anchor_targets(self.project)
                     or mute_anchor_point_targets(self.project)
+                    or mute_anchor_rule_targets(self.project)
                 )
             )
             for key, default in MUTE_ANCHOR_OPTIONS.items():
