@@ -5,7 +5,7 @@ import time
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QColor
-from PySide6.QtWidgets import QTableWidgetItem
+from PySide6.QtWidgets import QTableWidgetItem, QInputDialog, QMenu
 
 from . import training
 from .training_queue import ACTIVE, FINISHED
@@ -106,6 +106,55 @@ class QueueActions:
             self.navigate(3)
         except Exception as error:
             self.notify_error(error)
+
+    def show_queue_context_menu(self, point):
+        table = self.queue_table
+        item = table.itemAt(point)
+        if item is None:
+            return
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+        entry = self.queue_controller.store.get(entry_id)
+        if entry is None:
+            return
+        table.selectRow(item.row())
+        menu = QMenu(table)
+        change = menu.addAction("Change total epochs…")
+        change.setEnabled(entry["state"] not in {
+            "starting", "running", "scoring", "pausing", "stopping"
+        })
+        selected = menu.exec(table.viewport().mapToGlobal(point))
+        if selected == change:
+            self.change_queue_total_epochs(entry_id)
+
+    def change_queue_total_epochs(self, identifier):
+        entry = self.queue_controller.store.get(identifier)
+        if not entry:
+            return
+        job = Path(entry["job"])
+        spec = read_json(job / "spec.json", {})
+        progress = read_json(job / "progress.json", {})
+        if not spec:
+            self.notify_error("Training specifications are unavailable.")
+            return
+        current = int(spec["preferences"]["epochs"])
+        completed = int(progress.get("completed_epoch") or 0)
+        for member in range(int(spec["members"])):
+            done = read_json(job / f"resume-{member}.json", {})
+            completed = max(completed, int(done.get("completed_epoch") or 0))
+        if entry["state"] == "completed":
+            completed = max(completed, current)
+        value, accepted = QInputDialog.getInt(
+            self, "Change total epochs",
+            f"Total epochs (at least {max(1, completed)} already completed):",
+            current, max(1, completed), 1000000, 1,
+        )
+        if accepted:
+            try:
+                self.queue_controller.store.set_total_epochs(identifier, value)
+                self._queue_json_cache.clear()
+                self.refresh_training()
+            except Exception as error:
+                self.notify_error(error)
 
     def select_queue_job(self):
         item = self.queue_table.item(self.queue_table.currentRow(), 0)
