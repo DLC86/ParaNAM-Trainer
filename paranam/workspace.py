@@ -717,6 +717,30 @@ class Workspace:
         replacement.include_initial_corners = prefs["corners"]
         if prefs["corners"]:
             add_corner_captures(replacement)
+        # User-discovered mute/avoid points survive Plan edits. Do not restore
+        # them as WAV captures if the fresh sampling happens to hit the same
+        # combination; replace those pending sampled points instead.
+        from nam.capture.project import classify_capture
+        old_muted = [dict(p) for p in self.project.muted_settings]
+        old_avoided = [dict(p) for p in self.project.avoided_settings]
+        def key(p):
+            return tuple(sorted(p.items()))
+        marked = {
+            **{key(p): "mute" for p in old_muted},
+            **{key(p): "avoid" for p in old_avoided},
+        }
+        for entry in list(replacement.entries):
+            kind = marked.get(key(entry.params))
+            if kind is not None:
+                replacement, _ = classify_capture(replacement, entry, kind)
+        present_muted = {key(p) for p in replacement.muted_settings}
+        present_avoided = {key(p) for p in replacement.avoided_settings}
+        replacement.muted_settings.extend(
+            p for p in old_muted if key(p) not in present_muted
+        )
+        replacement.avoided_settings.extend(
+            p for p in old_avoided if key(p) not in present_avoided
+        )
         from nam.capture.output_gain import initialize_calibration
 
         initialize_calibration(replacement)
