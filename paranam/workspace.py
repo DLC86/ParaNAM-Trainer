@@ -41,7 +41,7 @@ DEFAULTS = {
     "corners": True,
     "include_default_as_additional_capture": True,
     "seed": 0,
-    "lhs_method": "standard",
+    "lhs_method": "sobol",
     "validation_method": "independent",
     "input_mode": "trunc",
     "custom_input": "",
@@ -229,6 +229,7 @@ class Workspace:
             knobs=[KnobModel.from_knob_spec(c) for c in controls],
             audio=audio or AudioSettingsModel(),
             sample_rate=48000,
+            lhs_method="sobol",
         )
         project.train_window.ny = project.validation_window.ny = 8192
         from .signals import install_signals
