@@ -283,3 +283,24 @@ def test_capture_rows_record_the_displayed_setting_after_route_reordering(
     window.record()
     assert recorded == [original[1]]
     assert workspace.project.entries == original
+
+
+def test_capture_view_marks_mute_and_avoid_dynamically(window, workspace):
+    window._attach(workspace)
+    window.refresh_captures()
+    assert window.mark_mute_button.isVisible() == window.scene.isVisible()
+    assert window.mark_avoid_button.isEnabled()
+    first = window._capture_entries[window.capture_table.currentRow()]
+    window.classify_selected_capture("mute")
+    project = workspace.project
+    assert first.params in project.muted_settings
+    assert not any(row.params == first.params for row in project.entries)
+    assert "mute" in window.capture_summary.text().lower()
+    second = window._capture_entries[window.capture_table.currentRow()]
+    window.classify_selected_capture("avoid")
+    assert second.params in project.avoided_settings or second.params in workspace.project.avoided_settings
+    assert not any(row.params == second.params for row in workspace.project.entries)
+    from paranam.workspace import Workspace
+    reopened = Workspace(workspace.directory)
+    assert first.params in reopened.project.muted_settings
+    assert second.params in reopened.project.avoided_settings
