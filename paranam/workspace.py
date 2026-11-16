@@ -37,7 +37,7 @@ DEFAULTS = {
     "additions": 8,
     "ensemble_members": 2,
     "n_train": 32,
-    "n_validation": 12,
+    "n_validation": 8,
     "corners": True,
     "include_default_as_additional_capture": True,
     "seed": 0,
