@@ -546,7 +546,7 @@ def plan_unique_splits(
             f"knob grid yields only {capacity} distinct settings. Reduce the capture "
             "counts, widen a knob's range, or use a finer step."
         )
-    if n_validation > capacity - len(reserved):
+    if n_validation > capacity - len(reserved - outside):
         raise ValueError(
             f"Cannot hold out {n_validation} validation settings: of the {capacity} distinct "
             f"settings on the knob grid, {len(reserved)} are reserved for the corner "
