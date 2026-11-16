@@ -317,6 +317,43 @@ def test_mute_transition_extra_honors_avoided_defaults():
         pytest.fail("Expected a Sobol seed without the first unmuted Gain step")
 
 
+def test_exact_discovered_mute_points_work_without_global_mute_endpoint(monkeypatch):
+    from nam.train.parametric import _MuteAnchorConfig
+
+    net_config = config()
+    net_config["params"].append({
+        "name": "Gain II", "type": "continuous",
+        "min": 0, "max": 10, "default": 5,
+    })
+    model = factory.init("HyperA2", args=(net_config,))
+    anchor = _MuteAnchorConfig(
+        targets=(),
+        point_targets=({"Gain": 0.0, "Gain II": 0.0},),
+        batch_size=1, ny=32,
+    )
+    module = _ParametricLightningModule(
+        model, loss_config=_ParametricLossConfig(mute_anchor=anchor)
+    )
+    input_audio = torch.ones((1, model.receptive_field + 63))
+    params = torch.tensor([[5.0, 5.0]])
+    target = torch.zeros((1, 64))
+    found = []
+    forward = model.forward_sizes
+
+    def intercept(audio, setting, **kwargs):
+        found.append(setting.tolist()[0])
+        return forward(audio, setting, **kwargs)
+
+    monkeypatch.setattr(model, "forward_sizes", intercept)
+    for target_index in (0, 1, 5):
+        anchor_losses = module._mute_anchor_losses(
+            (input_audio, params, target), anchor, target_index
+        )
+        assert torch.isfinite(anchor_losses).all()
+    assert found == [[0.0, 0.0]] * 3
+    assert anchor.settings() == {"interval": 1, "batch_size": 1, "ny": 32}
+
+
 def test_virtual_mute_corners_exclude_the_clean_volume_output_extension():
     from nam.capture.export import build_hyper_a2_model_config
     from nam.capture.params import KnobSpec
