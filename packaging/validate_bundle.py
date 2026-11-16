@@ -63,9 +63,61 @@ def validate_playback(executable, model):
     )
 
 
+def _frozen_queue_diagnostic_spec(frozen_spec, original_spec):
+    """Use the real frozen queue snapshot with a short, verified test recipe.
+
+    Queue snapshots rename and freeze their WAVs. Replacing their data or
+    learning dictionaries wholesale discards the frozen SNR noise map and
+    makes the bundle test fail even though normal training works.
+    """
+    import copy
+
+    data = copy.deepcopy(frozen_spec["data"])
+    data["common"]["require_input_pre_silence"] = None
+    # The synthetic installer WAVs are only one second long; normal jobs
+    # reserve up to ten seconds at the start and nine at the end.
+    for split in ("train", "train_evaluation"):
+        for capture in data.get(split, ()):
+            capture.update(start_seconds=0, stop_seconds=None)
+
+    learning = copy.deepcopy(original_spec["learning"])
+    if learning.get("snr_weighted_loss_normalization"):
+        frozen_noise = copy.deepcopy(
+            frozen_spec["learning"].get("snr_noise_powers")
+        )
+        if not isinstance(frozen_noise, dict):
+            raise ValueError("Frozen queue self-test is missing SNR noise metadata")
+        missing = {
+            Path(capture["y_path"]).as_posix()
+            for capture in data["train"]
+        } - set(frozen_noise)
+        if missing:
+            raise ValueError(
+                f"Frozen queue self-test has no SNR record for: {sorted(missing)}"
+            )
+        # A None value is intentional for legacy/imported recordings without
+        # a raw pre-blip. Preserve it; never invent a measured zero.
+        learning["snr_noise_powers"] = frozen_noise
+    learning["trainer_fit_kwargs"] = {}
+
+    return {
+        **frozen_spec,
+        "data": data,
+        "model": copy.deepcopy(original_spec["model"]),
+        "learning": learning,
+    }
+
+
+def _print_worker_log(job):
+    """Keep the actual failure visible on Windows' cp1252 CI consoles."""
+    log = (Path(job) / "worker.log").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    print(log.encode("ascii", errors="backslashreplace").decode("ascii"), flush=True)
+
+
 def validate_queue(executable, workspace, original_spec, build_directory):
     """Exercise the frozen scheduler launching its own frozen training subprocess."""
-    import copy
     from paranam.training_queue import TrainingQueue
     from paranam.workspace import read_json
     from nam.capture.project import atomic_write_json
@@ -75,27 +127,9 @@ def validate_queue(executable, workspace, original_spec, build_directory):
     )
     entry = queue.add(workspace)
     job = Path(entry["job"])
-    spec = read_json(job / "spec.json")
-    data = copy.deepcopy(original_spec["data"])
-
-    def diagnostic_paths(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in ("x_path", "y_path"):
-                    value[key] = str((workspace.directory / item).resolve())
-                else:
-                    diagnostic_paths(item)
-        elif isinstance(value, list):
-            for item in value:
-                diagnostic_paths(item)
-
-    diagnostic_paths(data)
-    spec.update(
-        data=data,
-        model=copy.deepcopy(original_spec["model"]),
-        learning=copy.deepcopy(original_spec["learning"]),
+    spec = _frozen_queue_diagnostic_spec(
+        read_json(job / "spec.json"), original_spec
     )
-    spec["learning"]["trainer_fit_kwargs"] = {}
     atomic_write_json(job / "spec.json", spec)
     report = queue.directory / "frozen-queue.json"
     result = subprocess.run(
@@ -105,7 +139,7 @@ def validate_queue(executable, workspace, original_spec, build_directory):
     )
     information = json.loads(report.read_text(encoding="utf-8"))
     if result.returncode or not information["ok"]:
-        print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        _print_worker_log(job)
         raise RuntimeError(f"Frozen queue failed: {information}")
     assert all(Path(path).is_file() for path in information["exports"])
     print(
@@ -194,7 +228,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     )
     progress = job_progress(job)
     if paused.returncode != 0 or progress.get("status") != "paused":
-        print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        _print_worker_log(job)
         raise RuntimeError(f"Frozen training worker could not pause: {progress}")
     assert (job / "resume-0.ckpt").is_file()
     assert (
@@ -220,7 +254,7 @@ def validate_training(executable, build_directory, gpu_runtime=False, device="cp
     )
     progress = job_progress(job)
     if result.returncode != 0 or progress.get("status") != "completed":
-        print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        _print_worker_log(job)
         raise RuntimeError(f"Frozen training worker failed: {progress}")
     assert list(
         job.glob("progress.json.corrupt-*")
@@ -324,7 +358,7 @@ def validate_static(executable, build_directory):
         )
         progress = job_progress(job)
         if result.returncode or progress.get("status") != expected:
-            print((job / "worker.log").read_text(encoding="utf-8", errors="replace"))
+            _print_worker_log(job)
             raise RuntimeError(f"Frozen static batch failed: {progress}")
         if expected == "paused":
             assert progress["completed_epoch"] == 0
