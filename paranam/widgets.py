@@ -242,6 +242,7 @@ class ControlScene(QWidget):
         super().__init__()
         self.controls, self.values = [], {}
         self.blink_names = set()
+        self.blink_previous = {}
         self.blink_started = 0.0
         self.blink_timer = QTimer(self)
         self.blink_timer.setInterval(40)
@@ -255,11 +256,13 @@ class ControlScene(QWidget):
         self._height()
         self.update()
 
-    def start_blink(self, names):
+    def start_blink(self, names, previous_values=None):
         names = set(names)
-        if names == self.blink_names:
+        previous_values = dict(previous_values or {})
+        if names == self.blink_names and previous_values == self.blink_previous:
             return
         self.blink_names = names
+        self.blink_previous = previous_values
         self.blink_started = time.monotonic()
         if self.blink_names:
             self.blink_timer.start()
@@ -269,6 +272,7 @@ class ControlScene(QWidget):
 
     def stop_blink(self):
         self.blink_names.clear()
+        self.blink_previous.clear()
         self.blink_timer.stop()
         self.update()
 
@@ -397,10 +401,31 @@ class ControlScene(QWidget):
                 )
                 painter.drawPath(path)
                 origin = -control.min / (control.max - control.min) if control.min <= 0 <= control.max else 0
+                ring = QRectF(center.x() - 39, center.y() - 39, 78, 78)
                 if fraction != origin:
                     painter.setPen(QPen(QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-                    ring = QRectF(center.x() - 39, center.y() - 39, 78, 78)
                     painter.drawArc(ring, round((90 - KNOB_START_DEGREES - origin * KNOB_SWEEP_DEGREES) * 16), round((origin - fraction) * KNOB_SWEEP_DEGREES * 16))
+                # Capture-only overlay. Pulse white over the existing red arc,
+                # fully transparent at the dimmest frame so only red remains.
+                if control.name in self.blink_names and control.name in self.blink_previous:
+                    previous = self.blink_previous[control.name]
+                    if isinstance(previous, (float, int)):
+                        previous_fraction = min(
+                            1, max(0, (float(previous) - control.min) / (control.max - control.min))
+                        )
+                        if previous_fraction != fraction:
+                            pulse = (1 - math.cos(
+                                (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
+                            )) / 2
+                            white = QColor(255, 255, 255, round(255 * pulse))
+                            painter.setPen(QPen(
+                                white, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
+                            ))
+                            painter.drawArc(
+                                ring,
+                                round((90 - KNOB_START_DEGREES - previous_fraction * KNOB_SWEEP_DEGREES) * 16),
+                                round((previous_fraction - fraction) * KNOB_SWEEP_DEGREES * 16),
+                            )
                 painter.setFont(QFont("Inter", 8))
                 painter.setPen(QColor(MUTED))
                 for side, limit in ((-1, control.min), (1, control.max)):
