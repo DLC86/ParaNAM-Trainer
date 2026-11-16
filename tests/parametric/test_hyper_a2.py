@@ -289,6 +289,23 @@ def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio(monkeypatch):
     assert not any("mute" in spec.to_dict() for spec in model.param_specs)
 
 
+def test_virtual_mute_corners_exclude_the_clean_volume_output_extension():
+    from nam.capture.export import build_hyper_a2_model_config
+    from nam.capture.params import KnobSpec
+    from nam.capture.project import new_project
+
+    project = new_project(
+        [
+            KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True),
+            KnobSpec("Volume", 0, 10, 1, 10, clean_volume=True),
+        ],
+        n_train=4, n_validation=1, lhs_method="sobol",
+    )
+    model = build_hyper_a2_model_config(project)
+    assert [p["name"] for p in model["net"]["config"]["params"]] == ["Gain"]
+    assert model["loss"]["mute_anchor"]["corner_targets"] == [{"Gain": 0.0}]
+
+
 def test_virtual_muted_corners_override_random_quota_until_all_are_covered(monkeypatch):
     from nam.train.parametric import _MuteAnchorConfig
 
