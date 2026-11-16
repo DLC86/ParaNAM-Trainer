@@ -132,10 +132,11 @@ def test_gui_controls_switch_roundtrip_and_recommendations(monkeypatch, tmp_path
         window._apply_n_validation_recommendation()
         window._refresh_corner_count()
         assert window.n_train_spin.value() == 48
-        assert window.n_validation_spin.value() == 15
-        assert window.n_train_spin.maximum() == 48
-        window.n_train_spin.setValue(49)
-        assert window.n_train_spin.value() == 48
+        # The 25% validation heuristic replaces the old 15/48 ratio.
+        assert window.n_validation_spin.value() == 12
+        assert window.n_train_spin.maximum() == 51
+        window.n_train_spin.setValue(52)
+        assert window.n_train_spin.value() == 51
         window.n_validation_spin.setValue(9)
         assert window.n_train_spin.maximum() == 54
         window.n_train_spin.setValue(54)
