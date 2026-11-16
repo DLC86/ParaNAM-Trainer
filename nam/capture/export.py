@@ -392,6 +392,22 @@ def _calibration_metadata(project: CaptureProject) -> dict[str, _Any]:
     return {"metadata": metadata} if metadata else {}
 
 
+def mute_anchor_corner_targets(project: CaptureProject) -> list[dict[str, _Any]]:
+    """The virtual silent corners in the network's parameter space.
+
+    Clean Volume is an output-only extension and is deliberately absent from
+    the neural model, though it remains at maximum in physical capture plans.
+    """
+    controls = project.knob_specs()
+    neural_names = {
+        knob.name for knob in controls if not getattr(knob, "clean_volume", False)
+    }
+    return [
+        {name: value for name, value in row.items() if name in neural_names}
+        for row in _mute_corner_settings(controls, rules=project.plan_rules)
+    ]
+
+
 def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     # input_size/condition_size are omitted on purpose: ConcatWaveNet derives them from
     # the param specs.
@@ -424,7 +440,7 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     if mute_targets:
         loss["mute_anchor"] = {
             "targets": mute_targets,
-            "corner_targets": _mute_corner_settings(project.knob_specs(), rules=project.plan_rules),
+            "corner_targets": mute_anchor_corner_targets(project),
             "weight": 0.25,
             **MUTE_ANCHOR_DEFAULTS,
         }
@@ -494,7 +510,7 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
         # Training-only targets: never add player-facing model fields.
         loss["mute_anchor"] = {
             "targets": mute_targets,
-            "corner_targets": _mute_corner_settings(project.knob_specs(), rules=project.plan_rules),
+            "corner_targets": mute_anchor_corner_targets(project),
             "weight": 0.25,
             **MUTE_ANCHOR_DEFAULTS,
         }
