@@ -813,6 +813,82 @@ def _assemble_raw_settings(
     return raw_settings
 
 
+def _balanced_sobol_switch_assignments(specs, n, *, seed):
+    """Balanced one-way margins and greedy pairwise coverage for 5+ states.
+
+    A covering-array-like arrangement avoids enumerating a potentially huge
+    Cartesian product. Every individual Simple Switch position occurs either
+    floor(n/k) or ceil(n/k) times; repeated switch pairs are discouraged.
+    """
+    rng = _np.random.default_rng(seed)
+    categories = _np.empty((n, len(specs)), dtype=_np.int64)
+    for column, spec in enumerate(specs):
+        k = spec.num_inputs
+        quota = _np.full(k, n // k, dtype=_np.int64)
+        quota[rng.permutation(k)[:n % k]] += 1
+        pair_counts = [
+            _np.zeros((prior.num_inputs, k), dtype=_np.int64)
+            for prior in specs[:column]
+        ]
+        for row in range(n):
+            available = _np.flatnonzero(quota)
+            if column == 0:
+                # Keep the first axis stratified rather than in shuffled clumps.
+                choice = int(available[rng.integers(len(available))])
+            else:
+                cost = _np.asarray([
+                    sum(
+                        pair_counts[prior_column][categories[row, prior_column], candidate]
+                        for prior_column in range(column)
+                    )
+                    for candidate in available
+                ])
+                tied = available[cost == cost.min()]
+                choice = int(tied[rng.integers(len(tied))])
+            categories[row, column] = choice
+            quota[choice] -= 1
+            for prior_column in range(column):
+                pair_counts[prior_column][categories[row, prior_column], choice] += 1
+    return categories
+
+
+def _simple_switch_sobol_settings(specs, n, *, seed):
+    """Use one Sobol budget for all Simple Switch states.
+
+    For at most four joint states, split a longer continuous-only Sobol
+    sequence into equal power-of-two blocks. Each state takes the number of
+    points afforded by the original total capture budget, not a new budget.
+    Larger state spaces use pairwise-balanced categories and one Sobol stream.
+    """
+    continuous = tuple(s for s in specs if s.type == "continuous")
+    switches = tuple(s for s in specs if s.type == "switch")
+    states = _math.prod(s.num_inputs for s in switches)
+    if states <= 4:
+        per_state = (n + states - 1) // states
+        block_size = 1 << (per_state - 1).bit_length()
+        total = states * block_size
+        units = latin_hypercube_unit(total, len(continuous), seed=seed,
+                                    lhs_method="sobol")
+        combos = list(_itertools.product(*(range(s.num_inputs) for s in switches)))
+        sampled = []
+        categories = []
+        for index, combo in enumerate(combos):
+            quota = n // states + (index < n % states)
+            sampled.extend(units[index * block_size:index * block_size + quota])
+            categories.extend([combo] * quota)
+        samples = _np.asarray(sampled, dtype=_np.float64).reshape(n, len(continuous))
+        assignments = _np.asarray(categories, dtype=_np.int64).reshape(n, len(switches))
+    else:
+        samples = latin_hypercube_unit(n, len(continuous), seed=seed,
+                                      lhs_method="sobol")
+        assignments = _balanced_sobol_switch_assignments(
+            switches, n, seed=(seed + 104729) % (2**32)
+        )
+    return _assemble_raw_settings(
+        _scale_continuous_samples(samples, continuous), assignments, specs
+    )
+
+
 def sample_raw_settings(
     specs: _Sequence[_ParamSpec],
     n: int,
@@ -827,6 +903,8 @@ def sample_raw_settings(
             raise ValueError(
                 "Simple switches use LHS dimensions, not switch-grid replication"
             )
+        if lhs_method == "sobol":
+            return _simple_switch_sobol_settings(specs, n, seed=seed)
         unit = latin_hypercube_unit(n, len(specs), seed=seed, lhs_method=lhs_method)
         raw = _np.empty_like(unit)
         for i, spec in enumerate(specs):
