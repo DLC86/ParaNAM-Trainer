@@ -1101,9 +1101,20 @@ class WizardWindow(
         )
         classifications.addWidget(self.mark_mute_button)
         classifications.addWidget(self.mark_avoid_button)
+        self.undo_capture_mark_button = button(
+            "Undo last mark", self.undo_last_capture_mark
+        )
+        self.undo_capture_mark_button.setToolTip(
+            "Restore the last mute/avoid classification and its original capture. "
+            "Cannot undo after a replacement has already been recorded."
+        )
+        classifications.addWidget(self.undo_capture_mark_button)
         classifications.addStretch(1)
         layout.addLayout(classifications)
-        self.mark_capture_actions = (self.mark_mute_button, self.mark_avoid_button)
+        self.mark_capture_actions = (
+            self.mark_mute_button, self.mark_avoid_button,
+            self.undo_capture_mark_button,
+        )
         self.capture_table = CaptureTable(0, 6)
         corner = self.capture_table.findChild(QAbstractButton)
         if corner:
@@ -3548,8 +3559,11 @@ class WizardWindow(
                 self.workspace.project.capture_type == "parametric"
                 and entry.split in ("train", "validation") and not self.busy()
             )
-            for action in self.mark_capture_actions:
+            for action in (self.mark_mute_button, self.mark_avoid_button):
                 action.setEnabled(can_classify)
+            self.undo_capture_mark_button.setEnabled(
+                not self.busy() and bool(self.workspace.project.capture_mark_history)
+            )
             if self.workspace.project.capture_type == "static":
                 self._static_edit_id = entry.capture_id
                 self.static_name.setText(entry.capture_name or "")
@@ -3609,6 +3623,24 @@ class WizardWindow(
                 f"{len(added)} replacement / adjacent-step capture(s) added; "
                 "existing recordings were preserved."
             )
+        except Exception as error:
+            self.notify_error(error)
+
+    def undo_last_capture_mark(self):
+        if not self.workspace or self.busy():
+            return
+        try:
+            from nam.capture.project import undo_last_capture_mark
+            updated = undo_last_capture_mark(self.workspace.project)
+            self.workspace.project = updated
+            if self.session is not None:
+                self.session.project = updated
+            self.rig_ready.setChecked(False)
+            self._confirmed_capture = None
+            self.workspace.save()
+            update_data_json(updated, self.workspace.directory)
+            self.refresh_captures()
+            self.capture_status.setText("Last mute/avoid classification restored.")
         except Exception as error:
             self.notify_error(error)
 
