@@ -289,6 +289,47 @@ def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio(monkeypatch):
     assert not any("mute" in spec.to_dict() for spec in model.param_specs)
 
 
+def test_virtual_muted_corners_override_random_quota_until_all_are_covered(monkeypatch):
+    from nam.train.parametric import _MuteAnchorConfig
+
+    model = make_model()
+    corners = ({"Gain": 0.0}, {"Gain": 10.0})
+    anchor = _MuteAnchorConfig(
+        targets=(("Gain", "min"), ("Gain", "max")),
+        corner_targets=corners, batch_size=1, ny=32,
+    )
+    module = _ParametricLightningModule(
+        model, loss_config=_ParametricLossConfig(mute_anchor=anchor)
+    )
+    x = torch.ones(1, model.receptive_field + 63)
+    params = torch.tensor([[5.0]])
+    y = torch.zeros(1, 64)
+    values = []
+    original_forward = model.forward_sizes
+
+    def record(audio, setting, **kwargs):
+        values.append(setting[0, 0].item())
+        return original_forward(audio, setting, **kwargs)
+
+    monkeypatch.setattr(model, "forward_sizes", record)
+    for index in (0, 1, 2, 6):
+        loss = module._mute_anchor_losses((x, params, y), anchor, index)
+        assert torch.isfinite(loss).all()
+    # First visit *every* corner, then repeat one in every four calls.
+    assert values == [0.0, 10.0, 0.0, 10.0]
+
+    with pytest.raises(ValueError, match="not muted"):
+        _ParametricLightningModule(
+            make_model(),
+            loss_config=_ParametricLossConfig(
+                mute_anchor=_MuteAnchorConfig(
+                    targets=(("Gain", "min"),),
+                    corner_targets=({"Gain": 5.0},),
+                )
+            ),
+        )
+
+
 def test_mute_anchor_cadence_and_weight_across_optimizer_steps(tmp_path, monkeypatch):
     from pytorch_lightning import Trainer
     from torch.utils.data import DataLoader, TensorDataset
