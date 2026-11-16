@@ -24,8 +24,8 @@ def requested_settings():
         "hypernetwork_learning_rate": 0.001,
         "hypernetwork_lr_decay": 0.998496613,
         "branch_loss_reduction": "sum",
-        "snr_weighted_loss_normalization": False,
-        "rms_loss_normalization": False,
+        "snr_weighted_loss_normalization": True,
+        "rms_loss_normalization": True,
         "rms_loss_normalization_exponent": 2.0,
         "mute_anchor_interval": 1,
         "mute_anchor_batch_size": 2,
@@ -33,7 +33,7 @@ def requested_settings():
     }
 
 
-def test_hypera2_preset_matches_every_saved_0252_advanced_field():
+def test_hypera2_preset_preserves_historical_fields_except_new_normalization_defaults():
     assert training_preset("HyperA2") == requested_settings()
 
 
