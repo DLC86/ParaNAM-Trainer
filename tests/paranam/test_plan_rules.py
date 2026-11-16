@@ -289,7 +289,10 @@ def test_marked_mute_corner_gets_exact_virtual_target_and_adjacent_steps():
     assert anchors["targets"] == []
     assert anchors["corner_targets"] == []
     assert anchors["point_targets"] == [corner.params]
-    assert not any(row.params == corner.params for row in marked.entries)
+    assert any(row.y_path == corner.y_path for row in marked.entries)
+    assert marked.classification_for_entry(
+        next(row for row in marked.entries if row.y_path == corner.y_path)
+    ) == "mute"
 
 
 def test_mute_corner_does_not_duplicate_an_already_planned_adjacent_step():
@@ -330,12 +333,16 @@ def test_dynamic_replacement_preserves_held_out_counts_and_existing_audio(classi
     separate.status = "captured"
     count = len(project.entries)
     updated, added = classify_capture(project, original, classification)
-    assert len(updated.entries) == count
+    assert len(updated.entries) == count + 1
     assert len(added) == 1
     assert updated.entries_for_split("validation") == project.entries_for_split("validation")
     assert any(e.y_path == separate.y_path and e.status == "captured"
                for e in updated.entries)
-    assert not any(e.params == original.params for e in updated.entries)
+    assert any(e.y_path == original.y_path and e.params == original.params
+               for e in updated.entries)
+    assert updated.classification_for_entry(
+        next(e for e in updated.entries if e.y_path == original.y_path)
+    ) == classification
     assert updated.muted_settings == ([original.params] if classification == "mute" else [])
     assert updated.avoided_settings == ([original.params] if classification == "avoid" else [])
     assert CaptureProject.model_validate(
@@ -356,7 +363,17 @@ def test_classifying_already_captured_entry_keeps_wav_as_unused_recording():
     updated, _ = classify_capture(project, captured, "avoid")
     assert captured.y_path in updated.unused_recordings
     assert updated.unused_recordings[captured.y_path]["context"] is None
-    assert not any(row.y_path == captured.y_path for row in updated.entries)
+    marked = next(row for row in updated.entries if row.y_path == captured.y_path)
+    assert marked.status == "captured"
+    assert updated.classification_for_entry(marked) == "avoid"
+    assert marked not in updated.captured_entries()
+    from nam.capture.export import build_data_config
+    assert not any(
+        sample["y_path"] == captured.y_path
+        for samples in (build_data_config(updated)["train"],
+                        build_data_config(updated)["validation"])
+        for sample in samples
+    )
 
 
 def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
@@ -374,8 +391,9 @@ def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
     assert updated.avoided_settings == [corner.params]
 
 
-def test_undo_last_mute_mark_restores_original_and_removes_adjacent_captures():
-    from nam.capture.project import classify_capture, undo_last_capture_mark
+def test_rerecorded_capture_clears_classification_but_retains_new_samples():
+    from nam.capture.project import classify_capture
+    from nam.capture.export import build_data_config, mute_anchor_point_targets
 
     knobs = [KnobSpec("Gain I", 0, 10, 1, 5),
              KnobSpec("Gain II", 0, 10, 1, 5)]
@@ -386,17 +404,49 @@ def test_undo_last_mute_mark_restores_original_and_removes_adjacent_captures():
         if e.is_corner and e.params == {"Gain I": 0.0, "Gain II": 0.0}
     )
     classified, added = classify_capture(project, original, "mute")
-    assert classified.capture_mark_history
+    assert not classified.capture_mark_history
     assert len(added) == 2
-    restored = undo_last_capture_mark(classified)
-    assert not restored.muted_settings
-    assert not restored.capture_mark_history
-    assert {(e.y_path, tuple(e.params.items())) for e in restored.entries} == {
-        (e.y_path, tuple(e.params.items())) for e in project.entries
-    }
-    classified.entries[-1].status = "captured"
-    # Marked-generated audio must never be silently discarded by Undo.
-    generated = next(e for e in classified.entries if e.y_path == added[0].y_path)
-    generated.status = "captured"
-    with pytest.raises(ValueError, match="Cannot undo after recording"):
-        undo_last_capture_mark(classified)
+    original_row = next(
+        e for e in classified.entries if e.y_path == original.y_path
+    )
+    assert classified.classification_for_entry(original_row) == "mute"
+    assert original_row not in classified.pending_entries()
+    assert mute_anchor_point_targets(classified) == [original.params]
+
+    original_row.status = "captured"
+    assert original_row not in classified.captured_entries()
+    classified.clear_capture_classification(original_row)
+    assert classified.classification_for_entry(original_row) is None
+    assert original_row in classified.captured_entries()
+    assert mute_anchor_point_targets(classified) == []
+    assert any(row.y_path == added[0].y_path for row in classified.entries)
+    assert any(
+        sample["y_path"] == original.y_path
+        for sample in build_data_config(classified)["train"]
+    )
+
+
+def test_legacy_undo_history_recovers_classified_rows_when_opened(tmp_path):
+    from nam.capture.project import classify_capture, save_project, load_project
+
+    project = new_project(
+        [KnobSpec("Gain", 0, 10, 1, 5),
+         KnobSpec("Tone", 0, 10, 1, 5)],
+        n_train=4, n_validation=2,
+    )
+    old = project.entries[0]
+    classified, _ = classify_capture(project, old, "mute")
+    legacy = classified.model_copy(deep=True)
+    row = next(e for e in legacy.entries if e.y_path == old.y_path)
+    position = legacy.entries.index(row)
+    legacy.entries.remove(row)
+    legacy.capture_mark_history.append({
+        "classification": "mute", "entry": old.model_dump(mode="json"),
+        "position": position, "added_paths": [],
+    })
+    save_project(legacy, tmp_path)
+    recovered = load_project(tmp_path)
+    assert recovered.capture_mark_history == []
+    restored = next(e for e in recovered.entries if e.y_path == old.y_path)
+    assert recovered.classification_for_entry(restored) == "mute"
+    assert restored.params in recovered.muted_settings
