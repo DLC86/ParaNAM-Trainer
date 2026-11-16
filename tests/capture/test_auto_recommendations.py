@@ -113,3 +113,43 @@ def test_switch_only_retains_separate_audio_validation_policy():
     ]
     assert capture_grid_limits(controls) == (1, 0, 6)
     assert capture_recommendations(controls) == (6, 0, 6)
+
+
+def test_sobol_recommendations_follow_smaller_dimension_budgets():
+    expected = {
+        1: (16, 8),
+        2: (32, 8),
+        3: (32, 12),
+        4: (64, 16),
+        5: (64, 16),
+        6: (64, 24),
+        7: (96, 24),
+        8: (96, 24),
+        9: (128, 24),
+        10: (128, 24),
+    }
+    for count, (train, validation) in expected.items():
+        controls = [KnobSpec(f"K{i}", 0, 10, step=0.1) for i in range(count)]
+        assert capture_recommendations(
+            controls, lhs_method="sobol"
+        ) == (train, validation, 1)
+        if count >= 3:
+            assert train < count * 16
+
+
+def test_simple_switch_never_increases_sobol_budget_but_complex_replicates_it():
+    knobs = [
+        KnobSpec("Gain", 0, 10, step=0.1),
+        KnobSpec("Tone", 0, 10, step=0.1),
+    ]
+    base = capture_recommendations(knobs, lhs_method="sobol")
+    assert base == (32, 8, 1)
+    simple = knobs + [
+        SwitchSpec("Channel", ("A", "B", "C", "D"),
+                   planning_mode="simple")
+    ]
+    assert capture_recommendations(simple, lhs_method="sobol") == base
+    complex_ = knobs + [
+        SwitchSpec("Channel", ("A", "B"), planning_mode="complex")
+    ]
+    assert capture_recommendations(complex_, lhs_method="sobol") == (64, 16, 2)
