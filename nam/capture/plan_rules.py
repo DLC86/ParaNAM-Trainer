@@ -72,6 +72,19 @@ def validate_plan_rules(specs, rules):
                     raise ValueError(f"Choose a switch position from {name!r}")
             elif isinstance(threshold, str):
                 raise ValueError(f"Choose a numeric threshold for {name!r}")
+            elif rule.kind == "mute":
+                # A Mute rule becomes a virtual training target. A condition
+                # outside the neural parameter range cannot be sampled and
+                # would otherwise fail only after launching training.
+                threshold = float(threshold)
+                if (
+                    (comparator == "=" and not spec.min <= threshold <= spec.max)
+                    or (comparator == "<" and threshold <= spec.min)
+                    or (comparator == ">" and threshold >= spec.max)
+                ):
+                    raise ValueError(
+                        f"Mute rule has no valid setting for {name!r}"
+                    )
 
 
 def allows(rules, params):
