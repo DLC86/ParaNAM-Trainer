@@ -1,3 +1,5 @@
+import pytest
+
 from nam.capture.params import KnobSpec, SwitchSpec
 from paranam.widgets import ControlDialog
 
