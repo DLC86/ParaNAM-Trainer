@@ -69,6 +69,37 @@ order to reduce switching, then sweeps the knobs within each group. Existing
 generated plans keep their stored counts and progress. After changing control
 names, types or switch positions, regenerate the plan before adding corners.
 
+## Discovering mute and unstable settings during capture
+
+In the **Capture** screen, select a pending or already recorded parametric
+training/validation setting and use **Mark as mute** or **Avoid this setting**.
+These are the only two classifications: *Avoid* includes unstable, dangerous
+or otherwise unwanted combinations. The selected point is removed from the
+active training/validation set and stored in the project; its WAV, if recorded,
+is retained on disk but excluded from training. A discarded sampled
+LHS/Sobol point is replaced with a fresh, distinct setting in the same split.
+Other recorded settings and the original sampled points are not regenerated.
+Complex Switch states remain fixed when replacing a sampled setting.
+
+A point marked **Mute** becomes an **exact virtual silence anchor**. The
+training network learns that *complete* setting without a WAV; marking
+Gain I=0 and Gain II=0 does **not** claim that either Gain alone mutes the amp.
+Known mute endpoints defined in Controls continue to generate their broader
+Mute Anchor conditions as before. Virtual points are training-only data; the
+exported model and players require no new fields.
+
+For a muted **Corner**, the planner checks the nearest playable step along
+each continuous control presently at a range endpoint. If no training
+capture already covers the step along that axis, it adds the corner setting
+with that one control moved to the adjacent step. This creates a small
+boundary set for mute transitions, without blindly filling the entire
+corner grid. A marked *Avoid* Corner is simply excluded; no adjacent point
+is presumed safe. The conditions and replacements survive saving, reopening
+and plan regeneration. **Undo last mark** restores the most recent annotation
+and any still-unrecorded additions; it refuses to remove audio acquired in
+those additions. Switch-only projects cannot apply this replacement workflow
+because there are no distinct spare states to select.
+
 ## Project and model files
 
 Existing knob-only projects still load. The project retains its historical `knobs`
