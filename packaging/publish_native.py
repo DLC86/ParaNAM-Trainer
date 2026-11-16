@@ -55,7 +55,23 @@ def main():
             for name in expected
         )
         if keep_draft:
-            print("All native packages verified; release remains in draft.")
+            # After all five *new* artifacts are verified, remove the prior
+            # version's installers from this same migrated draft release.
+            # Never delete them during partial or failed native builds.
+            obsolete = [
+                asset for name, asset in assets.items()
+                if name.startswith("ParaNAM-Trainer-") and name not in expected
+            ]
+            for asset in obsolete:
+                subprocess.run(
+                    ["gh", "api", "--method", "DELETE",
+                     f"repos/{repository}/releases/assets/{asset['id']}"],
+                    check=True,
+                )
+            print(
+                f"All native packages verified; removed {len(obsolete)} old "
+                "installer asset(s); release remains in draft."
+            )
         else:
             assert expected == assets.keys(), "Unexpected release assets"
             subprocess.run(["gh", "release", "edit", tag, "--draft=false"], check=True)
