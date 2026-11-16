@@ -417,15 +417,24 @@ class ControlScene(QWidget):
                             pulse = (1 - math.cos(
                                 (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
                             )) / 2
+                            start_angle = round(
+                                (90 - KNOB_START_DEGREES - previous_fraction * KNOB_SWEEP_DEGREES) * 16
+                            )
+                            span_angle = round(
+                                (previous_fraction - fraction) * KNOB_SWEEP_DEGREES * 16
+                            )
+                            # A backwards knob movement extends outside the current
+                            # red level arc. Draw the transition in red first, so the
+                            # faint phase always reveals red rather than grey.
+                            painter.setPen(QPen(
+                                QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
+                            ))
+                            painter.drawArc(ring, start_angle, span_angle)
                             white = QColor(255, 255, 255, round(255 * pulse))
                             painter.setPen(QPen(
                                 white, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
                             ))
-                            painter.drawArc(
-                                ring,
-                                round((90 - KNOB_START_DEGREES - previous_fraction * KNOB_SWEEP_DEGREES) * 16),
-                                round((previous_fraction - fraction) * KNOB_SWEEP_DEGREES * 16),
-                            )
+                            painter.drawArc(ring, start_angle, span_angle)
                 painter.setFont(QFont("Inter", 8))
                 painter.setPen(QColor(MUTED))
                 for side, limit in ((-1, control.min), (1, control.max)):
