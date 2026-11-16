@@ -513,25 +513,35 @@ def test_snr_uses_manifest_and_explicit_gain_with_trimmed_audio(tmp_path):
     module.set_capture_mse_normalization(dataset, snr_weighted=True)
     # The signal fraction is 1 - (0.0625 / 0.125)^2, independent of the trim.
     assert module._capture_mse_scales == _pytest.approx((0.75 * rms_scale,))
-    # The SNR reliability factor remains active for every exponent, and
-    # exponent=2 preserves the former SNR-weighted normalization exactly.
+    assert module._capture_mrstft_scales == _pytest.approx((0.75 ** 0.5,))
+    # SNR and RMS are independently controlled: reliability is linear
+    # on MSE and square-root on the already relative spectral loss.
     for exponent in (0.01, 1.0, 2.0):
         module.set_capture_mse_normalization(dataset, rms_exponent=exponent)
         base, = module._capture_mse_scales
+        assert module._capture_mrstft_scales == (1.0,)
         module.set_capture_mse_normalization(
             dataset, snr_weighted=True, rms_exponent=exponent
         )
-        assert module._capture_mse_scales == _pytest.approx(
-            (base * 0.75 ** (2.0 - exponent / 2.0),)
-        )
+        assert module._capture_mse_scales == _pytest.approx((base * 0.75,))
+        assert module._capture_mrstft_scales == _pytest.approx((0.75 ** 0.5,))
 
-    # SNR-only uses reliability² with no RMS compensation at any level.
     module.set_capture_mse_normalization(
         dataset, rms_enabled=False, snr_weighted=True,
     )
-    assert module._capture_mse_scales == _pytest.approx((0.75 ** 2,))
+    assert module._capture_mse_scales == _pytest.approx((0.75,))
+    assert module._capture_mrstft_scales == _pytest.approx((0.75 ** 0.5,))
+    # Even highly noisy captures retain at least 10% MSE / 20% STFT
+    # weight instead of disappearing completely.
+    module.set_capture_mse_normalization(
+        dataset, rms_enabled=False, snr_weighted=True,
+        snr_noise_powers={capture_path.as_posix(): 1000.0},
+    )
+    assert module._capture_mse_scales == _pytest.approx((0.1,))
+    assert module._capture_mrstft_scales == _pytest.approx((0.2,))
     module.set_capture_mse_normalization(dataset, rms_enabled=False)
     assert module._capture_mse_scales == (1.0,)
+    assert module._capture_mrstft_scales == (1.0,)
 
     _write_json(manifest, {"captures": [record, record]})
     with _pytest.raises(ValueError, match="exactly one matching capture record"):
