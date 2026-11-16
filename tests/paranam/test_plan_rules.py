@@ -335,6 +335,12 @@ def test_dynamic_replacement_preserves_held_out_counts_and_existing_audio(classi
     updated, added = classify_capture(project, original, classification)
     assert len(updated.entries) == count + int(classification == "avoid")
     assert len(added) == int(classification == "avoid")
+    if classification == "avoid":
+        # Unstable must be excluded, never reintroduced as its own replacement.
+        assert added[0].params != original.params
+        keys = [tuple(sorted(e.params.items())) for e in updated.entries
+                if e.split in ("train", "validation")]
+        assert len(keys) == len(set(keys))
     assert updated.entries_for_split("validation") == project.entries_for_split("validation")
     assert any(e.y_path == separate.y_path and e.status == "captured"
                for e in updated.entries)
@@ -605,3 +611,41 @@ def test_mute_corner_transition_ignores_other_classified_training_points():
         row.params for row in transitions
     ]
     assert marked.muted_settings == [original.params, corner.params]
+
+
+
+def test_conditional_mute_rule_covers_only_jointly_muted_gain_region():
+    from nam.capture.export import (
+        build_hyper_a2_model_config, mute_anchor_rule_targets,
+    )
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+        KnobSpec("Tone", 0, 10, 1, 5),
+    ]
+    rule = PlanRule(
+        controls=("Gain I", "Gain II"), operator="=", value=0,
+        kind="mute",
+    )
+    project = new_project(
+        controls, n_train=12, n_validation=4, seed=9,
+        plan_rules=[rule], lhs_method="sobol",
+    )
+    assert all(not rule.excludes(e.params) for e in project.entries)
+    assert any(e.params["Gain I"] == 0 and e.params["Gain II"] > 0
+               for e in project.entries) or any(
+        e.params["Gain II"] == 0 and e.params["Gain I"] > 0
+        for e in project.entries
+    )
+    assert mute_anchor_rule_targets(project) == [rule.model_dump(mode="json")]
+    loss = build_hyper_a2_model_config(project)["loss"]["mute_anchor"]
+    assert loss["rule_targets"] == [rule.model_dump(mode="json")]
+    assert loss["targets"] == []
+
+
+def test_avoid_rules_remain_backward_compatible_without_explicit_kind():
+    old = {"controls": ["Gain", "Tone"], "operator": "<", "value": 2}
+    rule = PlanRule.model_validate(old)
+    assert rule.kind == "avoid"
+    assert rule.excludes({"Gain": 1, "Tone": 0})
+    assert not rule.excludes({"Gain": 1, "Tone": 9})
