@@ -1144,7 +1144,9 @@ class WizardWindow(
         )
         self.capture_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.capture_table.setItemDelegate(PreserveSelectionTextDelegate(self.capture_table))
-        self.capture_table.setMinimumHeight(270)
+        # Leave enough vertical slack for the table to grow smoothly when the
+        # window is resized, even with the capture classification controls.
+        self.capture_table.setMinimumHeight(260)
         self.capture_table.itemSelectionChanged.connect(self.select_capture)
         layout.addWidget(self.capture_table, 1)
         self.rig_ready.toggled.connect(self.update_enabled)
