@@ -102,7 +102,7 @@ class QueueActions:
             return
         try:
             workspace = self.queue_controller.store.retrain(self.selected_job_id)
-            self._attach(workspace)
+            self._attach(workspace, register_recent=False)
             self.navigate(3)
         except Exception as error:
             self.notify_error(error)
