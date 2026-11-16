@@ -354,6 +354,34 @@ def test_exact_discovered_mute_points_work_without_global_mute_endpoint(monkeypa
     assert anchor.settings() == {"interval": 1, "batch_size": 1, "ny": 32}
 
 
+def test_exact_only_mute_anchor_visits_all_marked_points_without_inference(monkeypatch):
+    from nam.train.parametric import _MuteAnchorConfig
+
+    model = make_model()
+    anchor = _MuteAnchorConfig(
+        targets=(), point_targets=({"Gain": 0.0}, {"Gain": 10.0}),
+        batch_size=1, ny=32,
+    )
+    module = _ParametricLightningModule(
+        model, loss_config=_ParametricLossConfig(mute_anchor=anchor)
+    )
+    x = torch.ones(1, model.receptive_field + 63)
+    p = torch.full((1, 1), 5.0)
+    y = torch.zeros(1, 64)
+    recorded = []
+    forward = model.forward_sizes
+
+    def observe(audio, setting, **kwargs):
+        recorded.append(setting[0, 0].item())
+        return forward(audio, setting, **kwargs)
+
+    monkeypatch.setattr(model, "forward_sizes", observe)
+    for index in (0, 1, 2, 3, 4):
+        loss = module._mute_anchor_losses((x, p, y), anchor, index)
+        assert torch.isfinite(loss).all()
+    assert recorded == [0.0, 10.0, 0.0, 10.0, 0.0]
+
+
 def test_virtual_mute_corners_exclude_the_clean_volume_output_extension():
     from nam.capture.export import build_hyper_a2_model_config
     from nam.capture.params import KnobSpec
