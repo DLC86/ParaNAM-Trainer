@@ -925,10 +925,11 @@ class Workspace:
             lr_decay=0.994,
             ny=self.project.train_window.ny or 8192,
             fit_mrstft=True,
-            # Queue snapshots created before the switch used RMS weighting.
-            rms_loss_normalization="_queue_source_project" in self.preferences,
+            # New training defaults to level-normalized, noise-aware losses.
+            # Existing saved advanced options continue to override this default.
+            rms_loss_normalization=True,
             rms_loss_normalization_exponent=2.0,
-            snr_weighted_loss_normalization=False,
+            snr_weighted_loss_normalization=True,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
             gradient_clipping=(kind == "parametric"),
