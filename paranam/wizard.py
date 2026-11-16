@@ -937,10 +937,10 @@ class WizardWindow(
         self.seed = QSpinBox()
         self.seed.setRange(0, 2**31 - 1)
         self.lhs_method = QComboBox()
-        self.lhs_method.addItem("Standard", "standard")
-        self.lhs_method.addItem("Maximin", "maximin")
-        self.lhs_method.addItem("Orthogonal", "orthogonal")
-        self.lhs_method.addItem("Near-orthogonal", "near_orthogonal")
+        self.lhs_method.addItem("Standard LHS", "standard")
+        self.lhs_method.addItem("Maximin LHS", "maximin")
+        self.lhs_method.addItem("Orthogonal LHS", "orthogonal")
+        self.lhs_method.addItem("Near-orthogonal LHS", "near_orthogonal")
         self.lhs_method.addItem("Sobol", "sobol")
         self.lhs_method.addItem("Optimized LHS", "optimized")
         self.lhs_method.setToolTip(
@@ -2039,7 +2039,7 @@ class WizardWindow(
                 prefs["include_default_as_additional_capture"]
             )
             self.lhs_method.setCurrentIndex(
-                max(0, self.lhs_method.findData(prefs.get("lhs_method", "standard")))
+                max(0, self.lhs_method.findData(prefs.get("lhs_method", "sobol")))
             )
             self.validation_method.setCurrentIndex(
                 max(0, self.validation_method.findData(
@@ -2625,7 +2625,7 @@ class WizardWindow(
             is_switch = isinstance(control, SwitchSpec)
             self.control_kind.setCurrentIndex(int(is_switch))
             self.control_pages.setCurrentIndex(int(is_switch))
-            switch = control if is_switch else SwitchSpec(control.name, ("Position 1", "Position 2"))
+            switch = control if is_switch else SwitchSpec(control.name, ("Position 1", "Position 2"), planning_mode="simple")
             self.switch_mode.setCurrentIndex(self.switch_mode.findData(switch.planning_mode))
             self.switch_positions.clear()
             positions = switch.option_indices or range(len(switch.enum_names))
@@ -2941,7 +2941,8 @@ class WizardWindow(
 
         def recommendations():
             recommendation = capture_recommendations(
-                controls, include_default_as_additional_capture=include_default
+                controls, include_default_as_additional_capture=include_default,
+                lhs_method=self.lhs_method.currentData()
             )
             if rules:
                 combinations, capacity, _ = rule_capture_limits(
