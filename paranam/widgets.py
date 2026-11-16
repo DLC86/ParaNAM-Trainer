@@ -722,9 +722,9 @@ class ControlDialog(QDialog):
             knob_form.addRow(label, field)
         self.switch_mode = QComboBox()
         self.switch_mode.addItem(
-            "Complex Switch — separate plan for every state", "complex"
+            "Simple Switch — share one balanced sampling plan", "simple"
         )
-        self.switch_mode.addItem("Simple Switch — one discrete LHS dimension", "simple")
+        self.switch_mode.addItem("Complex Switch — separate plan for every state", "complex")
         switch_form.addWidget(self.switch_mode)
         row = QHBoxLayout()
         self.count = QSpinBox()
