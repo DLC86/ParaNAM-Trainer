@@ -1382,6 +1382,9 @@ class CaptureSession:
             qa=qa,
             stream_config=self.project.audio.stream_fingerprint(),
         )
+        # Unmark only after a successful capture; a failed attempt retains
+        # its Mute/Unstable warning and never enters the dataset.
+        self.project.clear_capture_classification(entry)
         _save_project(self.project, self.project_dir)
         _update_data_json(self.project, self.project_dir)
         return qa
