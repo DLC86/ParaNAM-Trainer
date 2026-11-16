@@ -285,35 +285,69 @@ def test_capture_rows_record_the_displayed_setting_after_route_reordering(
     assert workspace.project.entries == original
 
 
-def test_capture_view_marks_mute_and_avoid_dynamically(window, workspace):
+def test_capture_view_marks_mute_and_unstable_without_hiding_rows(window, workspace):
     window._attach(workspace)
     window.refresh_captures()
+    assert window.mark_mute_button.text() == "Mark as mute"
+    assert window.mark_avoid_button.text() == "Mark as unstable"
+    assert not hasattr(window, "undo_capture_mark_button")
     assert window.mark_mute_button.isVisible() == window.scene.isVisible()
     assert window.mark_avoid_button.isEnabled()
     first = window._capture_entries[window.capture_table.currentRow()]
+    count = len(workspace.project.entries)
     window.classify_selected_capture("mute")
     project = workspace.project
     assert first.params in project.muted_settings
-    assert not any(row.params == first.params for row in project.entries)
+    assert len(project.entries) > count
+    assert any(row.y_path == first.y_path for row in project.entries)
     assert "mute" in window.capture_summary.text().lower()
-    second = window._capture_entries[window.capture_table.currentRow()]
+    first_row = next(
+        i for i, row in enumerate(window._capture_entries)
+        if row.y_path == first.y_path
+    )
+    assert "Mute" in window.capture_table.item(first_row, 5).text()
+    window.capture_table.selectRow(first_row)
+    assert not window.mark_mute_button.isEnabled()
+    assert not window.mark_avoid_button.isEnabled()
+    assert window.record_button.text() == "Record this setting"
+
+    second_row = next(
+        i for i, row in enumerate(window._capture_entries)
+        if row.y_path != first.y_path
+        and row.split in ("train", "validation")
+        and project.classification_for_entry(row) is None
+    )
+    window.capture_table.selectRow(second_row)
+    second = window._capture_entries[second_row]
     window.classify_selected_capture("avoid")
-    assert second.params in project.avoided_settings or second.params in workspace.project.avoided_settings
-    assert not any(row.params == second.params for row in workspace.project.entries)
+    assert second.params in workspace.project.avoided_settings
+    assert any(row.y_path == second.y_path for row in workspace.project.entries)
+    second_row = next(
+        i for i, row in enumerate(window._capture_entries)
+        if row.y_path == second.y_path
+    )
+    assert "Unstable" in window.capture_table.item(second_row, 5).text()
+
     from paranam.workspace import Workspace
     reopened = Workspace(workspace.directory)
     assert first.params in reopened.project.muted_settings
     assert second.params in reopened.project.avoided_settings
+    assert {first.y_path, second.y_path}.issubset(
+        {entry.y_path for entry in reopened.project.entries}
+    )
 
 
-def test_undo_mark_button_restores_original_capture_row(window, workspace):
+def test_mute_capture_row_stays_selectable_for_later_recording(window, workspace):
     window._attach(workspace)
     window.refresh_captures()
     original = window._capture_entries[window.capture_table.currentRow()]
     window.classify_selected_capture("mute")
-    assert workspace.project.capture_mark_history
-    assert window.undo_capture_mark_button.isEnabled()
-    window.undo_last_capture_mark()
-    assert not workspace.project.muted_settings
-    assert not workspace.project.capture_mark_history
-    assert any(row.y_path == original.y_path for row in workspace.project.entries)
+    row = next(
+        i for i, entry in enumerate(window._capture_entries)
+        if entry.y_path == original.y_path
+    )
+    window.capture_table.selectRow(row)
+    assert window._capture_entries[row].params == original.params
+    assert window.capture_table.item(row, 5).text().startswith("Mute")
+    assert window.record_button.text() == "Record this setting"
+    assert not hasattr(window, "undo_last_capture_mark")
