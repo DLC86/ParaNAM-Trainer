@@ -93,8 +93,8 @@ each continuous control presently at a range endpoint. If no training
 capture already covers the step along that axis, it adds the corner setting
 with that one control moved to the adjacent step. This creates a small
 boundary set for mute transitions, without blindly filling the entire
-corner grid. A marked *Avoid* Corner is simply excluded; no adjacent point
-is presumed safe. The conditions and replacements survive saving, reopening
+corner grid. A marked *Avoid* Corner is replaced by a fresh sampled
+training point; no adjacent Corner is presumed safe. The conditions and replacements survive saving, reopening
 and plan regeneration. **Undo last mark** restores the most recent annotation
 and any still-unrecorded additions; it refuses to remove audio acquired in
 those additions. Switch-only projects cannot apply this replacement workflow
