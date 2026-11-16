@@ -493,3 +493,35 @@ def test_queue_idle_refresh_keeps_interactive_column_widths(window):
     window.navigate(0)
     window.navigate(4)
     assert table.columnWidth(1) == 181
+
+
+
+def test_completed_training_can_extend_epoch_target_without_new_instance(workspace, tmp_path):
+    """The existing frozen job, its checkpoint path, and its queue ID survive."""
+    small_ready(workspace)
+    queue = TrainingQueue(tmp_path / "queue")
+    entry = queue.add(workspace)
+    job = Path(entry["job"])
+    atomic_write_json(job / "resume-0.json", {"completed_epoch": 2})
+    queue.update(entry["id"], state="completed")
+    with pytest.raises(ValueError, match="already completed"):
+        queue.set_total_epochs(entry["id"], 1)
+    queue.set_total_epochs(entry["id"], 5)
+    spec = read_json(job / "spec.json")
+    assert spec["preferences"]["epochs"] == 5
+    assert spec["learning"]["trainer"]["max_epochs"] == 5
+    assert Workspace(Path(spec["project"])).preferences["epochs"] == 5
+    assert read_json(job / "progress.json")["completed_members"] == []
+    assert len(queue.entries()) == 1
+    assert queue.get(entry["id"])["state"] == "completed"
+    queue.set_total_epochs(entry["id"], 2)
+    assert read_json(job / "spec.json")["preferences"]["epochs"] == 2
+
+
+def test_active_training_cannot_change_epoch_target(workspace, tmp_path):
+    small_ready(workspace)
+    queue = TrainingQueue(tmp_path / "queue")
+    entry = queue.add(workspace)
+    queue.update(entry["id"], state="running")
+    with pytest.raises(ValueError, match="Pause or stop"):
+        queue.set_total_epochs(entry["id"], 8)
