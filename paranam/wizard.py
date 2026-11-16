@@ -2858,7 +2858,7 @@ class WizardWindow(
             try:
                 # The old training split may have imposed a lower validation
                 # maximum. Restore the UI ceiling before recalculating limits.
-                self.n_validation.setMaximum(1000000)
+                self.n_validation.setRange(0, 1000000)
                 self.n_validation.setValue(target)
             finally:
                 self.n_validation.blockSignals(False)
