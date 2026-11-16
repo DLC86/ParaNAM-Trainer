@@ -129,6 +129,7 @@ def job_can_resume(workspace, job):
             mute_anchor_settings,
             mute_anchor_targets,
             mute_anchor_corner_targets,
+            mute_anchor_point_targets,
         )
 
         if mute_anchor_targets(workspace.project):
@@ -136,7 +137,8 @@ def job_can_resume(workspace, job):
             if saved_mute is None:
                 return False
             if (saved_mute.get("targets") != mute_anchor_targets(workspace.project)
-                or saved_mute.get("corner_targets", ()) != mute_anchor_corner_targets(workspace.project)):
+                or saved_mute.get("corner_targets", ()) != mute_anchor_corner_targets(workspace.project)
+                or saved_mute.get("point_targets", []) != mute_anchor_point_targets(workspace.project)):
                 return False
             try:
                 current_mute = mute_anchor_settings(
