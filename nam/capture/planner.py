@@ -1107,6 +1107,12 @@ def _plan_captures_unadjusted(
         training, validation = [], []
         used_settings = set(external_exclude or ())
         complementary = lhs_method == "sobol" and policy != "inside"
+        if complementary and policy == "extra":
+            continuous_specs = tuple(c.to_param_spec() for c in continuous)
+            used_settings.add(_settings_key(
+                {spec.name: spec.default for spec in continuous_specs},
+                continuous_specs,
+            ))
         default_combo = tuple(spec.enum_names[int(spec.default)] for spec in switches)
         for i, combo in enumerate(
             _itertools.product(*(spec.enum_names for spec in switches))
@@ -1642,6 +1648,16 @@ def _plan_simple_switches(
         train, val = [], []
         used_settings = set(external_exclude or ())
         complementary = lhs_method == "sobol" and anchor_policy != "inside"
+        if complementary and anchor_policy == "extra":
+            inner_specs = tuple(c.to_param_spec() for c in inner)
+            used_settings.add(_settings_key(
+                {
+                    s.name: (s.enum_names[int(s.default)]
+                             if s.type == "switch" else s.default)
+                    for s in inner_specs
+                },
+                inner_specs,
+            ))
         default_combo = tuple(s.enum_names[int(s.default)] for s in complex_specs)
         for i, combo in enumerate(combinations):
             fixed = dict(zip((s.name for s in complex_specs), combo))
