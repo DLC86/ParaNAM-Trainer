@@ -50,7 +50,7 @@ def test_static_table_and_peak_columns(window, workspace):
     assert window.scene.isHidden()
     assert window.capture_table.rowCount() == 2
     headers = [window.capture_table.horizontalHeaderItem(i).text() for i in range(5)]
-    assert headers == ["Name", "Status", "Latency", "Peak (dBFS)", "Warnings"]
+    assert headers == ["Name", "Status", "Latency", "Peak (dBFS)", "Tags/Warnings"]
     assert window.capture_table.item(0, 2).text() == "Train: 476.250 samples"
     assert "-4.2" in window.capture_table.item(0, 3).text()
     assert "Level warning" in window.capture_table.item(0, 4).text()
