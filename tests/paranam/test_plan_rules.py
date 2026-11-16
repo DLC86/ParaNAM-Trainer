@@ -333,8 +333,8 @@ def test_dynamic_replacement_preserves_held_out_counts_and_existing_audio(classi
     separate.status = "captured"
     count = len(project.entries)
     updated, added = classify_capture(project, original, classification)
-    assert len(updated.entries) == count + 1
-    assert len(added) == 1
+    assert len(updated.entries) == count + int(classification == "avoid")
+    assert len(added) == int(classification == "avoid")
     assert updated.entries_for_split("validation") == project.entries_for_split("validation")
     assert any(e.y_path == separate.y_path and e.status == "captured"
                for e in updated.entries)
@@ -450,3 +450,84 @@ def test_legacy_undo_history_recovers_classified_rows_when_opened(tmp_path):
     restored = next(e for e in recovered.entries if e.y_path == old.y_path)
     assert recovered.classification_for_entry(restored) == "mute"
     assert restored.params in recovered.muted_settings
+
+
+@pytest.mark.parametrize("split", ["train", "validation"])
+def test_noncorner_mute_is_virtual_and_never_adds_a_generic_capture(split):
+    from nam.capture.project import classify_capture
+    from nam.capture.export import mute_anchor_point_targets
+
+    project = new_project(
+        [KnobSpec("Gain", 0, 10, 1, 5),
+         KnobSpec("Tone", 0, 10, 1, 5)],
+        n_train=12, n_validation=4, lhs_method="sobol",
+    )
+    original = project.entries_for_split(split)[0]
+    previous = [(e.y_path, e.params) for e in project.entries]
+    marked, added = classify_capture(project, original, "mute")
+    assert added == []
+    assert [(e.y_path, e.params) for e in marked.entries] == previous
+    assert marked.muted_settings == [original.params]
+    assert mute_anchor_point_targets(marked) == [original.params]
+    assert marked.classification_for_entry(
+        next(e for e in marked.entries if e.y_path == original.y_path)
+    ) == "mute"
+    assert original not in marked.pending_entries()
+
+
+def test_rule_conditions_can_have_different_thresholds_and_switch_positions():
+    from nam.capture.plan_rules import (
+        allows, allowed_grid_size, bound_rules, validate_plan_rules,
+    )
+
+    controls = [
+        KnobSpec("Gain", 0, 10, step=1, default=5),
+        KnobSpec("Bias", 0, 10, step=1, default=5),
+        SwitchSpec("Mode", ("Normal", "Boost"), planning_mode="simple"),
+    ]
+    rule = PlanRule(
+        controls=("Gain", "Bias", "Mode"), operator=">", value=8,
+        operators={"Bias": ">", "Mode": "="},
+        thresholds={"Bias": 7, "Mode": "Boost"},
+    )
+    validate_plan_rules([c.to_param_spec() for c in controls], [rule])
+    assert rule.excludes({"Gain": 9, "Bias": 8, "Mode": "Boost"})
+    assert not rule.excludes({"Gain": 9, "Bias": 7, "Mode": "Boost"})
+    assert not rule.excludes({"Gain": 8, "Bias": 9, "Mode": "Boost"})
+    assert not rule.excludes({"Gain": 9, "Bias": 9, "Mode": "Normal"})
+    assert allows([rule], {"Gain": 9, "Bias": 7, "Mode": "Boost"})
+
+    # The grid leaves 2 gain positions x 3 bias positions in Boost excluded.
+    axes = [(c.name, range(11) if isinstance(c, KnobSpec)
+             else c.enum_names) for c in controls]
+    assert allowed_grid_size(axes, [rule]) == 11 * 11 * 2 - 2 * 3
+    active = bound_rules([rule], {"Mode": "Boost"})
+    assert len(active) == 1
+    assert active[0].controls == ("Gain", "Bias")
+    assert active[0].excludes({"Gain": 9, "Bias": 8})
+    assert bound_rules([rule], {"Mode": "Normal"}) == ()
+    assert PlanRule.model_validate(rule.model_dump()).model_dump() == rule.model_dump()
+
+    # A legacy single-threshold rule continues to work as before.
+    legacy = PlanRule(controls=("Gain", "Bias"), operator=">", value=8)
+    assert legacy.excludes({"Gain": 9, "Bias": 9})
+    assert not legacy.excludes({"Gain": 9, "Bias": 8})
+
+
+def test_different_thresholds_change_sampled_plan_and_exclusion_capacity():
+    controls = [
+        KnobSpec("Gain", 0, 10, step=1, default=5),
+        KnobSpec("Bias", 0, 10, step=1, default=5),
+    ]
+    rule = PlanRule(
+        controls=("Gain", "Bias"), operator=">", value=8,
+        thresholds={"Bias": 7},
+    )
+    limit = rule_capture_limits(controls, [rule], n_train=24, n_validation=6)
+    assert limit[0] == 1 and limit[1] >= 24 and limit[2] >= 6
+    train, validation = plan_captures(
+        controls, n_train=24, n_validation=6, rules=[rule],
+        lhs_method="sobol", include_default_as_additional_capture=True,
+    )
+    assert len(train) == 25 and len(validation) == 6
+    assert all(not rule.excludes(entry.params) for entry in train + validation)
