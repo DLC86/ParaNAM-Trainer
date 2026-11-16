@@ -1236,9 +1236,11 @@ class _ParametricLightningModule(_LightningModule):
 
     def training_step(self, batch, batch_idx):
         mute = self._loss_config.mute_anchor
-        if mute is not None and mute.mode == "virtual" and batch_idx % 20 == 0:
-            epoch = self._trainer.current_epoch if self._trainer is not None else 0
-            return self._virtual_mute_step(batch, mute, epoch * 1000003 + batch_idx // 20)
+        # Count *optimizer steps*, not per-epoch batch positions. With fewer
+        # than 20 batches per epoch, batch_idx == 0 would otherwise make every
+        # first batch virtual and starve the real captures of training updates.
+        if mute is not None and mute.mode == "virtual" and self.global_step % 20 == 19:
+            return self._virtual_mute_step(batch, mute, self.global_step // 20)
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
         mse_scale = (
             self._capture_mse_scales[capture_index]
