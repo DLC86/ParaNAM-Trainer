@@ -132,7 +132,7 @@ def job_can_resume(workspace, job):
             mute_anchor_point_targets,
         )
 
-        if mute_anchor_targets(workspace.project):
+        if mute_anchor_targets(workspace.project) or mute_anchor_point_targets(workspace.project):
             saved_mute = spec.get("model", {}).get("loss", {}).get("mute_anchor")
             if saved_mute is None:
                 return False
