@@ -473,14 +473,75 @@ class TrainingQueue:
             data.setdefault("removed", []).append(entry["job"])
             atomic_write_json(self.path, data)
 
+    def set_total_epochs(self, identifier, epochs):
+        """Change a dormant instance's epoch target without touching checkpoints.
+
+        A completed run may be extended. Previously completed members must then
+        train their additional epochs too, with their own saved optimizer state.
+        """
+        entry = self.get(identifier)
+        if not entry:
+            raise ValueError("Select a training instance.")
+        if entry["state"] in ACTIVE:
+            raise ValueError("Pause or stop this job before changing total epochs.")
+        if type(epochs) is not int or not 1 <= epochs <= 1000000:
+            raise ValueError("Total epochs must be between 1 and 1000000.")
+        job = Path(entry["job"])
+        spec = read_json(job / "spec.json")
+        if not spec or not Path(spec.get("project", "")).is_dir():
+            raise ValueError("The training snapshot is unavailable.")
+        progress = training.job_progress(job)
+        completed = int(progress.get("completed_epoch") or 0)
+        for member in range(int(spec["members"])):
+            checkpoint = read_json(job / f"resume-{member}.json", {})
+            completed = max(completed, int(checkpoint.get("completed_epoch") or 0))
+        if entry["state"] == "completed":
+            completed = max(completed, int(spec["preferences"]["epochs"]))
+        if epochs < completed:
+            raise ValueError(
+                f"Total epochs cannot be lower than the {completed} already completed."
+            )
+        previous = int(spec["preferences"]["epochs"])
+        if epochs == previous:
+            return
+        from filelock import FileLock, Timeout
+        from .recovery import require_resolved
+        try:
+            with FileLock(
+                str(Path(spec["project"]) / "training" / "worker.lock"),
+                timeout=0,
+            ):
+                require_resolved(job / "spec.json")
+                require_resolved(job / "progress.json")
+                workspace = Workspace(Path(spec["project"]))
+                workspace.preferences["epochs"] = epochs
+                workspace.preferences[
+                    "static_epochs" if entry["kind"] == "static" else "parametric_epochs"
+                ] = epochs
+                workspace.save()
+                spec["preferences"]["epochs"] = epochs
+                spec["learning"]["trainer"]["max_epochs"] = epochs
+                spec["fingerprint"] = workspace.fingerprint()
+                atomic_write_json(job / "spec.json", spec)
+                progress["epochs"] = epochs
+                if epochs > previous:
+                    # Every member needs the extra epochs, including members
+                    # already marked complete in multi-model jobs.
+                    progress["completed_members"] = []
+                    progress["member"] = 0
+                    progress["epoch"] = 0
+                    if entry["kind"] == "static":
+                        progress["exports"] = []
+                progress["message"] = f"Total epochs changed to {epochs}"
+                atomic_write_json(job / "progress.json", progress)
+        except Timeout as error:
+            raise ValueError("Wait for the training worker to stop.") from error
+
     def prepare_resume(self, identifier, batch_size=None, device=None):
         entry = self.get(identifier)
-        if not entry or entry["state"] not in FINISHED - {
-            "completed",
-            "needs_captures",
-        }:
+        if not entry or entry["state"] not in FINISHED - {"needs_captures"}:
             raise ValueError(
-                "Select a paused, stopped or interrupted training instance."
+                "Select a paused, stopped, interrupted or extendable completed instance."
             )
         job = Path(entry["job"])
         spec = read_json(job / "spec.json")
@@ -488,6 +549,14 @@ class TrainingQueue:
             raise ValueError(
                 "This instance's files are unavailable. Reconnect its project drive before resuming."
             )
+        if entry["state"] == "completed":
+            completed = max(
+                [int(read_json(job / f"resume-{m}.json", {}).get("completed_epoch") or 0)
+                 for m in range(int(spec["members"]))]
+                + [int(training.job_progress(job).get("completed_epoch") or 0)]
+            )
+            if spec["preferences"]["epochs"] <= completed:
+                raise ValueError("Increase total epochs before resuming a completed run.")
         workspace = Workspace(Path(spec["project"]))
         from .evaluation import PROTOCOL
 
