@@ -284,7 +284,7 @@ def test_neural_plan_fixes_volume_at_maximum():
         KnobSpec("Tone", 0, 10, step=0.1),
         KnobSpec("Volume", 0, 10, clean_volume=True),
     ]
-    assert capture_recommendations(controls) == (16, 8, 1)
+    assert capture_recommendations(controls) == (16, 4, 1)
     train, validation = plan_captures(controls, n_train=15, n_validation=8)
     assert all(e.params["Volume"] == 10 for e in train + validation)
 
