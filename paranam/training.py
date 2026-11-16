@@ -1655,6 +1655,14 @@ def run_job(job):
                                 output_gain=spec["model"].get("output_gain")
                                 or workspace.project.output_gain,
                             )
+                        # A rename may occur while training is running.
+                        # Reload Name from disk before finalizing this member.
+                        current_name = read_json(job / "spec.json", {}).get(
+                            "model", {}
+                        ).get("metadata", {}).get("name")
+                        if current_name:
+                            from .model_names import set_model_metadata_name
+                            set_model_metadata_name(model_dict, current_name)
                         annotate_validation_metadata(
                             model_dict,
                             progress.best_metrics,
@@ -1719,6 +1727,12 @@ def run_job(job):
             from .model_names import model_basename
 
             selected_model = read_json(source)
+            current_name = read_json(job / "spec.json", {}).get(
+                "model", {}
+            ).get("metadata", {}).get("name")
+            if current_name:
+                from .model_names import set_model_metadata_name
+                set_model_metadata_name(selected_model, current_name)
             model_metadata = selected_model.get("metadata", {})
             destination = export / (
                 model_basename(model_metadata.get("name"), "ParaNAM_HyperA2") + ".pnam"

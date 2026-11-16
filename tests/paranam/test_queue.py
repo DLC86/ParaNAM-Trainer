@@ -527,32 +527,79 @@ def test_active_training_cannot_change_epoch_target(workspace, tmp_path):
         queue.set_total_epochs(entry["id"], 8)
 
 
-def test_queue_job_rename_is_persistent_and_does_not_mutate_training(workspace, tmp_path):
-    """Renaming the queue label must not modify a frozen dataset or .pnam metadata."""
+def test_queue_job_rename_changes_model_metadata_not_just_label(workspace, tmp_path):
     small_ready(workspace)
     store = TrainingQueue(tmp_path / "queue")
     entry = store.add(workspace)
-    original_name = entry["name"]
+    original = entry["name"]
     spec_path = Path(entry["job"]) / "spec.json"
-    original_spec = spec_path.read_bytes()
-    original_project = Path(entry["project"])
-    store.rename(entry["id"], "  Better job name  ")
+    before = read_json(spec_path)
+    store.rename(entry["id"], "  Better model name  ")
     stored = TrainingQueue(store.directory).get(entry["id"])
-    assert stored["display_name"] == "Better job name"
-    assert stored["name"] == original_name
-    assert stored["project"] == str(original_project)
-    assert spec_path.read_bytes() == original_spec
+    renamed = read_json(spec_path)
+    assert renamed["model"]["metadata"]["name"] == "Better model name"
+    assert stored["name"] == original
+    assert "display_name" not in stored
+    assert renamed["fingerprint"] == before["fingerprint"]
+    assert renamed["data"] == before["data"]
+    assert Workspace(Path(entry["project"])).project.name == workspace.project.name
+
     store.update(entry["id"], state="running")
     store.rename(entry["id"], "Training in progress")
-    assert TrainingQueue(store.directory).get(entry["id"])["display_name"] == (
-        "Training in progress"
-    )
+    assert read_json(spec_path)["model"]["metadata"]["name"] == "Training in progress"
     for invalid in ("", "  ", "bad\nname", "x" * 201):
         with pytest.raises(ValueError, match="name"):
             store.rename(entry["id"], invalid)
-    assert store.get(entry["id"])["display_name"] == "Training in progress"
+    assert read_json(spec_path)["model"]["metadata"]["name"] == "Training in progress"
     with pytest.raises(ValueError, match="no longer exists"):
-        store.rename("unknown-id", "New job name")
+        store.rename("unknown-id", "A model")
+
+
+def test_rename_updates_existing_parametric_export_and_nested_metadata(workspace, tmp_path):
+    small_ready(workspace)
+    store = TrainingQueue(tmp_path / "queue")
+    entry = store.add(workspace)
+    job = Path(entry["job"])
+    member_file = job / "member-0" / "model_parametric.pnam"
+    member_file.parent.mkdir(parents=True, exist_ok=True)
+    export_file = tmp_path / "final.pnam"
+    sample = {
+        "architecture": "ParametricSlimmableContainer",
+        "metadata": {"name": "Before"},
+        "config": {"submodels": [
+            {"model": {"metadata": {"name": "Before"}, "config": {}}},
+            {"model": {"metadata": {"name": "Before"}, "config": {}}},
+        ]},
+    }
+    atomic_write_json(member_file, sample)
+    atomic_write_json(export_file, sample)
+    atomic_write_json(job / "progress.json", {"export": str(export_file)})
+    store.update(entry["id"], state="completed")
+    store.rename(entry["id"], "After rename")
+    for path in (member_file, export_file):
+        data = read_json(path)
+        assert data["metadata"]["name"] == "After rename"
+        assert [c["model"]["metadata"]["name"]
+                for c in data["config"]["submodels"]] == [
+            "After rename", "After rename"
+        ]
+    assert read_json(job / "progress.json")["export"] == str(export_file)
+
+
+def test_rename_static_queue_job_updates_first_capture_only(workspace, tmp_path):
+    small_ready(workspace, "static")
+    store = TrainingQueue(tmp_path / "queue")
+    entry = store.add(workspace)
+    path = Path(entry["job"]) / "spec.json"
+    before = read_json(path)["static_captures"]
+    assert before
+    store.rename(entry["id"], "Static renamed")
+    captures = read_json(path)["static_captures"]
+    assert captures[0]["name"] == "Static renamed"
+    assert captures[0]["metadata"]["name"] == "Static renamed"
+    assert [c["name"] for c in captures[1:]] == [
+        c["name"] for c in before[1:]
+    ]
 
 
 def test_queue_rename_context_targets_right_clicked_job(window, workspace, monkeypatch):
@@ -602,8 +649,12 @@ def test_queue_rename_context_targets_right_clicked_job(window, workspace, monke
     monkeypatch.setattr(table, "itemAt", lambda _: table.item(0, 0))
     table.selectRow(1)
     window.show_queue_context_menu(QPoint(0, 0))
-    assert store.get(first["id"])["display_name"] == "Renamed from context menu"
-    assert "display_name" not in store.get(second["id"])
+    assert read_json(Path(first["job"]) / "spec.json")["model"]["metadata"]["name"] == (
+        "Renamed from context menu"
+    )
+    assert read_json(Path(second["job"]) / "spec.json")["model"].get(
+        "metadata", {}
+    ).get("name") != "Renamed from context menu"
     assert table.item(0, 0).text() == "Renamed from context menu"
     assert table.item(0, 1).text() == first["name"]
     assert window.selected_job_id == first["id"]

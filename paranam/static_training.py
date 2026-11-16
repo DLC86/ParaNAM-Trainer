@@ -195,13 +195,19 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         )
         train(data, spec["model"], learning, output, callback)
         model = read_json(output / "model.nam")
+        # A model rename may happen from the queue while this member trains.
+        captures_now = read_json(job / "spec.json", {}).get("static_captures") or []
+        model_name = (
+            captures_now[member].get("name", capture["name"])
+            if member < len(captures_now) else capture["name"]
+        )
         model.setdefault("metadata", {}).update(metadata)
-        model["metadata"].update(capture.get("metadata", {}), name=capture["name"])
+        model["metadata"].update(capture.get("metadata", {}), name=model_name)
         if model.get("architecture") == "SlimmableContainer":
             for child in model["config"]["submodels"]:
                 child["model"].setdefault("metadata", {}).update(metadata)
                 child["model"]["metadata"].update(
-                    capture.get("metadata", {}), name=capture["name"]
+                    capture.get("metadata", {}), name=model_name
                 )
         annotate_validation_metadata(
             model,

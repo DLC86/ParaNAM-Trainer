@@ -130,7 +130,7 @@ class QueueActions:
             self.change_queue_total_epochs(entry_id)
 
     def rename_queue_job(self, identifier):
-        """Rename the clicked queue job, not the project or exported model."""
+        """Edit the Name field of the selected job's actual model metadata."""
         entry = self.queue_controller.store.get(identifier)
         if entry is None:
             return
@@ -141,7 +141,7 @@ class QueueActions:
             if captures
             else spec.get("model", {}).get("metadata", {}).get("name", "")
         )
-        current = entry.get("display_name") or model_name or entry["name"]
+        current = model_name or entry["name"]
         name, accepted = QInputDialog.getText(
             self, "Rename training job", "Job name:", text=current
         )
@@ -229,7 +229,7 @@ class QueueActions:
                 else spec.get("model", {}).get("metadata", {}).get("name", "")
             )
             values = (
-                entry.get("display_name") or model_name or "—",
+                model_name or "—",
                 entry["name"],
                 time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
                 "Static A2" if entry["kind"] == "static" else "HyperA2",

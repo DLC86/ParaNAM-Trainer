@@ -416,23 +416,76 @@ class TrainingQueue:
         return self._edit(edit)
 
     def rename(self, identifier, name):
-        """Persist a queue-only display name without touching training artifacts."""
+        """Rename the frozen model's Name metadata, not a queue-only label.
+
+        Training weights, checkpoints, input audio, the source project and
+        existing export file paths are never renamed or altered.
+        """
+        from .model_names import set_model_metadata_name
+        from .recovery import require_resolved
+
         if not isinstance(name, str):
-            raise ValueError("The training job name must be text.")
+            raise ValueError("The model name must be text.")
         name = name.strip()
         if not name:
-            raise ValueError("The training job name cannot be empty.")
+            raise ValueError("The model name cannot be empty.")
         if len(name) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in name):
-            raise ValueError("The training job name must be a single line of at most 200 characters.")
+            raise ValueError("The model name must be one line of at most 200 characters.")
 
-        def edit(entries):
-            entry = next((e for e in entries if e["id"] == identifier), None)
+        with self.lock:
+            data = read_json(self.path, {"version": 1, "entries": []})
+            require_resolved(self.path)
+            entry = next(
+                (e for e in data["entries"] if e["id"] == identifier), None
+            )
             if entry is None:
                 raise ValueError("The selected training job no longer exists.")
-            entry["display_name"] = name
-            return dict(entry)
+            job = Path(entry["job"])
+            spec_path = job / "spec.json"
+            require_resolved(spec_path)
+            spec = read_json(spec_path, {})
+            if not spec:
+                raise ValueError("The training specifications are unavailable.")
+            captures = spec.get("static_captures") or []
+            if captures:
+                # A static queue row represents a batch; its Name column shows
+                # the first capture, which has its own independently named model.
+                captures[0]["name"] = name
+                captures[0].setdefault("metadata", {})["name"] = name
+            else:
+                spec.setdefault("model", {}).setdefault("metadata", {})["name"] = name
+            atomic_write_json(spec_path, spec)
 
-        return self._edit(edit)
+            # An active worker will pick up the new name during final export.
+            # Avoid writing files concurrently with that worker.
+            if entry["state"] not in ACTIVE:
+                progress = read_json(job / "progress.json", {})
+                filenames = set()
+                if captures:
+                    exports = progress.get("exports") or []
+                    if exports:
+                        filenames.add(str(exports[0]))
+                    filenames.add(str(job / "member-0" / "model.nam"))
+                else:
+                    filenames.update(
+                        str(p) for pattern in ("model_parametric.pnam", "model.nam")
+                        for p in job.glob(f"member-*/{pattern}")
+                    )
+                    if progress.get("export"):
+                        filenames.add(str(progress["export"]))
+                for filename in sorted(filenames):
+                    path = Path(filename)
+                    if not path.is_file():
+                        continue
+                    model = read_json(path, {})
+                    if not isinstance(model, dict) or not model:
+                        raise ValueError(f"Cannot update model metadata in {path}")
+                    set_model_metadata_name(model, name)
+                    atomic_write_json(path, model)
+
+            entry.pop("display_name", None)
+            atomic_write_json(self.path, data)
+            return dict(entry)
 
     def move(self, identifier, offset):
         def edit(entries):

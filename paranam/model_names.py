@@ -19,3 +19,14 @@ def model_basename(name, fallback="Model"):
     }:
         value = "_" + value
     return value
+
+
+def set_model_metadata_name(model, name):
+    """Update the serialized model Name, including nested Full/Lite submodels."""
+    model.setdefault("metadata", {})["name"] = name
+    children = model.get("config", {}).get("submodels", ())
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict) and isinstance(child.get("model"), dict):
+                set_model_metadata_name(child["model"], name)
+    return model
