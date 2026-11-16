@@ -531,3 +531,53 @@ def test_different_thresholds_change_sampled_plan_and_exclusion_capacity():
     )
     assert len(train) == 25 and len(validation) == 6
     assert all(not rule.excludes(entry.params) for entry in train + validation)
+
+
+def test_avoid_rule_editor_supports_different_controls_and_roundtrip(qapp):
+    from paranam.plan_rules_ui import PlanRuleDialog, describe_rule
+
+    controls = [
+        KnobSpec("Gain", 0, 10, step=0.5, default=5),
+        KnobSpec("Bias", 0, 10, step=0.5, default=5),
+        SwitchSpec("Mode", ("Normal", "Boost"), planning_mode="simple"),
+    ]
+    dialog = PlanRuleDialog(None, controls)
+    for name in ("Gain", "Bias", "Mode"):
+        dialog.rows[name][0].setChecked(True)
+    dialog.rows["Gain"][1].setCurrentText(">")
+    dialog.rows["Gain"][2].setValue(8)
+    dialog.rows["Bias"][1].setCurrentText(">")
+    dialog.rows["Bias"][2].setValue(7)
+    dialog.rows["Mode"][2].setCurrentText("Boost")
+    dialog.accept()
+    rule = dialog.rule
+    assert rule is not None
+    assert rule.excludes({"Gain": 9, "Bias": 8, "Mode": "Boost"})
+    assert not rule.excludes({"Gain": 9, "Bias": 7, "Mode": "Boost"})
+    assert describe_rule(rule) == "Avoid when Gain > 8 AND Bias > 7 AND Mode = Boost"
+
+    reloaded = PlanRule.model_validate(rule.model_dump(mode="json"))
+    editor = PlanRuleDialog(None, controls, reloaded)
+    assert editor.rows["Gain"][2].value() == 8
+    assert editor.rows["Bias"][2].value() == 7
+    assert editor.rows["Mode"][2].currentText() == "Boost"
+    editor.accept()
+    assert editor.rule == rule
+    dialog.close()
+    editor.close()
+
+
+def test_control_rename_preserves_mixed_rule_conditions(workspace):
+    knobs = [KnobSpec("Gain", 0, 10, default=5),
+             KnobSpec("Bias", 0, 10, default=5)]
+    workspace.draft_controls = [c.to_dict() for c in knobs]
+    workspace.preferences["draft_plan_rules"] = [PlanRule(
+        controls=("Gain", "Bias"), operator=">", value=8,
+        thresholds={"Bias": 7},
+    ).model_dump(mode="json")]
+    workspace.rename_control("Bias", "Tone")
+    rule = workspace.plan_rules()[0]
+    assert rule.controls == ("Gain", "Tone")
+    assert rule.thresholds == {"Tone": 7}
+    assert rule.excludes({"Gain": 9, "Tone": 8})
+    assert not rule.excludes({"Gain": 9, "Tone": 7})
