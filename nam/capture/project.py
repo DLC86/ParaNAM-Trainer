@@ -413,6 +413,7 @@ class CaptureProject(_BaseModel):
     # across the knob space unless the user explicitly defines a separate rule.
     muted_settings: list[dict[str, float | str]] = _Field(default_factory=list)
     avoided_settings: list[dict[str, float | str]] = _Field(default_factory=list)
+    # Legacy undo history, used only to restore marked rows from older projects.
     capture_mark_history: list[dict[str, _Any]] = _Field(default_factory=list)
     dynamic_capture_counter: int = 0
     train_input: str = "input_train.wav"
@@ -488,11 +489,35 @@ class CaptureProject(_BaseModel):
     ) -> list[CaptureEntryModel]:
         return [entry for entry in self.entries if entry.split == split]
 
+    def classification_for_entry(self, entry: CaptureEntryModel) -> _Optional[str]:
+        """An exact setting may be shown in Capture while excluded from training."""
+        if entry.split not in ("train", "validation"):
+            return None
+        if entry.params in self.muted_settings:
+            return "mute"
+        if entry.params in self.avoided_settings:
+            return "avoid"
+        return None
+
+    def clear_capture_classification(self, entry: CaptureEntryModel) -> None:
+        """A successfully re-recorded setting becomes an ordinary data capture."""
+        kind = self.classification_for_entry(entry)
+        if kind is not None:
+            marked = self.muted_settings if kind == "mute" else self.avoided_settings
+            marked.remove(entry.params)
+        self.unused_recordings.pop(entry.y_path, None)
+
     def pending_entries(self) -> list[CaptureEntryModel]:
-        return [entry for entry in self.entries if entry.status == "pending"]
+        return [
+            entry for entry in self.entries
+            if entry.status == "pending" and self.classification_for_entry(entry) is None
+        ]
 
     def captured_entries(self) -> list[CaptureEntryModel]:
-        return [entry for entry in self.entries if entry.status == "captured"]
+        return [
+            entry for entry in self.entries
+            if entry.status == "captured" and self.classification_for_entry(entry) is None
+        ]
 
     def input_for_split(self, split: Literal["train", "validation", "gain"]) -> str:
         return self.train_input if split == "train" else self.validation_input
@@ -625,13 +650,12 @@ def classify_capture(
     entry: CaptureEntryModel,
     classification: Literal["mute", "avoid"],
 ) -> tuple[CaptureProject, list[CaptureEntryModel]]:
-    """Classify one capture during reamping and update the *remaining* plan.
+    """Mark one existing capture and extend the plan without hiding its row.
 
-    This works on a deep copy: failed replacement searches never mutate a
-    recorded project. Existing recordings, indices and captured settings are
-    untouched. Marking a silent point creates only a fixed virtual zero-output
-    target; unlike an individual Mute at min/max it must NOT generalize to any
-    neighboring setting or any other switch state.
+    The marked setting remains selectable for a later recording but contributes
+    neither WAV data nor a required capture until successfully re-recorded.
+    A mute mark creates an exact virtual zero-output target, never a generalized
+    mute rule for other settings or switch states.
     """
     from .planner import (
         _capture_grid_values, _decode_named_params,
@@ -667,19 +691,13 @@ def classify_capture(
         raise ValueError("This combination has already been classified")
     attr = "muted_settings" if classification == "mute" else "avoided_settings"
     getattr(draft, attr).append(dict(old.params))
-    mark_index = draft.entries.index(old)
-    draft.entries.remove(old)
-    # Keep a recorded WAV intact on disk but prevent its accidental reuse as
-    # training data during any subsequent plan regeneration.
+    # Keep the original row and its WAV on disk. captured_entries() excludes
+    # classified points, so a prior recording cannot silently enter training.
+    # Retain its original take for safe handling during later Plan regeneration.
     if old.status == "captured":
         draft.unused_recordings[old.y_path] = {
             "entry": old.model_dump(mode="json"), "context": None,
         }
-    draft.capture_mark_history.append({
-        "classification": classification,
-        "entry": old.model_dump(mode="json"),
-        "position": mark_index,
-    })
     occupied = {_settings_key(row.params, specs) for row in draft.entries}
     occupied.update(blocked)
     occupied.add(key)
@@ -813,39 +831,7 @@ def classify_capture(
             params[knob.name] = step
             if acceptable(params):
                 append_point(params, split="train", prefix="mute_edge", corner=False)
-    draft.capture_mark_history[-1]["added_paths"] = [row.y_path for row in added]
     return draft, added
-
-
-def undo_last_capture_mark(project: CaptureProject) -> CaptureProject:
-    """Undo the most recent mute/avoid classification without losing any WAVs."""
-    if not project.capture_mark_history:
-        raise ValueError("No classified capture is available to undo")
-    draft = project.model_copy(deep=True)
-    item = draft.capture_mark_history[-1]
-    inserted = set(item.get("added_paths", ()))
-    to_remove = [entry for entry in draft.entries if entry.y_path in inserted]
-    if len(to_remove) != len(inserted):
-        raise ValueError("Cannot undo: the additional captures have changed")
-    if any(entry.status == "captured" for entry in to_remove):
-        raise ValueError(
-            "Cannot undo after recording an added capture; the recording is preserved."
-        )
-    for entry in to_remove:
-        draft.entries.remove(entry)
-    old = CaptureEntryModel.model_validate(item["entry"])
-    if any(entry.params == old.params for entry in draft.entries):
-        raise ValueError("Cannot restore a setting already occupied in the plan")
-    attr = "muted_settings" if item["classification"] == "mute" else "avoided_settings"
-    marked = getattr(draft, attr)
-    if old.params not in marked:
-        raise ValueError("The classification to undo has changed")
-    marked.remove(old.params)
-    draft.entries.insert(min(item["position"], len(draft.entries)), old)
-    if old.status == "captured":
-        draft.unused_recordings.pop(old.y_path, None)
-    draft.capture_mark_history.pop()
-    return draft
 
 
 def save_project(project: CaptureProject, project_dir: _Path) -> _Path:
@@ -864,6 +850,23 @@ def load_project(project_dir: _Path) -> CaptureProject:
             f"Unsupported capture project version {version!r}; expected {_PROJECT_VERSION}"
         )
     project = CaptureProject.model_validate(payload)
+    # Older versions removed marked rows, retaining only their Undo snapshots.
+    # Reconstitute them once, leaving their classification and original WAV intact.
+    for item in project.capture_mark_history:
+        if "entry" not in item:
+            continue
+        original = CaptureEntryModel.model_validate(item["entry"])
+        if project.classification_for_entry(original) is None:
+            continue
+        if any(
+            row.y_path == original.y_path
+            or (row.split == original.split and row.params == original.params)
+            for row in project.entries
+        ):
+            continue
+        position = min(max(0, int(item.get("position", len(project.entries)))), len(project.entries))
+        project.entries.insert(position, original)
+    project.capture_mark_history.clear()
     # Surface bad knob definitions at load time rather than when planning/recapturing.
     project.knob_specs()
     return project
