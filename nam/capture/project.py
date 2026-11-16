@@ -747,12 +747,13 @@ def classify_capture(
         occupied.add(_settings_key(params, specs))
         added.append(row)
 
-    # A rejected sampled point needs one fresh sample in the same split. Keep
-    # complex switch states fixed; the remaining Sobol/LHS coordinates are
-    # sampled from independent deterministic streams, never redraw prior points.
+    # Unstable captures provide no useful training signal, so replace them
+    # with a fresh point in the same split. Mute captures instead provide an
+    # exact virtual silence target and never need a generic replacement.
+    # Keep Complex Switch states fixed when drawing Unstable replacements.
     is_corner = bool(old.is_corner) or _Path(old.y_path).name.startswith("corner_")
     special = _Path(old.y_path).name.startswith("mute_edge_")
-    if (not is_corner and not special) or (classification == "avoid" and is_corner):
+    if classification == "avoid" and not special:
         fixed = {
             knob.name: old.params[knob.name]
             for knob in knobs
