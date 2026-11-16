@@ -1,6 +1,7 @@
 """Move or copy a project together with its project-local references."""
 
 import json
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -74,10 +75,14 @@ def change_project(source, name, *, duplicate=False, queue_store=None):
         raise ValueError("Select a valid project folder.")
     source = source.resolve()
     if duplicate:
-        index = 2
-        while _occupied(project_path(source, f"{name} ({index})")):
+        # Strip any numeric copy suffix before choosing the next free number.
+        # "Rig (2)" must duplicate to "Rig (3)", never "Rig (2) (2)".
+        suffix = re.search(r" \((\d+)\)$", name)
+        index = max(2, int(suffix.group(1)) + 1) if suffix else 2
+        base = name[:suffix.start()] if suffix else name
+        while _occupied(project_path(source, f"{base} ({index})")):
             index += 1
-        name = f"{name} ({index})"
+        name = f"{base} ({index})"
     target = project_path(source, name)
     if target.name == source.name and not duplicate:
         if json.loads((source / "capture_project.json").read_bytes()).get("name") == name:
