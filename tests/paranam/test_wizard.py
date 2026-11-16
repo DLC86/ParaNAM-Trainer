@@ -192,13 +192,11 @@ def test_switch_coverage_recommendations_and_signal_selection(window, workspace)
     ]
     window._attach(workspace)
     window.refresh_recommendation(True)
-    # With a separately reserved default in one of the six Complex Switch
-    # states, the feasible equally allocated LHS quota is 90 rather than 96.
+    # Six Complex Switch states each get 16 training and 4 validation
+    # captures, keeping the recommended 4:1 ratio.
     assert window.include_default_as_additional_capture.isChecked()
-    assert window.n_train.value() == 90
-    # The actual stepped control grid has only five reserved-free validation
-    # positions per Complex Switch combination, rather than the old heuristic 8.
-    assert window.n_validation.value() == 30
+    assert window.n_train.value() == 96
+    assert window.n_validation.value() == 24
     assert "6 Complex Switch" in window.recommendation.text()
     assert not window.custom_button.isEnabled()
     window.signal_mode.setCurrentIndex(window.signal_mode.findData("custom"))
@@ -373,3 +371,43 @@ def test_lhs_sampler_names_and_new_switch_default_to_simple(window, workspace):
     assert window.switch_mode.currentData() == "simple"
     assert workspace.draft_controls[0]["type"] == "switch"
     assert workspace.draft_controls[0]["planning_mode"] == "simple"
+
+
+@pytest.mark.parametrize(
+    "method", ["standard", "maximin", "orthogonal", "near_orthogonal", "sobol", "optimized"]
+)
+def test_training_count_automatically_updates_validation_for_every_sampler(
+    window, workspace, method
+):
+    window._attach(workspace)
+    window.lhs_method.setCurrentIndex(window.lhs_method.findData(method))
+
+    window.n_train.setValue(64)
+    assert window.n_validation.value() == 16
+    assert workspace.preferences["n_train"] == 64
+    assert workspace.preferences["n_validation"] == 16
+
+    window.n_train.setValue(34)
+    assert window.n_validation.value() == 9  # round-half-up, not ties-to-even
+
+    # Validation is still editable; changes unrelated to training do not
+    # override the user's chosen validation count.
+    window.n_validation.setValue(12)
+    assert window.n_validation.value() == 12
+    window.seed.setValue(123)
+    assert window.n_validation.value() == 12
+
+    window.n_train.setValue(32)
+    assert window.n_validation.value() == 8
+
+
+def test_training_ratio_obeys_limited_capture_grid(window, workspace):
+    workspace.draft_controls = [KnobSpec("Tone", 0, 1, step=0.5).to_dict()]
+    window._attach(workspace)
+    window.refresh_recommendation(True)
+    assert window.n_train.value() == 3
+    assert window.n_validation.value() == 0
+    # The three available settings are already exhausted, so the
+    # validation field cannot exceed its real held-out capacity.
+    window.n_train.setValue(2)
+    assert window.n_validation.value() == 0
