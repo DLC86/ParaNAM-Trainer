@@ -425,6 +425,14 @@ def mute_anchor_point_targets(project: CaptureProject) -> list[dict[str, _Any]]:
     return out
 
 
+def mute_anchor_rule_targets(project: CaptureProject) -> list[dict[str, _Any]]:
+    """Virtual mute regions (AND conditions), never exported to the player."""
+    return [
+        rule.model_dump(mode="json")
+        for rule in project.plan_rules if rule.kind == "mute"
+    ]
+
+
 def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     # input_size/condition_size are omitted on purpose: ConcatWaveNet derives them from
     # the param specs.
@@ -447,6 +455,7 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
         config["sample_rate"] = float(project.sample_rate)
     mute_targets = mute_anchor_targets(project)
     mute_points = mute_anchor_point_targets(project)
+    mute_rules = mute_anchor_rule_targets(project)
     loss = {
         "val_loss": "esr",
         "mrstft_weight": 0.0005,
@@ -460,6 +469,7 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
             "targets": mute_targets,
             "corner_targets": mute_anchor_corner_targets(project),
             **({"point_targets": mute_points} if mute_points else {}),
+            **({"rule_targets": mute_rules} if mute_rules else {}),
             "weight": 0.25,
             **MUTE_ANCHOR_DEFAULTS,
         }
@@ -526,7 +536,7 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     mute_targets = mute_anchor_targets(project)
     mute_points = mute_anchor_point_targets(project)
     loss = {"val_loss": "esr", "mrstft_weight": 0.0005}
-    if mute_targets or mute_points:
+    if mute_targets or mute_points or mute_rules:
         # Training-only targets: never add player-facing model fields.
         loss["mute_anchor"] = {
             "targets": mute_targets,
