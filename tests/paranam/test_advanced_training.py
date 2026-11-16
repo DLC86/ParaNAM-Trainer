@@ -260,6 +260,9 @@ def test_rms_normalization_exponent_ui_and_resume(window, workspace):
     exponent = window.advanced_fields["rms_loss_normalization_exponent"]
     assert exponent.value() == 2.0
     assert exponent.minimum() == pytest.approx(0.01)
+    # RMS is enabled by default in 0.8.0, including its exponent editor.
+    assert exponent.isEnabled()
+    rms.setChecked(False)
     assert not exponent.isEnabled()
     rms.setChecked(True)
     assert exponent.isEnabled()
