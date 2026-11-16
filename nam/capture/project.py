@@ -825,6 +825,7 @@ def classify_capture(
             # Only training samples count; held-out validation must remain held out.
             if any(
                 row.params[knob.name] == step
+                and draft.classification_for_entry(row) is None
                 for row in draft.entries if row.split == "train"
             ):
                 continue
