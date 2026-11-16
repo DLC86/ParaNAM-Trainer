@@ -486,9 +486,24 @@ class QueueActions:
                 or training.job_progress(self.job).get("recovery_required")
             )
         )
+        spec_for_resume = (
+            read_json(self.job / "spec.json", {}, tolerate_corrupt=True)
+            if self.job else {}
+        )
+        progress_for_resume = training.job_progress(self.job) if self.job else {}
+        extended_completed = (
+            state == "completed"
+            and bool(spec_for_resume)
+            and int(spec_for_resume["preferences"]["epochs"])
+            > max(
+                [int(read_json(self.job / f"resume-{member}.json", {}).get("completed_epoch") or 0)
+                 for member in range(int(spec_for_resume.get("members", 1)))]
+                + [int(progress_for_resume.get("completed_epoch") or 0)]
+            )
+        )
         resumable = (
             not recovery_blocked
-            and state in FINISHED - {"completed", "needs_captures"}
+            and (state in FINISHED - {"completed", "needs_captures"} or extended_completed)
             and not running
             and not exporting
         )
