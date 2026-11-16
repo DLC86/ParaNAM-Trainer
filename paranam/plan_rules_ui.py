@@ -1,9 +1,9 @@
-"""Editor for a conjunction of capture-plan exclusions."""
+"""Capture Plan exclusion editor supporting independent control conditions."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
-    QListWidget, QListWidgetItem, QPushButton, QStackedWidget, QVBoxLayout,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGridLayout,
+    QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from nam.capture.params import SwitchSpec
@@ -12,104 +12,136 @@ from .numeric import DecimalSpinBox
 
 
 def describe_rule(rule):
-    value = rule.value if isinstance(rule.value, str) else f"{rule.value:g}"
-    return f"Avoid all {rule.operator} {value}  ·  {', '.join(rule.controls)}"
+    terms = []
+    for name in rule.controls:
+        operator, value = rule.condition_for(name)
+        text = value if isinstance(value, str) else f"{value:g}"
+        terms.append(f"{name} {operator} {text}")
+    return "Avoid when " + " AND ".join(terms)
 
 
 class PlanRuleDialog(QDialog):
     def __init__(self, parent, controls, rule=None):
         super().__init__(parent)
         self.setWindowTitle("Edit plan rule" if rule else "Add plan rule")
+        self.resize(590, 400)
         self.controls = {control.name: control for control in controls}
         self.rule = None
+        self.rows = {}
         layout = QVBoxLayout(self)
-        detail = QLabel("Skip a setting when every selected control matches the condition.")
+        detail = QLabel(
+            "Exclude combinations only when every checked condition is true. "
+            "Each knob may have its own threshold and comparison."
+        )
         detail.setWordWrap(True)
         layout.addWidget(detail)
-        self.selection = QListWidget()
-        self.selection.setAccessibleName("Controls in this rule")
-        for name in self.controls:
-            item = QListWidgetItem(name, self.selection)
-            item.setCheckState(Qt.CheckState.Checked if rule and name in rule.controls
-                               else Qt.CheckState.Unchecked)
-        layout.addWidget(self.selection)
+
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setMinimumHeight(180)
+        area.setMaximumHeight(430)
+        content = QWidget()
+        grid = QGridLayout(content)
+        for col, heading in enumerate(("Use", "Control", "Condition", "Value")):
+            grid.addWidget(QLabel(heading), 0, col)
+        for i, control in enumerate(controls, 1):
+            checked = QCheckBox()
+            checked.setAccessibleName(f"Include {control.name} in rule")
+            checked.setChecked(rule is not None and control.name in rule.controls)
+            grid.addWidget(checked, i, 0)
+            grid.addWidget(QLabel(control.name), i, 1)
+            operator = QComboBox()
+            operator.setAccessibleName(f"Operator for {control.name}")
+            is_switch = isinstance(control, SwitchSpec)
+            operator.addItems(["="] if is_switch else ["<", ">", "="])
+            grid.addWidget(operator, i, 2)
+            if is_switch:
+                value = QComboBox()
+                value.addItems(list(control.enum_names))
+            else:
+                value = DecimalSpinBox()
+                value.setDecimals(6)
+                value.setRange(-10000, 10000)
+                value.setValue(control.default)
+            value.setAccessibleName(f"Threshold for {control.name}")
+            grid.addWidget(value, i, 3)
+            if rule is not None and control.name in rule.controls:
+                op, threshold = rule.condition_for(control.name)
+                operator.setCurrentText(op)
+                if is_switch:
+                    value.setCurrentText(str(threshold))
+                else:
+                    value.setValue(float(threshold))
+            else:
+                operator.setCurrentText("=" if is_switch else ">")
+            checked.toggled.connect(self.update_fields)
+            self.rows[control.name] = (checked, operator, value)
+        grid.setColumnStretch(3, 1)
+        area.setWidget(content)
+        layout.addWidget(area)
+
         select_all = QPushButton("Select all")
         select_all.clicked.connect(self.select_all)
         layout.addWidget(select_all)
-
-        form = QFormLayout()
-        self.operator = QComboBox()
-        self.operator.addItems(["<", ">", "="])
-        form.addRow("Avoid all", self.operator)
-        self.number = DecimalSpinBox()
-        self.number.setRange(-10000, 10000)
-        self.number.setDecimals(6)
-        self.position = QComboBox()
-        self.value = QStackedWidget()
-        self.value.addWidget(self.number)
-        self.value.addWidget(self.position)
-        form.addRow("Value", self.value)
-        layout.addLayout(form)
         self.error = QLabel()
         self.error.setWordWrap(True)
         layout.addWidget(self.error)
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                        | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
-        self.selection.itemChanged.connect(self.update_fields)
         self.update_fields()
-        if rule:
-            self.operator.setCurrentText(rule.operator)
-            if isinstance(rule.value, str):
-                self.position.setCurrentText(rule.value)
-            else:
-                self.number.setValue(rule.value)
 
     def selected(self):
         return [
-            item.text() for item in (self.selection.item(i) for i in range(self.selection.count()))
-            if item.checkState() == Qt.CheckState.Checked
+            name for name, (checked, _, _) in self.rows.items()
+            if checked.isChecked()
         ]
 
     def select_all(self):
-        self.selection.blockSignals(True)
-        for i in range(self.selection.count()):
-            self.selection.item(i).setCheckState(Qt.CheckState.Checked)
-        self.selection.blockSignals(False)
+        for checked, _, _ in self.rows.values():
+            checked.setChecked(True)
         self.update_fields()
 
-    def update_fields(self):
-        selected = [self.controls[name] for name in self.selected()]
-        switches = [c for c in selected if isinstance(c, SwitchSpec)]
-        self.operator.setEnabled(not switches)
-        self.value.setCurrentIndex(int(bool(switches)))
-        message = ""
-        if switches:
-            self.operator.setCurrentText("=")
-            previous = self.position.currentText()
-            shared = [name for name in switches[0].enum_names
-                      if all(name in c.enum_names for c in switches)]
-            self.position.clear()
-            self.position.addItems(shared)
-            self.position.setCurrentText(previous)
-            if len(switches) != len(selected):
-                message = "Choose either knobs or switches for this condition."
-            elif not shared:
-                message = "The selected switches need a shared position name."
-        self.error.setText(message)
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(bool(selected) and not message)
+    def update_fields(self, *_):
+        selected = self.selected()
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(bool(selected))
+        for checked, operator, value in self.rows.values():
+            operator.setEnabled(checked.isChecked())
+            value.setEnabled(checked.isChecked())
 
     def accept(self):
         try:
-            names = self.selected()
+            selected = self.selected()
+            if not selected:
+                raise ValueError("Select at least one control")
+            conditions = {}
+            for name in selected:
+                _, operator, field = self.rows[name]
+                control = self.controls[name]
+                threshold = (
+                    field.currentText() if isinstance(control, SwitchSpec)
+                    else field.value()
+                )
+                conditions[name] = (operator.currentText(), threshold)
+            first_op, first_val = conditions[selected[0]]
             rule = PlanRule(
-                controls=names,
-                operator=self.operator.currentText(),
-                value=self.position.currentText() if self.value.currentIndex() else self.number.value(),
+                controls=tuple(selected), operator=first_op, value=first_val,
+                operators={
+                    name: op for name, (op, _) in conditions.items()
+                    if op != first_op
+                },
+                thresholds={
+                    name: value for name, (_, value) in conditions.items()
+                    if value != first_val
+                },
             )
-            validate_plan_rules([c.to_param_spec() for c in self.controls.values()], [rule])
+            validate_plan_rules(
+                [c.to_param_spec() for c in self.controls.values()], [rule]
+            )
         except ValueError as error:
             self.error.setText(str(error))
             return
