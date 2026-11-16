@@ -1969,7 +1969,7 @@ class WizardWindow(
         except Exception as error:
             self.notify_error(error)
 
-    def _attach(self, workspace, use_last_setup=False):
+    def _attach(self, workspace, use_last_setup=False, *, register_recent=True):
         self.close_audio()
         self._play_model_options_loaded = False
         self.scene.stop_blink()
@@ -1992,15 +1992,16 @@ class WizardWindow(
         audio = workspace.project.audio
         self.monitor_return.setChecked(audio.monitor_return_enabled)
         self.verify_asio_timing.setChecked(audio.verify_asio_timing)
-        paths = self.settings.value("recent", [])
-        if isinstance(paths, str):
-            paths = [paths]
-        self.settings.setValue(
-            "recent",
-            [str(workspace.directory)]
-            + [p for p in paths if p != str(workspace.directory)][:11],
-        )
-        self._refresh_recent()
+        if register_recent:
+            paths = self.settings.value("recent", [])
+            if isinstance(paths, str):
+                paths = [paths]
+            self.settings.setValue(
+                "recent",
+                [str(workspace.directory)]
+                + [p for p in paths if p != str(workspace.directory)][:11],
+            )
+            self._refresh_recent()
         self._loading = True
         try:
             prefs = workspace.preferences
