@@ -180,7 +180,7 @@ def test_plan_lhs_selection_is_saved_and_detected_as_a_plan_change(window, works
     from paranam.workspace import Workspace
 
     window._attach(workspace)
-    assert window.lhs_method.currentData() == "standard"
+    assert window.lhs_method.currentData() == "sobol"
     window.lhs_method.setCurrentIndex(window.lhs_method.findData("maximin"))
     assert workspace.preferences["lhs_method"] == "maximin"
     assert workspace.plan_changed()
