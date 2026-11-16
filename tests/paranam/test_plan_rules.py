@@ -581,3 +581,27 @@ def test_control_rename_preserves_mixed_rule_conditions(workspace):
     assert rule.thresholds == {"Tone": 7}
     assert rule.excludes({"Gain": 9, "Tone": 8})
     assert not rule.excludes({"Gain": 9, "Tone": 7})
+
+
+def test_mute_corner_transition_ignores_other_classified_training_points():
+    from nam.capture.project import classify_capture
+
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+    ]
+    project = new_project(controls, n_train=1, n_validation=0)
+    add_corner_captures(project)
+    original = project.entries_for_split("train")[0]
+    original.params = {"Gain I": 1.0, "Gain II": 5.0}
+    with_mute, replacement = classify_capture(project, original, "mute")
+    assert replacement == []
+    corner = next(
+        row for row in with_mute.entries if row.is_corner
+        and row.params == {"Gain I": 0.0, "Gain II": 0.0}
+    )
+    marked, transitions = classify_capture(with_mute, corner, "mute")
+    assert {"Gain I": 1.0, "Gain II": 0.0} in [
+        row.params for row in transitions
+    ]
+    assert marked.muted_settings == [original.params, corner.params]
