@@ -646,3 +646,35 @@ def test_avoid_rules_remain_backward_compatible_without_explicit_kind():
     assert rule.kind == "avoid"
     assert rule.excludes({"Gain": 1, "Tone": 0})
     assert not rule.excludes({"Gain": 1, "Tone": 9})
+
+
+
+def test_rule_editor_mute_kind_roundtrips_and_rejects_empty_region(qapp):
+    from paranam.plan_rules_ui import PlanRuleDialog, describe_rule
+    from nam.capture.plan_rules import validate_plan_rules
+
+    controls = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+    ]
+    dialog = PlanRuleDialog(None, controls)
+    dialog.rule_kind.setCurrentIndex(dialog.rule_kind.findData("mute"))
+    for name in ("Gain I", "Gain II"):
+        dialog.rows[name][0].setChecked(True)
+        dialog.rows[name][1].setCurrentText("=")
+        dialog.rows[name][2].setValue(0)
+    dialog.accept()
+    assert dialog.rule.kind == "mute"
+    assert describe_rule(dialog.rule) == "Mute when Gain I = 0 AND Gain II = 0"
+    reloaded = PlanRuleDialog(None, controls, PlanRule.model_validate(
+        dialog.rule.model_dump(mode="json")
+    ))
+    assert reloaded.rule_kind.currentData() == "mute"
+    dialog.close()
+    reloaded.close()
+
+    impossible = PlanRule(
+        controls=("Gain I",), operator="<", value=0, kind="mute"
+    )
+    with pytest.raises(ValueError, match="no valid setting"):
+        validate_plan_rules([controls[0].to_param_spec()], [impossible])
