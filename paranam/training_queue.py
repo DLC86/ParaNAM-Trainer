@@ -496,7 +496,8 @@ class TrainingQueue:
             checkpoint = read_json(job / f"resume-{member}.json", {})
             completed = max(completed, int(checkpoint.get("completed_epoch") or 0))
         if entry["state"] == "completed":
-            completed = max(completed, int(spec["preferences"]["epochs"]))
+            # An increased epoch target is not an executed epoch.
+            completed = max(completed, int(progress.get("epoch") or 0))
         if epochs < completed:
             raise ValueError(
                 f"Total epochs cannot be lower than the {completed} already completed."
