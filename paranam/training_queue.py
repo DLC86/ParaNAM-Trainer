@@ -159,9 +159,26 @@ def freeze_snr_noise(source, snapshot, source_project=None):
                 f"Cannot match the original capture for {frozen.y_path}. "
                 "Add a new training instance using the current recordings."
             )
-        powers[Path(frozen.y_path).as_posix()] = pre_blip_noise_power(
-            source / original.y_path, sf.info(frozen_path).samplerate
+        original_path = source / original.y_path
+        has_manifest = any(
+            (parent / "captures_raw" / "manifest.json").is_file()
+            for parent in original_path.parents
         )
+        if has_manifest:
+            noise_power = pre_blip_noise_power(
+                original_path, sf.info(frozen_path).samplerate
+            )
+        else:
+            # Imported and legacy captures have no preserved pre-blip return.
+            # Store an explicit "unavailable" value so default-on SNR can
+            # safely use unity weights, without inventing a noise measurement.
+            import warnings
+            warnings.warn(
+                f"SNR unavailable for {original.y_path}: no raw preamble. "
+                "Using unity SNR weights for this take."
+            )
+            noise_power = None
+        powers[Path(frozen.y_path).as_posix()] = noise_power
     return powers
 
 
@@ -215,9 +232,9 @@ class TrainingQueue:
                 previous_spec = read_json(Path(previous_job) / "spec.json")
                 previous_noise = previous_spec.get("learning", {}).get("snr_noise_powers")
                 if not isinstance(previous_noise, dict):
-                    raise ValueError(
-                        "The original job has no frozen SNR noise measurements"
-                    )
+                    # Jobs made before default-on SNR have no frozen noise.
+                    # Their audio is valid; do not pretend noise was measured.
+                    previous_noise = {}
                 from nam.capture.project import load_project
 
                 original_project = load_project(Path(previous_spec["project"]))
@@ -228,12 +245,9 @@ class TrainingQueue:
                     if old.split != new.split or old.params != new.params:
                         raise ValueError("Retrain captures no longer match the original plan")
                     if old.split == "train" and old.status == "captured":
-                        raw_noise = previous_noise.get(old.y_path)
-                        if raw_noise is None:
-                            raise ValueError(
-                                f"Missing original SNR measurement for {old.y_path}"
-                            )
-                        powers[new.y_path] = raw_noise
+                        # None explicitly records unavailable pre-blip noise.
+                        # Older jobs with no SNR data are still retrainable.
+                        powers[new.y_path] = previous_noise.get(old.y_path)
                 spec["learning"]["snr_noise_powers"] = powers
             else:
                 spec["learning"]["snr_noise_powers"] = freeze_snr_noise(
