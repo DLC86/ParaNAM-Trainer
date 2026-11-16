@@ -24,7 +24,7 @@ def test_validation_recommendations_per_joint_switch_state(knobs, expected):
 
 def test_validation_default_does_not_overwrite_saved_plans(tmp_path):
     ws = Workspace.create(tmp_path / "Rig", "Rig")
-    assert ws.preferences["n_validation"] == 12
+    assert ws.preferences["n_validation"] == 8
     ws.preferences["n_validation"] = 6
     ws.save()
     assert Workspace(ws.directory).preferences["n_validation"] == 6
