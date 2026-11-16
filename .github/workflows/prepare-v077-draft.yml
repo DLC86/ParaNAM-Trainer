@@ -8,6 +8,8 @@ on:
       - '.github/workflows/paranam-installers.yml'
       - '.github/workflows/paranam-tests.yml'
       - 'packaging/pytest_windows_runner.py'
+      - 'packaging/validate_bundle.py'
+      - 'tests/paranam/test_release_080.py'
       - 'tests/paranam/test_plan_rules.py'
       - 'tests/capture/test_auto_recommendations.py'
       - 'nam/capture/planner.py'
