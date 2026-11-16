@@ -409,6 +409,12 @@ class CaptureProject(_BaseModel):
     knobs: list[KnobModel | SwitchModel]
     seed: int = 0
     plan_rules: list[PlanRule] = _Field(default_factory=list)
+    # Exact settings classified during capture. These are not generalized
+    # across the knob space unless the user explicitly defines a separate rule.
+    muted_settings: list[dict[str, float | str]] = _Field(default_factory=list)
+    avoided_settings: list[dict[str, float | str]] = _Field(default_factory=list)
+    capture_mark_history: list[dict[str, _Any]] = _Field(default_factory=list)
+    dynamic_capture_counter: int = 0
     train_input: str = "input_train.wav"
     validation_input: str = "input_validation.wav"
     sample_rate: _Optional[int] = None
@@ -607,6 +613,199 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
     )
     project.entries[insert_at:insert_at] = added
     return added, skipped
+
+
+
+def classify_capture(
+    project: CaptureProject,
+    entry: CaptureEntryModel,
+    classification: Literal["mute", "avoid"],
+) -> tuple[CaptureProject, list[CaptureEntryModel]]:
+    """Classify one capture during reamping and update the *remaining* plan.
+
+    This works on a deep copy: failed replacement searches never mutate a
+    recorded project. Existing recordings, indices and captured settings are
+    untouched. Marking a silent point creates only a fixed virtual zero-output
+    target; unlike an individual Mute at min/max it must NOT generalize to any
+    neighboring setting or any other switch state.
+    """
+    from .planner import (
+        _capture_grid_values, _decode_named_params,
+        _quantize_to_capture_grid, _settings_key,
+        _planned_from_params, sample_raw_settings,
+    )
+    from .plan_rules import allows
+
+    if classification not in ("mute", "avoid"):
+        raise ValueError("Classification must be mute or avoid")
+    if project.capture_type != "parametric" or entry.split not in ("train", "validation"):
+        raise ValueError("Only parametric training/validation settings can be classified")
+    draft = project.model_copy(deep=True)
+    matches = [
+        row for row in draft.entries
+        if row.y_path == entry.y_path and row.split == entry.split
+    ]
+    if len(matches) != 1:
+        raise ValueError("The selected capture is no longer part of this plan")
+    old = matches[0]
+    specs = tuple(knob.to_param_spec() for knob in draft.knob_specs())
+    knobs = draft.knob_specs()
+    key = _settings_key(old.params, specs)
+    blocked = [
+        _settings_key(row, specs)
+        for row in draft.muted_settings + draft.avoided_settings
+    ]
+    if key in blocked:
+        raise ValueError("This combination has already been classified")
+    attr = "muted_settings" if classification == "mute" else "avoided_settings"
+    getattr(draft, attr).append(dict(old.params))
+    mark_index = draft.entries.index(old)
+    draft.entries.remove(old)
+    # Keep a recorded WAV intact on disk but prevent its accidental reuse as
+    # training data during any subsequent plan regeneration.
+    if old.status == "captured":
+        draft.unused_recordings[old.y_path] = {
+            "entry": old.model_dump(mode="json"), "context": None,
+        }
+    draft.capture_mark_history.append({
+        "classification": classification,
+        "entry": old.model_dump(mode="json"),
+        "position": mark_index,
+    })
+    occupied = {_settings_key(row.params, specs) for row in draft.entries}
+    occupied.update(blocked)
+    occupied.add(key)
+    added = []
+
+    def acceptable(params):
+        identity = _settings_key(params, specs)
+        if identity in occupied or not allows(draft.plan_rules, params):
+            return False
+        for spec in specs:
+            if spec.type == "switch":
+                if params[spec.name] not in spec.enum_names:
+                    return False
+                continue
+            v = float(params[spec.name])
+            if ((spec.avoid_zero and v == spec.min)
+                or (spec.avoid_max and v == spec.max)
+                or (spec.avoid_below is not None and v < spec.avoid_below)
+                or (spec.avoid_above is not None and v > spec.avoid_above)):
+                return False
+        return True
+
+    def append_point(params, *, split, prefix, corner=False):
+        for _ in range(100000):
+            number = draft.dynamic_capture_counter
+            draft.dynamic_capture_counter += 1
+            start = max((r.index for r in draft.entries if r.split == split), default=-1) + 1
+            planned = _planned_from_params(
+                prefix, split, specs, [params],
+                index_offset=start, filename_start=number,
+            )[0]
+            if (planned.y_path not in {r.y_path for r in draft.entries}
+                    and planned.y_path not in draft.unused_recordings):
+                break
+        else:
+            raise ValueError("Unable to reserve a unique name for an additional capture")
+        row = CaptureEntryModel(
+            index=planned.index, split=split, params=planned.params,
+            y_path=planned.y_path, is_corner=corner,
+        )
+        before = next(
+            (i for i, existing in enumerate(draft.entries)
+             if existing.split == "validation" and split == "train"),
+            len(draft.entries),
+        )
+        draft.entries.insert(before, row)
+        occupied.add(_settings_key(params, specs))
+        added.append(row)
+
+    # A rejected sampled point needs one fresh sample in the same split. Keep
+    # complex switch states fixed; the remaining Sobol/LHS coordinates are
+    # sampled from independent deterministic streams, never redraw prior points.
+    is_corner = bool(old.is_corner) or _Path(old.y_path).name.startswith("corner_")
+    special = _Path(old.y_path).name.startswith("mute_edge_")
+    if not is_corner and not special:
+        fixed = {
+            knob.name: old.params[knob.name]
+            for knob in knobs
+            if isinstance(knob, SwitchSpec) and knob.planning_mode == "complex"
+        }
+        fixed.update(
+            {knob.name: knob.max for knob in knobs
+             if isinstance(knob, KnobSpec) and knob.clean_volume}
+        )
+        replacement = None
+        for attempt in range(16):
+            candidate_seed = (
+                draft.seed + 2654435761 * (draft.dynamic_capture_counter + attempt + 1)
+            ) % (2**32)
+            try:
+                points = sample_raw_settings(
+                    specs, 64, seed=candidate_seed, lhs_method=draft.lhs_method
+                )
+            except ValueError:
+                # Orthogonal LHS only accepts n=p², p prime.
+                points = sample_raw_settings(
+                    specs, 49, seed=candidate_seed, lhs_method=draft.lhs_method
+                )
+            for raw in points:
+                values = _decode_named_params(
+                    _quantize_to_capture_grid(
+                        raw, specs, default_step=DEFAULT_KNOB_STEP
+                    ), specs
+                )
+                values.update(fixed)
+                if acceptable(values):
+                    replacement = values
+                    break
+            if replacement is not None:
+                break
+        if replacement is None:
+            raise ValueError(
+                "No unused valid setting was found to replace this capture. "
+                "Broaden the allowed range or reduce the requested captures."
+            )
+        append_point(
+            replacement, split=old.split,
+            prefix="dynamic_train" if old.split == "train" else "dynamic_val",
+        )
+
+    # A marked muted CORNER is an exact virtual anchor. If LHS/Sobol has not
+    # already sampled the nearest adjacent grid step on an axis at its minimum,
+    # add the corresponding corner-adjacent training capture. Move one control
+    # at a time: for a two-gain mute at (0,0), both (step,0) and (0,step)
+    # may be non-muted, and moving both together would lose this information.
+    if classification == "mute" and is_corner:
+        for knob, spec in zip(knobs, specs):
+            if not isinstance(knob, KnobSpec) or knob.clean_volume:
+                continue
+            endpoint = old.params[knob.name]
+            if endpoint not in (knob.min, knob.max):
+                continue
+            grid = _capture_grid_values(spec, DEFAULT_KNOB_STEP)
+            if not grid:
+                continue
+            if endpoint == knob.min:
+                values = [v for v in grid if v > endpoint]
+                step = values[0] if values else None
+            else:
+                values = [v for v in grid if v < endpoint]
+                step = values[-1] if values else None
+            if step is None:
+                continue
+            # Only training samples count; held-out validation must remain held out.
+            if any(
+                row.params[knob.name] == step
+                for row in draft.entries if row.split == "train"
+            ):
+                continue
+            params = dict(old.params)
+            params[knob.name] = step
+            if acceptable(params):
+                append_point(params, split="train", prefix="mute_edge", corner=False)
+    return draft, added
 
 
 def save_project(project: CaptureProject, project_dir: _Path) -> _Path:
