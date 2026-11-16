@@ -18,6 +18,7 @@ from pathlib import Path as _Path
 from typing import Any as _Any
 from typing import Optional as _Optional
 
+from .planner import mute_corner_settings as _mute_corner_settings
 from .project import CONCAT_LEARNING_CONFIG_FILENAME
 from .project import CONCAT_MODEL_CONFIG_FILENAME
 from .project import HYPER_LEARNING_CONFIG_FILENAME
@@ -483,7 +484,10 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     if mute_targets:
         # Training-only targets: never add player-facing model fields.
         loss["mute_anchor"] = {
-            "targets": mute_targets, "weight": 0.25, **MUTE_ANCHOR_DEFAULTS
+            "targets": mute_targets,
+            "corner_targets": _mute_corner_settings(project.knob_specs(), rules=project.plan_rules),
+            "weight": 0.25,
+            **MUTE_ANCHOR_DEFAULTS,
         }
     return {
         **_calibration_metadata(project),
