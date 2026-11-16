@@ -121,9 +121,11 @@ Both classifications are exact combinations; Unstable includes dangerous or
 otherwise unwanted settings. **The marked row stays in the Capture list** and
 shows **Mute** or **Unstable** in its **Warnings** column. Even if its WAV was
 already recorded, it is excluded from training and validation while marked.
-A rejected sampled LHS/Sobol point receives a replacement setting in the same
-split. Recorded settings are preserved, and Complex Switch states remain
-fixed for replacement points. Selecting the marked row and recording it again
+An **Unstable** sampled LHS/Sobol point receives a replacement setting
+in the same split. A **Mute** point provides an exact virtual silence target
+and does not require a replacement, except for possible additional
+boundary-transition captures near a muted Corner. Recorded settings are
+preserved, and Complex Switch states remain fixed for Unstable replacements. Selecting the marked row and recording it again
 clears its classification **only after a successful capture**. There is no
 Undo control; legacy Undo-marked projects recover their original rows when opened.
 
