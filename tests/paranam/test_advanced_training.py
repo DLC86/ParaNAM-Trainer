@@ -337,6 +337,7 @@ def test_mute_anchor_fields_persist_and_reach_job(window, workspace):
     spec = read_json(job / "spec.json")
     assert spec["model"]["loss"]["mute_anchor"] == {
         "targets": [{"name": "Gain", "edge": "min"}],
+        "corner_targets": [{"Gain": 0.0}],
         "weight": 0.25, "interval": 3, "batch_size": 4, "ny": 1000,
     }
     (job / "resume-0.ckpt").touch()
