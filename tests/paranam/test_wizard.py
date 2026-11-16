@@ -298,7 +298,8 @@ def test_capture_view_marks_mute_and_unstable_without_hiding_rows(window, worksp
     window.classify_selected_capture("mute")
     project = workspace.project
     assert first.params in project.muted_settings
-    assert len(project.entries) > count
+    # Ordinary Mute marks are virtual training targets, not replacement WAVs.
+    assert len(project.entries) == count
     assert any(row.y_path == first.y_path for row in project.entries)
     assert "mute" in window.capture_summary.text().lower()
     first_row = next(
@@ -321,6 +322,8 @@ def test_capture_view_marks_mute_and_unstable_without_hiding_rows(window, worksp
     second = window._capture_entries[second_row]
     window.classify_selected_capture("avoid")
     assert second.params in workspace.project.avoided_settings
+    # Unstable still needs a fresh valid capture, unlike Mute.
+    assert len(workspace.project.entries) == count + 1
     assert any(row.y_path == second.y_path for row in workspace.project.entries)
     second_row = next(
         i for i, row in enumerate(window._capture_entries)
@@ -381,6 +384,13 @@ def test_lhs_sampler_names_and_new_switch_default_to_simple(window, workspace):
 def test_training_count_automatically_updates_validation_for_every_sampler(
     window, workspace, method
 ):
+    # The standard fixture has just one 0.5-step knob (only 21 positions).
+    # Use a sufficiently fine, two-dimensional grid to verify the 64/16
+    # UI behavior rather than incorrectly expecting an impossible split.
+    workspace.draft_controls = [
+        KnobSpec("Gain", 0, 10, step=0.1).to_dict(),
+        KnobSpec("Tone", 0, 10, step=0.1).to_dict(),
+    ]
     window._attach(workspace)
     window.lhs_method.setCurrentIndex(window.lhs_method.findData(method))
 
@@ -407,9 +417,9 @@ def test_training_ratio_obeys_limited_capture_grid(window, workspace):
     workspace.draft_controls = [KnobSpec("Tone", 0, 1, step=0.5).to_dict()]
     window._attach(workspace)
     window.refresh_recommendation(True)
-    assert window.n_train.value() == 3
+    # One of the three grid points is reserved for the optional Default.
+    assert window.n_train.value() == 2
     assert window.n_validation.value() == 0
-    # The three available settings are already exhausted, so the
-    # validation field cannot exceed its real held-out capacity.
-    window.n_train.setValue(2)
+    # The usable settings are exhausted, so the held-out split stays at 0.
+    window.n_train.setValue(1)
     assert window.n_validation.value() == 0
