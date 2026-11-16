@@ -351,3 +351,25 @@ def test_mute_capture_row_stays_selectable_for_later_recording(window, workspace
     assert window.capture_table.item(row, 5).text().startswith("Mute")
     assert window.record_button.text() == "Record this setting"
     assert not hasattr(window, "undo_last_capture_mark")
+
+
+def test_lhs_sampler_names_and_new_switch_default_to_simple(window, workspace):
+    window._attach(workspace)
+    labels = {
+        window.lhs_method.itemData(i): window.lhs_method.itemText(i)
+        for i in range(window.lhs_method.count())
+    }
+    assert labels["standard"] == "Standard LHS"
+    assert labels["maximin"] == "Maximin LHS"
+    assert labels["orthogonal"] == "Orthogonal LHS"
+    assert labels["near_orthogonal"] == "Near-orthogonal LHS"
+    assert labels["optimized"] == "Optimized LHS"
+    assert labels["sobol"] == "Sobol"
+    assert window.lhs_method.currentData() == "sobol"
+
+    assert window.control_kind.currentData() == "knob"
+    assert window.switch_mode.currentData() == "simple"
+    window.control_kind.setCurrentIndex(window.control_kind.findData("switch"))
+    assert window.switch_mode.currentData() == "simple"
+    assert workspace.draft_controls[0]["type"] == "switch"
+    assert workspace.draft_controls[0]["planning_mode"] == "simple"
