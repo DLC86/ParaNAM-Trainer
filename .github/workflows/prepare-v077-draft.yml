@@ -149,7 +149,10 @@ jobs:
               echo "Waiting for exact parent source CI on $ci_sha (workflow-only follow-up)"
             fi
             tests_conclusion=""
-            for attempt in $(seq 1 120); do
+            # Full native/Python CI can exceed 20 minutes on hosted runners.
+            # Give it up to 45 minutes; a terminal failure is still rejected
+            # immediately, and never dispatch installers without green CI.
+            for attempt in $(seq 1 270); do
               tests_conclusion="$(gh api "repos/$GH_REPO/actions/runs?head_sha=$ci_sha&per_page=40" \
                 --jq '.workflow_runs[] | select(.name == "ParaNAM tests") | .conclusion' | head -n 1)"
               if [[ "$tests_conclusion" == "success" ]]; then break; fi
