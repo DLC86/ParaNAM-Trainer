@@ -1007,7 +1007,7 @@ class WizardWindow(
         self.active_learning_help = box.itemAt(box.count() - 1).widget()
         self.active_learning_help.hide()
         layout.addWidget(self.plan_card)
-        self.n_train.valueChanged.connect(self._sync_capture_limits)
+        self.n_train.valueChanged.connect(self._training_capture_count_changed)
         self.n_validation.valueChanged.connect(self._sync_capture_limits)
         for field in (
             self.n_train,
@@ -2837,6 +2837,33 @@ class WizardWindow(
             self.refresh_recommendation(True)
             self.workspace.save()
 
+    def _training_capture_count_changed(self, *_):
+        """Keep validation at a quarter of training when training is edited.
+
+        Do not overwrite a manually edited validation count on unrelated edits.
+        Switch-only plans continue to use their repeated-audio validation policy.
+        """
+        if self._loading or not self.workspace:
+            return
+        if self.capture_kind.currentData() == "static":
+            return
+        controls = [
+            control_from_dict(c) for c in self.workspace.draft_controls
+        ]
+        if any(isinstance(c, KnobSpec) and not c.clean_volume for c in controls):
+            from nam.capture.params import validation_for_training
+
+            target = validation_for_training(self.n_train.value())
+            self.n_validation.blockSignals(True)
+            try:
+                # The old training split may have imposed a lower validation
+                # maximum. Restore the UI ceiling before recalculating limits.
+                self.n_validation.setMaximum(1000000)
+                self.n_validation.setValue(target)
+            finally:
+                self.n_validation.blockSignals(False)
+        self._sync_capture_limits()
+
     def _sync_capture_limits(self, *_):
         """Bound both Capture Plan spinboxes to feasible, distinct settings.
 
@@ -2955,7 +2982,9 @@ class WizardWindow(
                     controls, rules, train,
                     include_default_as_additional_capture=include_default,
                 )
-                val = min(val_cap, val // old_combinations * combinations)
+                from nam.capture.params import validation_for_training
+
+                val = min(val_cap, validation_for_training(train))
                 recommendation = train, val if val >= combinations else 0, combinations
             return recommendation, corner_capture_count(controls, rules=rules)
 
@@ -2976,7 +3005,7 @@ class WizardWindow(
             f"Suggested: {train} sampled training + {val} validation captures, "
             f"plus {'1 default + ' if include_default and any(isinstance(c, KnobSpec) and not c.clean_volume for c in controls) else ''}"
             f"up to {count} corners.\n"
-            f"{combinations} Complex Switch combination(s); Simple Switches share the LHS plan. Each enabled split covers every Complex combination. Counts account for actual control positions and are starting guidelines, not an accuracy guarantee.{note}"
+            f"{combinations} Complex Switch combination(s); Simple Switches share the sampling plan. Validation targets 25% of training captures, subject to available combinations. Each enabled split covers every Complex combination. Counts account for actual control positions and are starting guidelines, not an accuracy guarantee.{note}"
         )
         if autofill:
             for field in (self.n_train, self.n_validation):
