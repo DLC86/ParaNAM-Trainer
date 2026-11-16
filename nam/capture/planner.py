@@ -1211,7 +1211,7 @@ def plan_captures(
             sources = [defaults] + [entry.params for entry in train + validation]
             if not any(getattr(c, "clean_volume", False) for c in knobs):
                 for raw in sample_raw_settings(
-                    specs, max(64, n_train + n_validation),
+                    specs, min(256, max(64, n_train + n_validation)),
                     seed=(seed + 131071) % (2**32), lhs_method="standard",
                 ):
                     sources.append(_decode_named_params(
@@ -1224,6 +1224,19 @@ def plan_captures(
                 candidate = {name: candidate[name] for name in names}
                 key = _settings_key(candidate, specs)
                 if key in occupied or not allows(rules, candidate):
+                    continue
+                # Defaults may be outside an Avoid range when the default
+                # capture itself is disabled. Never import those excluded
+                # values into an additional mute-transition WAV.
+                if any(
+                    (spec.avoid_zero and candidate[spec.name] == spec.min)
+                    or (spec.avoid_max and candidate[spec.name] == spec.max)
+                    or (spec.avoid_below is not None
+                        and candidate[spec.name] < spec.avoid_below)
+                    or (spec.avoid_above is not None
+                        and candidate[spec.name] > spec.avoid_above)
+                    for spec in specs if spec.type == "continuous"
+                ):
                     continue
                 if any(
                     (getattr(c, "mute_at_min", False) and candidate[c.name] == c.min)
