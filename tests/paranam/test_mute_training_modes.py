@@ -34,7 +34,7 @@ def test_mode_is_saved_and_blocks_incompatible_resume(workspace, mode):
     workspace.preferences["advanced_parametric"] = {"mute_training_mode": mode}
     job = training.make_job(workspace)
     spec = read_json(job / "spec.json")
-    assert spec["model"]["loss"]["mute_anchor"]["mode"] == mode
+    assert spec["model"]["loss"]["mute_anchor"].get("mode", "anchor") == mode
     assert spec["learning"]["rms_loss_normalization"]
     assert spec["learning"]["snr_weighted_loss_normalization"]
     (job / "resume-0.ckpt").touch()

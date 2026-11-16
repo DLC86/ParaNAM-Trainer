@@ -1169,6 +1169,73 @@ class _ParametricLightningModule(_LightningModule):
         else:
             yield None, self._shared_step(batch)
 
+    def _mute_anchor_setting(self, net, config, target_index, device):
+        """Sample muted endpoints, exact points or AND-rule regions."""
+        fixed_targets = config.corner_targets + config.point_targets
+        fixed_count = len(fixed_targets)
+        special_count = fixed_count + len(config.rule_targets)
+        # Sweep every fixed mute point and every conditional mute region before
+        # alternating with general single-knob endpoint anchors.
+        use_special = bool(special_count) and (
+            not config.targets or target_index < special_count
+            or (target_index - special_count) % 4 == 0
+        )
+        setting = _sample_raw_params(net.param_specs, 1, device=device)
+        if use_special:
+            special_index = (
+                target_index % special_count
+                if not config.targets or target_index < special_count
+                else (target_index - special_count) // 4 % special_count
+            )
+            if special_index < fixed_count:
+                row = fixed_targets[special_index]
+                for index, spec in enumerate(net.param_specs):
+                    value = row[spec.name]
+                    if spec.type == "switch":
+                        value = spec.enum_names.index(value)
+                    setting[0, index] = float(value)
+            else:
+                from ..capture.plan_rules import PlanRule
+                rule = PlanRule.model_validate(
+                    config.rule_targets[special_index - fixed_count]
+                )
+                for index, spec in enumerate(net.param_specs):
+                    if spec.name not in rule.controls:
+                        continue  # Unconstrained controls stay randomized.
+                    op, threshold = rule.condition_for(spec.name)
+                    if spec.type == "switch":
+                        setting[0, index] = spec.enum_names.index(threshold)
+                    elif op == "=":
+                        setting[0, index] = float(threshold)
+                    else:
+                        # Draw from the exact interval covered by the Mute
+                        # condition. Use nextafter in the tensor dtype to keep
+                        # strict comparisons strict even on float32 tensors.
+                        boundary = _torch.tensor(
+                            float(threshold), dtype=setting.dtype, device=device
+                        )
+                        direction = _torch.full_like(
+                            boundary, float("-inf") if op == "<" else float("inf")
+                        )
+                        bound = _torch.nextafter(boundary, direction)
+                        low = _torch.tensor(float(spec.min), dtype=setting.dtype, device=device)
+                        high = _torch.tensor(float(spec.max), dtype=setting.dtype, device=device)
+                        if op == "<":
+                            high = _torch.minimum(high, bound)
+                        else:
+                            low = _torch.maximum(low, bound)
+                        if bool((low > high).item()):
+                            raise ValueError(
+                                f"Mute rule has no valid neural values for {spec.name}"
+                            )
+                        setting[0, index] = low + (high - low) * _torch.rand_like(low)
+        else:
+            name, edge = config.targets[target_index % len(config.targets)]
+            index = next(i for i, spec in enumerate(net.param_specs) if spec.name == name)
+            spec = net.param_specs[index]
+            setting[0, index] = spec.min if edge == "min" else spec.max
+        return setting
+
     def _mute_anchor_losses(self, batch, config, target_index):
         """Apply one muted endpoint to real input audio, alternating targets.
 

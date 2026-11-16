@@ -30,6 +30,7 @@ def requested_settings():
         "mute_anchor_interval": 1,
         "mute_anchor_batch_size": 2,
         "mute_anchor_ny": 512,
+        "mute_training_mode": "anchor",
     }
 
 

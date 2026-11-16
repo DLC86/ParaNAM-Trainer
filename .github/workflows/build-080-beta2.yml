@@ -35,6 +35,13 @@ jobs:
             sleep 15
           done
           exit 1
+      - name: Check mute-method regressions before full suite
+        run: >-
+          python -m pytest -q -o addopts= --basetemp .test-mute
+          tests/paranam/test_mute_training_modes.py
+          tests/paranam/test_hypera2_defaults059.py
+          tests/paranam/test_advanced_training.py::test_mute_anchor_fields_persist_and_reach_job
+          tests/parametric/test_hyper_a2.py::test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio
       - name: Test beta 2 mute modes and regression suite
         run: >-
           python -m pytest -q -o addopts= --basetemp .test-temp

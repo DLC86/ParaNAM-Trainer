@@ -431,7 +431,9 @@ def make_job(workspace, resume=False, job_directory=None):
             if mute_mode not in ("anchor", "virtual", "weight"):
                 raise ValueError(f"Unknown mute training method: {mute_mode!r}")
             if mute is not None:
-                mute["mode"] = mute_mode
+                # Keep pre-beta default Mute Anchor configs byte-compatible.
+                if mute_mode != "anchor":
+                    mute["mode"] = mute_mode
                 mute.update(
                     mute_anchor_settings(
                         {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}
