@@ -1083,34 +1083,30 @@ class WizardWindow(
             "muted",
         )
         layout.addWidget(self.capture_status)
-        classifications = QHBoxLayout()
-        classifications.addWidget(label("Selected setting:", "muted"))
         self.mark_mute_button = button(
-            "Mark as mute", lambda: self.classify_selected_capture("mute")
+            "Mute", lambda: self.classify_selected_capture("mute")
         )
         self.mark_mute_button.setToolTip(
             "No WAV required. Add an exact virtual silence target and adapt the remaining "
             "training plan. Does not assume any other setting is muted."
         )
         self.mark_avoid_button = button(
-            "Avoid this setting", lambda: self.classify_selected_capture("avoid")
+            "Avoid", lambda: self.classify_selected_capture("avoid")
         )
         self.mark_avoid_button.setToolTip(
             "Exclude this unstable or unwanted combination from training and validation "
             "without changing captures already recorded."
         )
-        classifications.addWidget(self.mark_mute_button)
-        classifications.addWidget(self.mark_avoid_button)
+        row.addWidget(self.mark_mute_button)
+        row.addWidget(self.mark_avoid_button)
         self.undo_capture_mark_button = button(
-            "Undo last mark", self.undo_last_capture_mark
+            "Undo", self.undo_last_capture_mark
         )
         self.undo_capture_mark_button.setToolTip(
             "Restore the last mute/avoid classification and its original capture. "
             "Cannot undo after a replacement has already been recorded."
         )
-        classifications.addWidget(self.undo_capture_mark_button)
-        classifications.addStretch(1)
-        layout.addLayout(classifications)
+        row.addWidget(self.undo_capture_mark_button)
         self.mark_capture_actions = (
             self.mark_mute_button, self.mark_avoid_button,
             self.undo_capture_mark_button,
