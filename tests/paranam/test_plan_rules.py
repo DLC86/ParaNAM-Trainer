@@ -137,7 +137,8 @@ def test_muted_endpoint_is_excluded_from_training_validation_and_corners(
     mute_flags, forbidden
 ):
     from nam.capture.planner import (
-        _capture_grid_values, corner_capture_count, plan_corner_captures
+        _capture_grid_values, corner_capture_count, plan_corner_captures,
+        mute_corner_settings,
     )
 
     controls = [
@@ -151,13 +152,30 @@ def test_muted_endpoint_is_excluded_from_training_validation_and_corners(
         controls, n_train=20, n_validation=8, seed=31
     )
     corners, _ = plan_corner_captures(controls)
-    assert corners and corner_capture_count(controls) == len(corners)
-    assert any(row.params["Drive"] == 1.0 for row in corners) == bool(
-        mute_flags.get("mute_at_min")
+    virtual = mute_corner_settings(controls)
+    assert corner_capture_count(controls) == len(corners)
+    assert len(virtual) == (8 if len(forbidden) == 2 else 4)
+    assert all(
+        any(row[k.name] == getattr(k, "min" if e == "min" else "max")
+            for k in controls if hasattr(k, "mute_at_min")
+            for e in ("min", "max") if getattr(k, f"mute_at_{e}"))
+        for row in virtual
     )
-    assert any(row.params["Drive"] == 9.0 for row in corners) == bool(
-        mute_flags.get("mute_at_max")
+    # Muted corners no longer require WAVs, not even at the adjacent step.
+    assert not any(
+        row.params["Drive"] == (1.0 if mute_flags.get("mute_at_min") else 9.0)
+        for row in corners
+        if mute_flags.get("mute_at_min") or mute_flags.get("mute_at_max")
     )
+    assert all(
+        row.params["Drive"] not in ({1.0} if mute_flags.get("mute_at_min") else set())
+        | ({9.0} if mute_flags.get("mute_at_max") else set())
+        for row in corners
+    )
+    for endpoint in ({1.0} if mute_flags.get("mute_at_min") else set()) | (
+        {9.0} if mute_flags.get("mute_at_max") else set()
+    ):
+        assert any(row.params["Drive"] == endpoint for row in train)
     assert all(
         row.params["Drive"] not in forbidden
         for row in [*train, *validation, *corners]
@@ -197,3 +215,44 @@ def test_mute_anchor_targets_ignore_switches_and_keep_both_endpoints():
     ]
     assert "mute_at_min" not in model["net"]["config"]["params"][0]
     assert "mute_at_max" not in model["net"]["config"]["params"][0]
+
+
+def test_mute_corners_are_virtual_while_nonmuted_corners_remain_recordable():
+    from nam.capture.planner import mute_corner_settings, plan_corner_captures
+
+    controls = [
+        KnobSpec("Gain", 0, 10, 0.5, 5, mute_at_min=True, is_gain=True),
+        KnobSpec("Tone", 0, 10, 0.5, 5),
+        KnobSpec("Presence", 0, 10, 0.5, 5),
+    ]
+    virtual = mute_corner_settings(controls)
+    real, _ = plan_corner_captures(controls)
+    assert len(virtual) == 4
+    assert len(real) == 4
+    assert {(r["Gain"], r["Tone"], r["Presence"]) for r in virtual} == {
+        (0.0, 0.0, 0.0), (0.0, 0.0, 10.0),
+        (0.0, 10.0, 0.0), (0.0, 10.0, 10.0),
+    }
+    assert all(row.params["Gain"] == 10.0 for row in real)
+
+
+def test_sobol_reserves_only_missing_mute_transition_without_changing_sampled_points():
+    from nam.capture.planner import _plan_captures_unadjusted
+
+    controls = [
+        KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True),
+        KnobSpec("Tone", 0, 10, 1, 5),
+        KnobSpec("Presence", 0, 10, 1, 5),
+    ]
+    raw, raw_val = _plan_captures_unadjusted(
+        controls, n_train=8, n_validation=4, seed=17, lhs_method="sobol"
+    )
+    train, val = plan_captures(
+        controls, n_train=8, n_validation=4, seed=17, lhs_method="sobol"
+    )
+    assert val == raw_val
+    assert train[:len(raw)] == raw
+    assert len(train) in (8, 9)
+    assert any(row.params["Gain"] == 1.0 for row in train)
+    assert len({tuple(row.params.values()) for row in train + val}) == len(train) + len(val)
+    assert all(row.params["Gain"] != 0.0 for row in train + val)
