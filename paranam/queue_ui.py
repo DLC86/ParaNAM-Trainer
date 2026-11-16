@@ -142,7 +142,7 @@ class QueueActions:
             done = read_json(job / f"resume-{member}.json", {})
             completed = max(completed, int(done.get("completed_epoch") or 0))
         if entry["state"] == "completed":
-            completed = max(completed, current)
+            completed = max(completed, int(progress.get("epoch") or 0))
         value, accepted = QInputDialog.getInt(
             self, "Change total epochs",
             f"Total epochs (at least {max(1, completed)} already completed):",
