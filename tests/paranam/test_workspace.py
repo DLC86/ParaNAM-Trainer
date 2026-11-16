@@ -140,3 +140,25 @@ def test_changed_validation_must_be_recaptured(workspace):
     (workspace.directory / workspace.project.validation_input).write_bytes(b"changed")
     assert workspace.plan_changed()
     assert not workspace.training_ready()
+
+
+def test_discovered_mute_and_avoid_points_survive_replanning(workspace):
+    from nam.capture.project import classify_capture
+
+    initial = workspace.project.entries_for_split("train")[0]
+    first, _ = classify_capture(workspace.project, initial, "mute")
+    other = first.entries_for_split("validation")[0]
+    workspace.project, _ = classify_capture(first, other, "avoid")
+    workspace.save()
+    muted = dict(initial.params)
+    avoided = dict(other.params)
+    workspace.preferences["seed"] += 7
+    assert workspace.plan_changed()
+    workspace.generate_plan()
+    assert muted in workspace.project.muted_settings
+    assert avoided in workspace.project.avoided_settings
+    assert all(e.params not in (muted, avoided) for e in workspace.project.entries)
+    reopened = Workspace(workspace.directory)
+    assert muted in reopened.project.muted_settings
+    assert avoided in reopened.project.avoided_settings
+    assert not reopened.plan_changed()
