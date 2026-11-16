@@ -240,7 +240,16 @@ class Workspace:
         workspace = cls(directory)
         from .recipes import training_preset, preset_batch_size
 
+        from nam.capture.params import capture_recommendations
+
+        suggested_train, suggested_val, _ = capture_recommendations(
+            controls, include_default_as_additional_capture=True,
+            lhs_method="sobol",
+        )
         workspace.preferences.update(
+            n_train=suggested_train,
+            n_validation=suggested_val,
+            lhs_method="sobol",
             epochs=200,
             parametric_epochs=200,
             static_epochs=200,
