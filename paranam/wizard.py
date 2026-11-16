@@ -860,10 +860,11 @@ class WizardWindow(
         editor.addWidget(self.control_error)
         self.control_error.hide()
         box.addWidget(self.control_editor)
-        self.rules_card, rules_box = card("Avoid rules")
+        self.rules_card, rules_box = card("Rules")
         rules_box.addWidget(label(
-            "Exclude unsafe combinations from the capture plan. Each knob can use "
-            "a different comparison and threshold (for example, Gain > 8 AND Bias > 7).",
+            "Avoid excludes unstable settings; Mute excludes silent combinations "
+            "and teaches the network silence with virtual anchors. "
+            "Conditions combine with AND, e.g. Gain I = 0 AND Gain II = 0.",
             "muted",
         ))
         self.plan_rule_list = QListWidget()
@@ -3392,7 +3393,7 @@ class WizardWindow(
                 next((e for e in group if e.status != "captured"), group[0])
                 for group in groups
             ]
-            headers = ["Name", "Status", "Latency", "Peak (dBFS)", "Warnings"]
+            headers = ["Name", "Status", "Latency", "Peak (dBFS)", "Tags/Warnings"]
         else:
             planned_entries = tuple(project.entries)
             controls = project.control_specs()
@@ -3405,7 +3406,7 @@ class WizardWindow(
                 "Status",
                 "Latency",
                 "Peak (dBFS)",
-                "Warnings",
+                "Tags/Warnings",
             ]
         self._capture_entries = entries
         knob_ranges = {
@@ -3509,6 +3510,8 @@ class WizardWindow(
                 color = (
                     "#00ff00"
                     if running
+                    else "#53aaff"
+                    if not static and project.classification_for_entry(entry) is not None
                     else "#ffff00"
                     if has_warning
                     else "#00ffff"
@@ -3583,7 +3586,8 @@ class WizardWindow(
             self.scene.stop_blink()
         else:
             self.scene.start_blink(
-                name for name, value in entry.params.items() if previous.get(name) != value
+                (name for name, value in entry.params.items() if previous.get(name) != value),
+                previous_values=previous,
             )
 
     def select_capture(self):
