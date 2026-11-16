@@ -582,6 +582,10 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
     existing_keys = {
         tuple(entry.params[spec.name] for spec in specs) for entry in project.entries
     }
+    existing_keys.update(
+        tuple(point[spec.name] for spec in specs)
+        for point in project.muted_settings + project.avoided_settings
+    )
     train_indices = [entry.index for entry in project.entries if entry.split == "train"]
     next_index = max(train_indices) + 1 if train_indices else 0
     corner_count = sum(1 for entry in project.entries if _is_corner_entry(entry))
@@ -640,6 +644,8 @@ def classify_capture(
         raise ValueError("Classification must be mute or avoid")
     if project.capture_type != "parametric" or entry.split not in ("train", "validation"):
         raise ValueError("Only parametric training/validation settings can be classified")
+    if all(isinstance(knob, SwitchSpec) for knob in project.knob_specs()):
+        raise ValueError("Switch-only states cannot be dynamically replaced with another distinct setting")
     draft = project.model_copy(deep=True)
     matches = [
         row for row in draft.entries
@@ -648,6 +654,8 @@ def classify_capture(
     if len(matches) != 1:
         raise ValueError("The selected capture is no longer part of this plan")
     old = matches[0]
+    if any(row is not old and row.params == old.params for row in draft.entries):
+        raise ValueError("A setting shared by multiple capture splits cannot be classified separately")
     specs = tuple(knob.to_param_spec() for knob in draft.knob_specs())
     knobs = draft.knob_specs()
     key = _settings_key(old.params, specs)
