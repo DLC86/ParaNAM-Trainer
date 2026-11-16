@@ -1212,7 +1212,7 @@ def plan_captures(
             if not any(getattr(c, "clean_volume", False) for c in knobs):
                 for raw in sample_raw_settings(
                     specs, max(64, n_train + n_validation),
-                    seed=(seed + 131071) % (2**32), lhs_method=lhs_method,
+                    seed=(seed + 131071) % (2**32), lhs_method="standard",
                 ):
                     sources.append(_decode_named_params(
                         _quantize_to_capture_grid(
@@ -1521,7 +1521,7 @@ def _plan_simple_switches(
                 None if anchor_policy == "inside" else
                 False if combo == default_combo else "sample"
             )
-            t, v = plan_captures(
+            t, v = _plan_captures_unadjusted(
                 inner,
                 n_train=n_train // count + (i < n_train % count),
                 n_validation=n_validation // count + (i < n_validation % count),
