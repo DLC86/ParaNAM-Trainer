@@ -1,4 +1,4 @@
-"""Exclusions evaluated against decoded capture settings.
+"""Avoid and virtual mute rules evaluated against decoded capture settings.
 
 Legacy rules use one operator/threshold for all selected controls. Modern rules
 may override each control independently without changing serialized projects.
@@ -19,6 +19,7 @@ class PlanRule(BaseModel):
     controls: tuple[str, ...]
     operator: Literal["<", ">", "="]
     value: float | str
+    kind: Literal["avoid", "mute"] = "avoid"
     # Optional per-control overrides preserve backwards compatibility with
     # existing single-threshold rules and their JSON representation.
     operators: dict[str, Literal["<", ">", "="]] = Field(default_factory=dict)
