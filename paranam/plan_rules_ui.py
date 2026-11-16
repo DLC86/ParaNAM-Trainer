@@ -1,4 +1,4 @@
-"""Capture Plan exclusion editor supporting independent control conditions."""
+"""Capture Plan Avoid/Mute rule editor with independent control conditions."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -17,7 +17,7 @@ def describe_rule(rule):
         operator, value = rule.condition_for(name)
         text = value if isinstance(value, str) else f"{value:g}"
         terms.append(f"{name} {operator} {text}")
-    return "Avoid when " + " AND ".join(terms)
+    return ("Mute when " if rule.kind == "mute" else "Avoid when ") + " AND ".join(terms)
 
 
 class PlanRuleDialog(QDialog):
@@ -30,11 +30,20 @@ class PlanRuleDialog(QDialog):
         self.rows = {}
         layout = QVBoxLayout(self)
         detail = QLabel(
-            "Exclude combinations only when every checked condition is true. "
-            "Each knob may have its own threshold and comparison."
+            "All selected conditions must be true (AND). Avoid excludes unstable "
+            "combinations. Mute excludes recordings and teaches the model silence "
+            "through a virtual training anchor. Each control has its own condition."
         )
         detail.setWordWrap(True)
         layout.addWidget(detail)
+        self.rule_kind = QComboBox()
+        self.rule_kind.setAccessibleName("Rule type")
+        self.rule_kind.addItem("Avoid — unstable / do not capture", "avoid")
+        self.rule_kind.addItem("Mute — train silence without recording", "mute")
+        self.rule_kind.setCurrentIndex(
+            max(0, self.rule_kind.findData(rule.kind if rule else "avoid"))
+        )
+        layout.addWidget(self.rule_kind)
 
         area = QScrollArea()
         area.setWidgetResizable(True)
@@ -130,6 +139,7 @@ class PlanRuleDialog(QDialog):
             first_op, first_val = conditions[selected[0]]
             rule = PlanRule(
                 controls=tuple(selected), operator=first_op, value=first_val,
+                kind=self.rule_kind.currentData(),
                 operators={
                     name: op for name, (op, _) in conditions.items()
                     if op != first_op
