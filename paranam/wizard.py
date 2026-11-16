@@ -1084,14 +1084,14 @@ class WizardWindow(
         )
         layout.addWidget(self.capture_status)
         self.mark_mute_button = button(
-            "Mute", lambda: self.classify_selected_capture("mute")
+            "Mark as mute", lambda: self.classify_selected_capture("mute")
         )
         self.mark_mute_button.setToolTip(
             "No WAV required. Add an exact virtual silence target and adapt the remaining "
             "training plan. Does not assume any other setting is muted."
         )
         self.mark_avoid_button = button(
-            "Avoid", lambda: self.classify_selected_capture("avoid")
+            "Mark as unstable", lambda: self.classify_selected_capture("avoid")
         )
         self.mark_avoid_button.setToolTip(
             "Exclude this unstable or unwanted combination from training and validation "
@@ -1099,17 +1099,8 @@ class WizardWindow(
         )
         row.addWidget(self.mark_mute_button)
         row.addWidget(self.mark_avoid_button)
-        self.undo_capture_mark_button = button(
-            "Undo", self.undo_last_capture_mark
-        )
-        self.undo_capture_mark_button.setToolTip(
-            "Restore the last mute/avoid classification and its original capture. "
-            "Cannot undo after a replacement has already been recorded."
-        )
-        row.addWidget(self.undo_capture_mark_button)
         self.mark_capture_actions = (
             self.mark_mute_button, self.mark_avoid_button,
-            self.undo_capture_mark_button,
         )
         self.capture_table = CaptureTable(0, 6)
         corner = self.capture_table.findChild(QAbstractButton)
@@ -3452,6 +3443,14 @@ class WizardWindow(
                     entry.status.title(),
                     *(metrics := self._capture_metrics(entry)),
                 ]
+                mark = project.classification_for_entry(entry)
+                if mark is not None:
+                    warning = "Mute" if mark == "mute" else "Unstable"
+                    columns[-1] = (
+                        warning if columns[-1] == "—"
+                        else f"{warning} / {columns[-1]}"
+                    )
+                    metrics = (*metrics[:2], columns[-1])
             has_warning = (
                 any(values[2] not in ("—", "") for _, values in metrics)
                 if static
@@ -3486,18 +3485,22 @@ class WizardWindow(
                 if col == status_col and running:
                     item.setText("Running")
         self.capture_table.blockSignals(False)
-        counted = self.workspace.training_capture_entries() if static else project.entries
+        counted = self.workspace.training_capture_entries()
         completed = sum(e.status == "captured" for e in counted)
         self.capture_summary.setText(
             f"{len(entries)} static model(s) · {completed} of {len(counted)} required signals captured. Imported WAVs use their held-out tail for validation."
             if static
-            else f"{completed} of {len(entries)} captured · {len(entries) - completed} remaining · "
-            f"{len(project.muted_settings)} mute / {len(project.avoided_settings)} avoided. "
+            else f"{completed} of {len(counted)} captured · {len(counted) - completed} remaining · "
+            f"{len(project.muted_settings)} Mute / {len(project.avoided_settings)} Unstable (still listed). "
             "Ordered to change fewer controls and turn knobs less."
         )
         if entries:
             row = next(
-                (i for i, e in enumerate(entries) if e.status != "captured"),
+                (
+                    i for i, e in enumerate(entries)
+                    if e.status != "captured"
+                    and (static or project.classification_for_entry(e) is None)
+                ),
                 len(entries) - 1,
             )
             confirmed = self._confirmed_capture
@@ -3556,12 +3559,10 @@ class WizardWindow(
             can_classify = (
                 self.workspace.project.capture_type == "parametric"
                 and entry.split in ("train", "validation") and not self.busy()
+                and self.workspace.project.classification_for_entry(entry) is None
             )
             for action in (self.mark_mute_button, self.mark_avoid_button):
                 action.setEnabled(can_classify)
-            self.undo_capture_mark_button.setEnabled(
-                not self.busy() and bool(self.workspace.project.capture_mark_history)
-            )
             if self.workspace.project.capture_type == "static":
                 self._static_edit_id = entry.capture_id
                 self.static_name.setText(entry.capture_name or "")
@@ -3583,7 +3584,7 @@ class WizardWindow(
             )
 
     def classify_selected_capture(self, classification):
-        """Keep the captured plan intact while dynamically excluding one point."""
+        """Keep the marked row visible while excluding it from the dataset."""
         if not self.workspace or self.busy():
             return
         project = self.workspace.project
@@ -3615,30 +3616,12 @@ class WizardWindow(
             self.workspace.save()
             update_data_json(replacement, self.workspace.directory)
             self.refresh_captures()
-            caption = "Mute Anchor" if classification == "mute" else "Avoid"
+            caption = "Mute" if classification == "mute" else "Unstable"
             self.capture_status.setText(
                 f"{caption} marked for the selected setting. "
                 f"{len(added)} replacement / adjacent-step capture(s) added; "
                 "existing recordings were preserved."
             )
-        except Exception as error:
-            self.notify_error(error)
-
-    def undo_last_capture_mark(self):
-        if not self.workspace or self.busy():
-            return
-        try:
-            from nam.capture.project import undo_last_capture_mark
-            updated = undo_last_capture_mark(self.workspace.project)
-            self.workspace.project = updated
-            if self.session is not None:
-                self.session.project = updated
-            self.rig_ready.setChecked(False)
-            self._confirmed_capture = None
-            self.workspace.save()
-            update_data_json(updated, self.workspace.directory)
-            self.refresh_captures()
-            self.capture_status.setText("Last mute/avoid classification restored.")
         except Exception as error:
             self.notify_error(error)
 
