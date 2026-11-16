@@ -385,6 +385,16 @@ def capture_count_maxima(
     return train_max, validation_max
 
 
+def validation_for_training(n_train: int) -> int:
+    """Suggest one held-out validation capture per four training captures.
+
+    Use round-half-up for positive integers (for example 34 -> 9), rather
+    than Python's ties-to-even rounding. Feasibility limits are applied by
+    the planner/UI after this ideal count has been computed.
+    """
+    return max(0, (n_train + 2) // 4)
+
+
 def capture_recommendations(
     controls: _Sequence[ControlSpec],
     include_default_as_additional_capture: _Optional[bool] = None,
@@ -421,9 +431,7 @@ def capture_recommendations(
             # Beyond six dimensions grow by 32 every two controls. This stays
             # below the old 16-per-control LHS budget without flattening forever.
             train = 64 + 32 * ((dimensions - 5) // 2)
-        validation = {
-            1: 8, 2: 8, 3: 12, 4: 16, 5: 16, 6: 24
-        }.get(dimensions, 24)
+        validation = validation_for_training(train)
     else:
         train = max(
             1,
@@ -437,7 +445,7 @@ def capture_recommendations(
                 default=1,
             ),
         )
-        validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
+        validation = validation_for_training(train) if n_knobs else 0
     capacity, validation_capacity, _ = capture_grid_limits(controls)
     if active and all(isinstance(c, SwitchSpec) for c in active):
         # Capture every categorical state. The main trainer can additionally
