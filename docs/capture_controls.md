@@ -94,6 +94,25 @@ order to reduce switching, then sweeps the knobs within each group. Existing
 generated plans keep their stored counts and progress. After changing control
 names, types or switch positions, regenerate the plan before adding corners.
 
+## Avoid Rules in Plan
+
+The **Avoid Rules** panel is visible directly on the **Plan** screen, beneath
+the rig controls. Use **Add rule**, **Edit** or **Delete** to exclude known
+unusable control regions before generating or regenerating a capture plan.
+Each checked control has its own comparison and threshold; the rule excludes
+a combination only when **all** of its selected conditions are true.
+For example, **Gain > 8 AND Bias > 7** excludes their joint high region
+without excluding either control independently. Switch positions may be
+selected in the same rule using equality, such as
+**Gain > 8 AND Bias > 7 AND Channel = Boost**.
+
+Rules constrain training, validation, corner captures and automatic
+replacements for Unstable settings. They are saved with the Plan and retained
+when renaming controls. Existing rules using a common threshold remain
+compatible. The separate Linear Volume calibration still intentionally ignores
+Plan rules. Rules are configured only from Plan; they are not automatically
+inferred or edited during Capture.
+
 ## Discovering mute and unstable settings during capture
 
 In the **Capture** screen, select a pending or already recorded parametric
