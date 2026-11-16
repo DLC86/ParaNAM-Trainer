@@ -388,6 +388,8 @@ def capture_count_maxima(
 def capture_recommendations(
     controls: _Sequence[ControlSpec],
     include_default_as_additional_capture: _Optional[bool] = None,
+    *,
+    lhs_method: str = "standard",
 ) -> tuple[int, int, int]:
     """Recommend feasible train/validation counts on the actual capture grid.
 
@@ -405,19 +407,37 @@ def capture_recommendations(
         for c in active
         if isinstance(c, SwitchSpec) and c.planning_mode == "complex"
     )
-    train = max(
-        1,
-        16 * n_knobs,
-        max(
-            (
-                len(c.enum_names)
-                for c in active
-                if isinstance(c, SwitchSpec) and c.planning_mode == "simple"
+    if lhs_method == "sobol" and any(isinstance(c, KnobSpec) for c in active):
+        # Simple Switches partition one continuous Sobol budget, not add another
+        # sampling dimension. Complex Switches replicate that budget per state.
+        dimensions = sum(isinstance(c, KnobSpec) for c in active)
+        if dimensions <= 2:
+            train = 16 * dimensions
+        elif dimensions == 3:
+            train = 32
+        elif dimensions <= 6:
+            train = 64
+        else:
+            # Beyond six dimensions grow by 32 every two controls. This stays
+            # below the old 16-per-control LHS budget without flattening forever.
+            train = 64 + 32 * ((dimensions - 5) // 2)
+        validation = {
+            1: 8, 2: 8, 3: 12, 4: 16, 5: 16, 6: 24
+        }.get(dimensions, 24)
+    else:
+        train = max(
+            1,
+            16 * n_knobs,
+            max(
+                (
+                    len(c.enum_names)
+                    for c in active
+                    if isinstance(c, SwitchSpec) and c.planning_mode == "simple"
+                ),
+                default=1,
             ),
-            default=1,
-        ),
-    )
-    validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
+        )
+        validation = min(max(8, 4 * n_knobs), 24) if n_knobs else 0
     capacity, validation_capacity, _ = capture_grid_limits(controls)
     if active and all(isinstance(c, SwitchSpec) for c in active):
         # Capture every categorical state. The main trainer can additionally
