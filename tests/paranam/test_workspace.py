@@ -168,3 +168,18 @@ def test_discovered_mute_and_avoid_points_survive_replanning(workspace):
     assert muted in reopened.project.muted_settings
     assert avoided in reopened.project.avoided_settings
     assert not reopened.plan_changed()
+
+
+def test_new_workspace_defaults_to_sobol_but_preserves_existing_lhs_choice(tmp_path):
+    project = Workspace.create(tmp_path / "Sobol", "Sobol")
+    assert project.project.lhs_method == "sobol"
+    assert project.preferences["lhs_method"] == "sobol"
+    assert (project.preferences["n_train"], project.preferences["n_validation"]) == (32, 8)
+
+    # An old project explicitly selecting Standard LHS must not be migrated.
+    project.project.lhs_method = "standard"
+    project.preferences["lhs_method"] = "standard"
+    project.save()
+    reopened = Workspace(project.directory)
+    assert reopened.preferences["lhs_method"] == "standard"
+    assert reopened.project.lhs_method == "standard"
