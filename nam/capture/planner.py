@@ -18,6 +18,7 @@ import itertools as _itertools
 import math as _math
 from collections.abc import Sequence as _Sequence
 from dataclasses import dataclass as _dataclass
+from dataclasses import replace as _replace
 from typing import Any as _Any
 from typing import Literal
 from typing import Optional as _Optional
@@ -905,7 +906,7 @@ def _planned_from_params(
     return planned
 
 
-def plan_captures(
+def _plan_captures_unadjusted(
     knobs: _Sequence[_ControlSpec],
     *,
     n_train: int,
@@ -958,7 +959,7 @@ def plan_captures(
             raise ValueError(
                 "Parametric capture needs another tone/drive/switch control besides clean volume"
             )
-        t, v = plan_captures(
+        t, v = _plan_captures_unadjusted(
             inner, n_train=n_train, n_validation=n_validation, seed=seed,
             lhs_method=lhs_method, validation_method=validation_method,
             include_default_as_additional_capture=include_default_as_additional_capture,
@@ -1024,7 +1025,7 @@ def plan_captures(
                     False if combo == default_combo else "sample"
                 )
                 try:
-                    train_part, val_part = plan_captures(
+                    train_part, val_part = _plan_captures_unadjusted(
                         continuous,
                         n_train=n_train // count + (i < n_train % count),
                         n_validation=n_validation // count + (i < n_validation % count),
@@ -1065,7 +1066,7 @@ def plan_captures(
             specs,
             gain_index=_gain_knob_index(knobs),
             default_step=_DEFAULT_KNOB_STEP,
-        )
+        ) if not _muted_corner_replaced_by_anchor(params, knobs)
     }
     train_params, validation_params = plan_unique_splits(
         specs,
@@ -1115,6 +1116,136 @@ def _corner_raw_vector(
 # main effects alias two-factor interactions, and at K<=2 they alias each other. The full
 # factorial is at most 8 vertices there, so it is cheap enough to take outright.
 _MIN_HALF_FRACTION_KNOBS = 4
+
+
+
+def _mute_adjacent_values(knob, default_step=_DEFAULT_KNOB_STEP):
+    """The nearest *recordable* setting for each explicitly muted endpoint."""
+    if not (getattr(knob, "mute_at_min", False) or getattr(knob, "mute_at_max", False)):
+        return ()
+    values = _capture_grid_values(knob.to_param_spec(), default_step)
+    return tuple(
+        (edge, values[0 if edge == "min" else -1])
+        for edge in ("min", "max")
+        if getattr(knob, f"mute_at_{edge}", False)
+    )
+
+
+def _muted_corner_replaced_by_anchor(params, knobs):
+    """A shifted corner adjacent to a Mute Anchor is redundant as a WAV."""
+    return any(
+        params[knob.name] == value
+        for knob in knobs
+        for _, value in _mute_adjacent_values(knob)
+    )
+
+
+def mute_corner_settings(knobs, *, rules=()):
+    """All nominal mute-endpoint corners, now trained virtually instead of recorded.
+
+    Retain the exact gain/switch/fractional-factorial corner design. Only muted
+    endpoints bypass capture avoidance; other knobs keep their original limits.
+    """
+    knobs = _validate_knobs(knobs)
+    specs = tuple(knob.to_param_spec() for knob in knobs)
+    unrestricted = tuple(
+        _replace(
+            spec,
+            avoid_zero=False if getattr(knob, "mute_at_min", False) else spec.avoid_zero,
+            avoid_max=False if getattr(knob, "mute_at_max", False) else spec.avoid_max,
+            avoid_below=None if getattr(knob, "mute_at_min", False) else spec.avoid_below,
+            avoid_above=None if getattr(knob, "mute_at_max", False) else spec.avoid_above,
+        )
+        if spec.type == "continuous" else spec
+        for knob, spec in zip(knobs, specs)
+    )
+    return [
+        params for params in corner_settings(
+            unrestricted, gain_index=_gain_knob_index(knobs)
+        )
+        if allows(rules, params) and any(
+            (getattr(knob, "mute_at_min", False) and params[knob.name] == knob.min)
+            or (getattr(knob, "mute_at_max", False) and params[knob.name] == knob.max)
+            for knob in knobs
+        )
+    ]
+
+
+def plan_captures(
+    knobs: _Sequence[_ControlSpec],
+    *,
+    n_train: int,
+    n_validation: int,
+    seed: int = 0,
+    lhs_method: str = "standard",
+    validation_method: str = "independent",
+    rules=(),
+    include_default_as_additional_capture: bool | None | str = None,
+) -> tuple[list[PlannedCapture], list[PlannedCapture]]:
+    """Keep Sobol/LHS intact and add one real capture per uncovered mute transition."""
+    knobs = _validate_knobs(knobs)
+    train, validation = _plan_captures_unadjusted(
+        knobs, n_train=n_train, n_validation=n_validation, seed=seed,
+        lhs_method=lhs_method, validation_method=validation_method, rules=rules,
+        include_default_as_additional_capture=include_default_as_additional_capture,
+    )
+    if not any(_mute_adjacent_values(knob) for knob in knobs):
+        return train, validation
+    specs = tuple(knob.to_param_spec() for knob in knobs)
+    names = [spec.name for spec in specs]
+    occupied = {_settings_key(entry.params, specs) for entry in train + validation}
+    defaults = {
+        spec.name: (
+            spec.enum_names[int(spec.default)] if spec.type == "switch"
+            else spec.max if spec.clean_volume else spec.default
+        )
+        for spec in specs
+    }
+    extras = []
+    for knob in knobs:
+        for edge, first_step in _mute_adjacent_values(knob):
+            if any(entry.params[knob.name] == first_step for entry in train) or any(
+                params[knob.name] == first_step for params in extras
+            ):
+                continue
+            sources = [defaults] + [entry.params for entry in train + validation]
+            if not any(getattr(c, "clean_volume", False) for c in knobs):
+                for raw in sample_raw_settings(
+                    specs, max(64, n_train + n_validation),
+                    seed=(seed + 131071) % (2**32), lhs_method=lhs_method,
+                ):
+                    sources.append(_decode_named_params(
+                        _quantize_to_capture_grid(
+                            raw, specs, default_step=_DEFAULT_KNOB_STEP
+                        ), specs
+                    ))
+            for source in sources:
+                candidate = {**source, knob.name: first_step}
+                candidate = {name: candidate[name] for name in names}
+                key = _settings_key(candidate, specs)
+                if key in occupied or not allows(rules, candidate):
+                    continue
+                if any(
+                    (getattr(c, "mute_at_min", False) and candidate[c.name] == c.min)
+                    or (getattr(c, "mute_at_max", False) and candidate[c.name] == c.max)
+                    for c in knobs if hasattr(c, "mute_at_min")
+                ):
+                    continue
+                occupied.add(key)
+                extras.append(candidate)
+                break
+            else:
+                raise ValueError(
+                    f"Cannot reserve a first unmuted step at {knob.name}={first_step:g} "
+                    f"for Mute at {edge}: all usable combinations are occupied "
+                    "or excluded by the capture rules."
+                )
+    if extras:
+        train = train + _planned_from_params(
+            "mute_edge", "train", specs, extras,
+            index_offset=max(entry.index for entry in train) + 1,
+        )
+    return train, validation
 
 
 def _corner_vertices(n: int) -> list[tuple[bool, ...]]:
@@ -1274,7 +1405,8 @@ def corner_capture_count(
     specs = tuple(knob.to_param_spec() for knob in knobs)
     validate_plan_rules(specs, rules)
     return sum(
-        allows(rules, params) for params in corner_settings(
+        allows(rules, params) and not _muted_corner_replaced_by_anchor(params, knobs)
+        for params in corner_settings(
             specs, gain_index=_gain_knob_index(knobs), default_step=default_step
         )
     )
@@ -1313,7 +1445,7 @@ def plan_corner_captures(
     for params in corner_settings(
         specs, gain_index=gain_index, default_step=_DEFAULT_KNOB_STEP
     ):
-        if not allows(rules, params):
+        if not allows(rules, params) or _muted_corner_replaced_by_anchor(params, knobs):
             continue
         key = _settings_key(params, specs)
         if key in excluded:
@@ -1413,6 +1545,7 @@ def _plan_simple_switches(
         corners = {
             _settings_key(p, specs)
             for p in corner_settings(specs, gain_index=_gain_knob_index(controls))
+            if not _muted_corner_replaced_by_anchor(p, controls)
         }
         anchor = {
             s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default
@@ -1473,7 +1606,7 @@ def _rule_groups(controls, rules, anchor_policy="inside"):
     fixed_axes = [s.enum_names if s.type == "switch" else (s.max,) for s in fixed_specs]
     allowed_corners = {}
     for params in corner_settings(specs, gain_index=_gain_knob_index(controls)):
-        if allows(rules, params):
+        if allows(rules, params) and not _muted_corner_replaced_by_anchor(params, controls):
             group_key = _settings_key(params, fixed_specs)
             allowed_corners.setdefault(group_key, set()).add(_settings_key(params, active))
     groups = []
