@@ -872,7 +872,9 @@ class Workspace:
         include_hypernetwork_controls=True,
     ):
         """Reject checkpoints when captures, controls, calibration or training choices change."""
-        from nam.capture.export import build_data_config, mute_anchor_targets
+        from nam.capture.export import (
+            build_data_config, mute_anchor_targets, mute_anchor_point_targets,
+        )
 
         data = {
             **(
@@ -934,7 +936,10 @@ class Workspace:
             data["settings"]["advanced_training"] = options
             uses_mute_anchor = (
                 self.project.capture_type == "parametric"
-                and bool(mute_anchor_targets(self.project))
+                and bool(
+                    mute_anchor_targets(self.project)
+                    or mute_anchor_point_targets(self.project)
+                )
             )
             for key, default in MUTE_ANCHOR_OPTIONS.items():
                 if not uses_mute_anchor or options[key] == default:
