@@ -1829,19 +1829,39 @@ def _plan_with_rules(knobs, n_train, n_validation, seed, lhs_method, validation_
             raise ValueError(f"Capture all {count} allowed states once using each signal")
         return _planned_from_params("lhs", "train", specs, [g.fixed for g in groups]), []
     train, validation = [], []
+    used_settings = set()
+    complementary = lhs_method == "sobol" and anchor_policy != "inside" and count > 1
     for i, group in enumerate(groups):
+        arguments = dict(
+            n_train=n_train // count + (i < n_train % count),
+            n_validation=n_validation // count + (i < n_validation % count),
+            seed=(seed + i * 104729) % (2**32),
+            default_step=_DEFAULT_KNOB_STEP,
+            lhs_method=lhs_method,
+            validation_method=validation_method,
+            anchor=group.anchor,
+            validation_exclude=group.corners,
+            rules=group.rules,
+            anchor_policy=anchor_policy if group.anchor is not None else "sample",
+        )
+        external = {
+            key for key in used_settings
+            if allows(group.rules, dict(zip((s.name for s in active), key)))
+        } if complementary else set()
         try:
-            t, v = plan_unique_splits(
-                active, n_train=n_train // count + (i < n_train % count),
-                n_validation=n_validation // count + (i < n_validation % count),
-                seed=(seed + i * 104729) % (2**32), default_step=_DEFAULT_KNOB_STEP,
-                lhs_method=lhs_method, validation_method=validation_method,
-                anchor=group.anchor, validation_exclude=group.corners, rules=group.rules,
-                anchor_policy=anchor_policy if group.anchor is not None else "sample",
-            )
+            try:
+                t, v = plan_unique_splits(
+                    active, **arguments, external_exclude=external
+                )
+            except ValueError:
+                if not complementary:
+                    raise
+                t, v = plan_unique_splits(active, **arguments)
         except ValueError as exc:
             context = f" for {group.fixed}" if group.fixed else ""
             raise ValueError(f"Cannot generate a plan with these rules{context}: {exc}") from exc
+        if complementary:
+            used_settings.update(_settings_key(point, active) for point in t + v)
         train.extend({**point, **group.fixed} for point in sort_settings(t, [s.name for s in active]))
         validation.extend({**point, **group.fixed} for point in sort_settings(v, [s.name for s in active]))
     return (
