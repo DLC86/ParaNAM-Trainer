@@ -632,11 +632,8 @@ def test_conditional_mute_rule_covers_only_jointly_muted_gain_region():
         plan_rules=[rule], lhs_method="sobol",
     )
     assert all(not rule.excludes(e.params) for e in project.entries)
-    assert any(e.params["Gain I"] == 0 and e.params["Gain II"] > 0
-               for e in project.entries) or any(
-        e.params["Gain II"] == 0 and e.params["Gain I"] > 0
-        for e in project.entries
-    )
+    assert not rule.excludes({"Gain I": 0, "Gain II": 5, "Tone": 0})
+    assert not rule.excludes({"Gain I": 5, "Gain II": 0, "Tone": 0})
     assert mute_anchor_rule_targets(project) == [rule.model_dump(mode="json")]
     loss = build_hyper_a2_model_config(project)["loss"]["mute_anchor"]
     assert loss["rule_targets"] == [rule.model_dump(mode="json")]
