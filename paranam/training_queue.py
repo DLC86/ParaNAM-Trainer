@@ -415,6 +415,25 @@ class TrainingQueue:
 
         return self._edit(edit)
 
+    def rename(self, identifier, name):
+        """Persist a queue-only display name without touching training artifacts."""
+        if not isinstance(name, str):
+            raise ValueError("The training job name must be text.")
+        name = name.strip()
+        if not name:
+            raise ValueError("The training job name cannot be empty.")
+        if len(name) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in name):
+            raise ValueError("The training job name must be a single line of at most 200 characters.")
+
+        def edit(entries):
+            entry = next((e for e in entries if e["id"] == identifier), None)
+            if entry is None:
+                raise ValueError("The selected training job no longer exists.")
+            entry["display_name"] = name
+            return dict(entry)
+
+        return self._edit(edit)
+
     def move(self, identifier, offset):
         def edit(entries):
             a = next(

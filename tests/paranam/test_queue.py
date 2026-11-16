@@ -525,3 +525,85 @@ def test_active_training_cannot_change_epoch_target(workspace, tmp_path):
     queue.update(entry["id"], state="running")
     with pytest.raises(ValueError, match="Pause or stop"):
         queue.set_total_epochs(entry["id"], 8)
+
+
+def test_queue_job_rename_is_persistent_and_does_not_mutate_training(workspace, tmp_path):
+    """Renaming the queue label must not modify a frozen dataset or .pnam metadata."""
+    small_ready(workspace)
+    store = TrainingQueue(tmp_path / "queue")
+    entry = store.add(workspace)
+    original_name = entry["name"]
+    spec_path = Path(entry["job"]) / "spec.json"
+    original_spec = spec_path.read_bytes()
+    original_project = Path(entry["project"])
+    store.rename(entry["id"], "  Better job name  ")
+    stored = TrainingQueue(store.directory).get(entry["id"])
+    assert stored["display_name"] == "Better job name"
+    assert stored["name"] == original_name
+    assert stored["project"] == str(original_project)
+    assert spec_path.read_bytes() == original_spec
+    store.update(entry["id"], state="running")
+    store.rename(entry["id"], "Training in progress")
+    assert TrainingQueue(store.directory).get(entry["id"])["display_name"] == (
+        "Training in progress"
+    )
+    for invalid in ("", "  ", "bad\nname", "x" * 201):
+        with pytest.raises(ValueError, match="name"):
+            store.rename(entry["id"], invalid)
+    assert store.get(entry["id"])["display_name"] == "Training in progress"
+    with pytest.raises(ValueError, match="no longer exists"):
+        store.rename("unknown-id", "New job name")
+
+
+def test_queue_rename_context_targets_right_clicked_job(window, workspace, monkeypatch):
+    from PySide6.QtCore import QPoint, Qt
+    from paranam import queue_ui
+
+    small_ready(workspace)
+    window._attach(workspace)
+    store = window.queue_controller.store
+    first = store.add(workspace)
+    second = store.add(workspace)
+    window.refresh_training()
+
+    class Action:
+        def __init__(self, label):
+            self.label = label
+
+        def setEnabled(self, value):
+            self.enabled = value
+
+    class ContextMenu:
+        def __init__(self, parent):
+            self.actions = []
+
+        def addAction(self, label):
+            action = Action(label)
+            self.actions.append(action)
+            return action
+
+        def exec(self, point):
+            assert [action.label for action in self.actions] == [
+                "Rename…", "Change total epochs…"
+            ]
+            return self.actions[0]
+
+    class TextInput:
+        @staticmethod
+        def getText(parent, title, label, **kwargs):
+            assert title == "Rename training job"
+            return "Renamed from context menu", True
+
+    monkeypatch.setattr(queue_ui, "QMenu", ContextMenu)
+    monkeypatch.setattr(queue_ui, "QInputDialog", TextInput)
+    table = window.queue_table
+    # The job on which the user right-clicks can differ from the selected row.
+    assert table.item(0, 0).data(Qt.ItemDataRole.UserRole) == first["id"]
+    monkeypatch.setattr(table, "itemAt", lambda _: table.item(0, 0))
+    table.selectRow(1)
+    window.show_queue_context_menu(QPoint(0, 0))
+    assert store.get(first["id"])["display_name"] == "Renamed from context menu"
+    assert "display_name" not in store.get(second["id"])
+    assert table.item(0, 0).text() == "Renamed from context menu"
+    assert table.item(0, 1).text() == first["name"]
+    assert window.selected_job_id == first["id"]

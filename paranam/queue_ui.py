@@ -118,13 +118,41 @@ class QueueActions:
             return
         table.selectRow(item.row())
         menu = QMenu(table)
+        rename = menu.addAction("Rename…")
         change = menu.addAction("Change total epochs…")
         change.setEnabled(entry["state"] not in {
             "starting", "running", "scoring", "pausing", "stopping"
         })
         selected = menu.exec(table.viewport().mapToGlobal(point))
-        if selected == change:
+        if selected == rename:
+            self.rename_queue_job(entry_id)
+        elif selected == change:
             self.change_queue_total_epochs(entry_id)
+
+    def rename_queue_job(self, identifier):
+        """Rename the clicked queue job, not the project or exported model."""
+        entry = self.queue_controller.store.get(identifier)
+        if entry is None:
+            return
+        spec = self._cached_job_json(entry["job"], "spec.json")
+        captures = spec.get("static_captures") or []
+        model_name = (
+            captures[0].get("name", "")
+            if captures
+            else spec.get("model", {}).get("metadata", {}).get("name", "")
+        )
+        current = entry.get("display_name") or model_name or entry["name"]
+        name, accepted = QInputDialog.getText(
+            self, "Rename training job", "Job name:", text=current
+        )
+        if not accepted:
+            return
+        try:
+            self.queue_controller.store.rename(identifier, name)
+            self.selected_job_id = identifier
+            self.refresh_training()
+        except Exception as error:
+            self.notify_error(error)
 
     def change_queue_total_epochs(self, identifier):
         entry = self.queue_controller.store.get(identifier)
@@ -201,7 +229,7 @@ class QueueActions:
                 else spec.get("model", {}).get("metadata", {}).get("name", "")
             )
             values = (
-                model_name or "—",
+                entry.get("display_name") or model_name or "—",
                 entry["name"],
                 time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
                 "Static A2" if entry["kind"] == "static" else "HyperA2",
