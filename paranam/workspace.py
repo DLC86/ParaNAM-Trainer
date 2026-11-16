@@ -294,9 +294,19 @@ class Workspace:
 
     def rename_rule_control(self, old_name, new_name):
         def rename(rule):
-            return rule.model_copy(update={"controls": tuple(
-                new_name if name == old_name else name for name in rule.controls
-            )})
+            return rule.model_copy(update={
+                "controls": tuple(
+                    new_name if name == old_name else name for name in rule.controls
+                ),
+                "operators": {
+                    new_name if name == old_name else name: op
+                    for name, op in rule.operators.items()
+                },
+                "thresholds": {
+                    new_name if name == old_name else name: value
+                    for name, value in rule.thresholds.items()
+                },
+            })
 
         self.preferences["draft_plan_rules"] = [
             rename(rule).model_dump(mode="json") for rule in self.plan_rules()
