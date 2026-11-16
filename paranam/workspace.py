@@ -173,7 +173,10 @@ class Workspace:
         if not stored and self.project.entries:
             self.preferences.update(
                 n_train=self.project.n_train_lhs,
-                n_validation=len(self.project.entries_for_split("validation")),
+                n_validation=sum(
+                    self.project.classification_for_entry(e) is None
+                    for e in self.project.entries_for_split("validation")
+                ),
                 seed=self.project.seed,
                 corners=self.project.include_initial_corners,
             )
@@ -510,7 +513,10 @@ class Workspace:
             or self.plan_rules() != self.project.plan_rules
             or self.preferences["n_train"] != self.project.n_train_lhs
             or self.preferences["n_validation"]
-            != len(self.project.entries_for_split("validation"))
+            != sum(
+                self.project.classification_for_entry(e) is None
+                for e in self.project.entries_for_split("validation")
+            )
             or self.preferences["seed"] != self.project.seed
             or self.preferences["lhs_method"] != self.project.lhs_method
             or self.preferences["validation_method"] != self.project.validation_method
@@ -562,8 +568,16 @@ class Workspace:
 
         from nam.capture.session import raw_paths
 
-        reserved = set(pool)
+        reserved = set(pool) | {
+            entry.y_path for entry in replacement.entries
+            if replacement.classification_for_entry(entry) is not None
+        }
         for entry in replacement.entries:
+            if replacement.classification_for_entry(entry) is not None:
+                # Classified rows remain visible, but their old recordings
+                # must not be reused as training data.
+                pool.pop(entry.y_path, None)
+                continue
             context = self._recording_context(replacement, entry.split, validation_matches=True)
             recorded = available.pop(key(entry, context), None)
             if recorded is not None:
@@ -717,9 +731,9 @@ class Workspace:
         replacement.include_initial_corners = prefs["corners"]
         if prefs["corners"]:
             add_corner_captures(replacement)
-        # User-discovered mute/avoid points survive Plan edits. Do not restore
-        # them as WAV captures if the fresh sampling happens to hit the same
-        # combination; replace those pending sampled points instead.
+        # Preserve discovered mute/unstable points across Plan edits.
+        # Mark sampled matches and replace them, but retain the marked rows
+        # in the Capture screen, even when this plan samples different points.
         from nam.capture.project import classify_capture
         old_muted = [dict(p) for p in self.project.muted_settings]
         old_avoided = [dict(p) for p in self.project.avoided_settings]
@@ -729,26 +743,22 @@ class Workspace:
             **{key(p): "mute" for p in old_muted},
             **{key(p): "avoid" for p in old_avoided},
         }
-        # A replacement can itself land on *another* previously classified
-        # point. Keep resolving until no active entry matches any annotation.
+        # A classified row is no longer removed by classify_capture. Skip
+        # already marked rows to avoid re-classifying them indefinitely.
         for _ in range(max(32, len(replacement.entries) * 4)):
             entry = next(
-                (row for row in replacement.entries
-                 if key(row.params) in marked),
+                (
+                    row for row in replacement.entries
+                    if key(row.params) in marked
+                    and replacement.classification_for_entry(row) is None
+                ),
                 None,
             )
             if entry is None:
                 break
-            kind = marked[key(entry.params)]
-            # If another replacement had temporarily populated this category,
-            # allow the classifier to remove the active row again.
-            row_list = (
-                replacement.muted_settings
-                if kind == "mute" else replacement.avoided_settings
+            replacement, _ = classify_capture(
+                replacement, entry, marked[key(entry.params)]
             )
-            if entry.params in row_list:
-                row_list.remove(entry.params)
-            replacement, _ = classify_capture(replacement, entry, kind)
         else:
             raise ValueError(
                 "Unable to avoid all previously marked mute/unstable combinations"
@@ -761,6 +771,45 @@ class Workspace:
         replacement.avoided_settings.extend(
             p for p in old_avoided if key(p) not in present_avoided
         )
+        # Keep previously marked entries accessible even if the new sampler
+        # doesn't happen to choose those exact settings. Preserve their old WAV
+        # and QA if a new row can use the same filename.
+        names = {c.name for c in controls}
+        for old in self.project.entries:
+            if self.project.classification_for_entry(old) is None:
+                continue
+            if set(old.params) != names:
+                continue  # No longer the same rig; the old point stays annotated.
+            match = next(
+                (
+                    row for row in replacement.entries
+                    if row.split == old.split and row.params == old.params
+                ),
+                None,
+            )
+            if match is None:
+                clone = old.model_copy(deep=True)
+                if old.split == "train":
+                    at = next(
+                        (i for i, row in enumerate(replacement.entries)
+                         if row.split == "validation"),
+                        len(replacement.entries),
+                    )
+                    replacement.entries.insert(at, clone)
+                else:
+                    replacement.entries.append(clone)
+            else:
+                # A sampled classified point retains its original recording
+                # whenever doing so does not duplicate another row's path.
+                if not any(
+                    row is not match and row.y_path == old.y_path
+                    for row in replacement.entries
+                ):
+                    for field in (
+                        "y_path", "status", "delay", "captured_at",
+                        "qa", "stream_config", "is_corner",
+                    ):
+                        setattr(match, field, getattr(old, field))
         from nam.capture.output_gain import initialize_calibration
 
         initialize_calibration(replacement)
@@ -792,7 +841,10 @@ class Workspace:
     def training_capture_entries(self):
         entries = self.project.entries
         if self.project.capture_type != "static":
-            return entries
+            return [
+                e for e in entries
+                if self.project.classification_for_entry(e) is None
+            ]
         imported = {
             e.capture_id for e in entries
             if e.split == "train" and e.status == "captured" and e.validation_from_tail
@@ -813,6 +865,9 @@ class Workspace:
             return False
         if not self.project.entries or not self.validation_matches():
             return False
+        required = self.training_capture_entries()
+        if not any(e.split == "train" for e in required):
+            return False
         return all(
             e.status == "captured"
             and (self.directory / e.y_path).is_file()
@@ -826,7 +881,7 @@ class Workspace:
                     )
                 )
             )
-            for e in self.training_capture_entries()
+            for e in required
         )
 
     def training_batch_size(self):
