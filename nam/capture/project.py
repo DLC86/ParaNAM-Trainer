@@ -734,7 +734,7 @@ def classify_capture(
     # sampled from independent deterministic streams, never redraw prior points.
     is_corner = bool(old.is_corner) or _Path(old.y_path).name.startswith("corner_")
     special = _Path(old.y_path).name.startswith("mute_edge_")
-    if not is_corner and not special:
+    if (not is_corner and not special) or (classification == "avoid" and is_corner):
         fixed = {
             knob.name: old.params[knob.name]
             for knob in knobs
