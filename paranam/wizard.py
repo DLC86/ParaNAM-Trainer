@@ -2885,7 +2885,7 @@ class WizardWindow(
             requested_train = self.n_train.value()
             requested_validation = self.n_validation.value()
 
-            rules = self.workspace.plan_rules()
+            rules = [r for r in self.workspace.plan_rules() if r.kind == "avoid"]
             include_default = self.include_default_as_additional_capture.isChecked()
 
             def limits():
@@ -2964,7 +2964,7 @@ class WizardWindow(
         if not controls:
             self.recommendation.setText("Add at least one control to build a plan.")
             return
-        rules = self.workspace.plan_rules()
+        rules = [r for r in self.workspace.plan_rules() if r.kind == "avoid"]
         include_default = self.include_default_as_additional_capture.isChecked()
 
         def recommendations():

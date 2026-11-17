@@ -495,10 +495,10 @@ class CaptureProject(_BaseModel):
         """An exact setting may be shown in Capture while excluded from training."""
         if entry.split not in ("train", "validation"):
             return None
-        if entry.synthetic_mute or entry.params in self.muted_settings:
-            return "mute"
         if entry.params in self.avoided_settings:
             return "avoid"
+        if entry.synthetic_mute or entry.params in self.muted_settings:
+            return "mute"
         return None
 
     def clear_capture_classification(self, entry: CaptureEntryModel) -> None:

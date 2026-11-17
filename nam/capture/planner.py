@@ -1633,7 +1633,7 @@ def _plan_simple_switches(
         corners = {
             _settings_key(p, specs)
             for p in corner_settings(specs, gain_index=_gain_knob_index(controls))
-            if True
+            if allows(rules, p)
         }
         anchor = {
             s.name: s.enum_names[int(s.default)] if s.type == "switch" else s.default

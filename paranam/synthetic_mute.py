@@ -111,14 +111,27 @@ def ensure_mute_rule_corners(project, rules):
     by_name = {control.name: control for control in controls}
     avoid_rules = [rule for rule in rules if rule.kind == "avoid"]
     occupied = {tuple(row.params[name] for name in by_name)
-                for row in project.entries if row.split == "train"}
+                for row in project.entries}
     next_index = max((row.index for row in project.entries if row.split == "train"), default=-1) + 1
     extra = []
     for rule_index, rule in enumerate(rules):
-        if rule.kind != "mute" or any(
-            row.split == "train" and rule.excludes(row.params)
-            for row in project.entries
-        ):
+        if rule.kind != "mute":
+            continue
+        # A valid training vertex already sampled by LHS is a Corner, not an
+        # additional capture. Otherwise reserve a new min/max vertex below.
+        for row in project.entries:
+            if (row.split == "train" and rule.excludes(row.params)
+                    and allows(avoid_rules, row.params)
+                    and all(
+                        row.params[c.name] in c.enum_names
+                        if hasattr(c, "enum_names")
+                        else row.params[c.name] in (c.min, c.max)
+                        for c in controls
+                    )):
+                row.is_corner = True
+                break
+        if any(row.split == "train" and row.is_corner
+               and rule.excludes(row.params) for row in project.entries):
             continue
         fixed = {}
         for name in rule.controls:

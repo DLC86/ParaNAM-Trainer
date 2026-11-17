@@ -683,7 +683,6 @@ class Workspace:
         rules = self.plan_rules()
         synthetic_mode = True
         if synthetic_mode:
-            from dataclasses import replace
             # Keep legacy Avoid exclusions, but admit marked Mute endpoints and
             # Mute-rule regions to the ordinary Sobol/validation/corner sampler.
             planning_controls = list(controls)
@@ -692,7 +691,7 @@ class Workspace:
             planning_controls, planning_rules = controls, rules
         all_switches = all(isinstance(c, SwitchSpec) for c in controls)
         switches_only = all_switches and (
-            bool(rules) or prefs["n_train"] == __import__("math").prod(len(c.enum_names) for c in controls)
+            bool(planning_rules) or prefs["n_train"] == __import__("math").prod(len(c.enum_names) for c in controls)
         )
         if planning_rules and switches_only:
             states, _, _ = rule_capture_limits(controls, planning_rules)
