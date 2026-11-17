@@ -126,7 +126,7 @@ def job_can_resume(workspace, job):
             return False
         if not spec.get("model", {}).get("loss", {}).get("synthetic_mute"):
             return False
-        if (spec.get("learning", {}).get("synthetic_mute_reference_rms", True)
+        if (spec.get("learning", {}).get("synthetic_mute_reference_rms", False)
                 != options["synthetic_mute_reference_rms"]):
             return False
     saved_trainer = spec.get("learning", {}).get("trainer", {})

@@ -28,7 +28,7 @@ DEFAULTS = {
     "capture_level_dbfs": 0.0,
     "capture_type": "parametric",
     "mode": "normal",
-    "epochs": 200,
+    "epochs": 100,
     "batch_size": 16,
     "static_batch_size": 16,
     "device": "auto",
@@ -959,7 +959,7 @@ class Workspace:
             gradient_clip_val=1.0,
             check_nonfinite_gradients=(kind == "parametric"),
             hypernetwork_recipe="HyperA2",
-            synthetic_mute_reference_rms=True,
+            synthetic_mute_reference_rms=False,
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
         # Retire the old beta mute objectives without breaking older projects.
@@ -1058,7 +1058,7 @@ class Workspace:
         if include_advanced:
             options = self.training_options()
             data["settings"]["advanced_training"] = options
-            if options["synthetic_mute_reference_rms"]:
+            if not options["synthetic_mute_reference_rms"]:
                 options.pop("synthetic_mute_reference_rms", None)
             static = self.project.capture_type == "static"
             rms_enabled = options["rms_loss_normalization"]

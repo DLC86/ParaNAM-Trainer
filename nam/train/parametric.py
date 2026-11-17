@@ -887,7 +887,7 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler = val_sampler
 
     def set_synthetic_mute_indices(
-        self, train_indices=(), validation_indices=(), *, reference_rms=True
+        self, train_indices=(), validation_indices=(), *, reference_rms=False
     ):
         if not isinstance(reference_rms, bool):
             raise ValueError("synthetic_mute_reference_rms must be boolean")
@@ -1764,7 +1764,7 @@ def main(
     model.set_synthetic_mute_indices(
         learning_config.get("synthetic_mute_train_indices", ()),
         learning_config.get("synthetic_mute_validation_indices", ()),
-        reference_rms=learning_config.get("synthetic_mute_reference_rms", True),
+        reference_rms=learning_config.get("synthetic_mute_reference_rms", False),
     )
     if (model._synthetic_train_indices or model._synthetic_val_indices) and (
         not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler)

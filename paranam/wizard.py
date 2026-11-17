@@ -1238,7 +1238,7 @@ class WizardWindow(
         self.advanced_fields["rms_loss_normalization_exponent"] = exponent
         advanced_form.addRow("RMS loss normalization exponent", exponent)
         snr_weighted = QCheckBox("SNR weighted loss normalization")
-        snr_weighted.setChecked(True)
+        snr_weighted.setChecked(False)
         snr_weighted.setToolTip(
             "Use measured pre-blip noise to scale training MSE by a capped linear "
             "reliability (minimum 10%) and MRSTFT by a gentler square-root "
@@ -1419,7 +1419,7 @@ class WizardWindow(
             "Number of training output samples per window. Validation keeps its independent window."
         )
         synthetic_reference = QCheckBox("Use -18 dBFS RMS reference for synthetic Mute captures")
-        synthetic_reference.setChecked(True)
+        synthetic_reference.setChecked(False)
         synthetic_reference.setToolTip(
             "Checked: silence remains literal zero but its RMS normalization factor "
             "is unity (-18 dBFS reference). Unchecked: use the measured zero "

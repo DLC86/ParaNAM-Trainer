@@ -62,7 +62,7 @@ def training_preset(name):
         gradient_clipping=True,
         gradient_clip_val=1.0,
         check_nonfinite_gradients=not hyper_a2,
-        synthetic_mute_reference_rms=True,
+        synthetic_mute_reference_rms=False,
     )
 
 
