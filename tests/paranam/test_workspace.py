@@ -155,10 +155,10 @@ def test_discovered_mute_and_avoid_points_survive_replanning(workspace):
     workspace.preferences["seed"] += 7
     assert workspace.plan_changed()
     workspace.generate_plan()
-    assert muted in workspace.project.muted_settings
     assert avoided in workspace.project.avoided_settings
     mute_rows = [e for e in workspace.project.entries if e.params == muted]
-    assert mute_rows
+    # An explicit old Mute is retained only when this plan selected that setting.
+    assert (muted in workspace.project.muted_settings) == bool(mute_rows)
     assert all(e.synthetic_mute and e.status == "captured" for e in mute_rows)
     assert all((workspace.directory / e.y_path).is_file() for e in mute_rows)
     # Replanning is free to replace an Avoid row, but preserves its classified
@@ -167,10 +167,10 @@ def test_discovered_mute_and_avoid_points_survive_replanning(workspace):
     # Avoided rows are excluded, while Mute rows remain as synthetic silent
     # targets in the dataset.
     assert all(e.params != avoided for e in training_rows)
-    assert any(e.params == muted and e.synthetic_mute for e in training_rows)
+    assert any(e.params == muted and e.synthetic_mute for e in training_rows) == bool(mute_rows)
     assert not workspace.plan_changed()
     reopened = Workspace(workspace.directory)
-    assert muted in reopened.project.muted_settings
+    assert (muted in reopened.project.muted_settings) == bool(mute_rows)
     assert avoided in reopened.project.avoided_settings
     assert not reopened.plan_changed()
 

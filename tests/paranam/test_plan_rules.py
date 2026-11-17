@@ -5,7 +5,7 @@ from nam.capture.params import KnobSpec, SwitchSpec
 from nam.capture.planner import plan_captures, rule_capture_limits
 from nam.capture.plan_rules import PlanRule
 from nam.capture.project import add_corner_captures, new_project
-from paranam.workspace import Workspace, migrate_knob_limits
+from paranam.workspace import Workspace, migrate_knob_limits, legacy_avoid_rules
 
 
 def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
@@ -71,13 +71,16 @@ def test_switch_rule_excludes_position_by_label():
         )
 
 
-def test_legacy_endpoint_exclusions_produce_same_plan():
+def test_legacy_endpoint_exclusions_become_equivalent_rules():
     old = KnobSpec("Drive", -0.5, 2.5, 0.5, 1, avoid_zero=True, avoid_max=True)
     new = KnobSpec.from_dict(migrate_knob_limits(old.to_dict()))
-    assert new.avoid_below > old.min and new.avoid_above < old.max
-    assert plan_captures([old], n_train=4, n_validation=1) == plan_captures(
-        [new], n_train=4, n_validation=1
-    )
+    rules = legacy_avoid_rules(old.to_dict())
+    assert new.avoid_below is None and new.avoid_above is None
+    assert not new.avoid_zero and not new.avoid_max
+    assert {(r.operator, r.value) for r in rules} == {("=", -0.5), ("=", 2.5)}
+    train, validation = plan_captures([new], n_train=4, n_validation=1, rules=rules)
+    assert all(not any(rule.excludes(row.params) for rule in rules)
+               for row in train + validation)
 
 
 def test_replan_keeps_matching_recordings_and_can_reuse_an_unused_take(workspace):
@@ -564,6 +567,7 @@ def test_avoid_rules_remain_backward_compatible_without_explicit_kind():
     rule = PlanRule.model_validate(old)
     assert rule.kind == "avoid"
     assert rule.excludes({"Gain": 1, "Tone": 0})
+    assert not rule.excludes({"Gain": 2, "Tone": 0})
     assert not rule.excludes({"Gain": 1, "Tone": 9})
 
 
