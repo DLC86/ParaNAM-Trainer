@@ -398,6 +398,9 @@ class CaptureEntryModel(_BaseModel):
     stream_config: _Optional[str] = None
     # Generated zero-target WAV, not a physical recording. Shown as Captured / Mute.
     synthetic_mute: bool = False
+    # Populated ONLY for an Avoid/Unstable replacement. Persist its source
+    # capture's path so unmarking the source removes the correct extra row.
+    replaces_avoided_capture: _Optional[str] = None
 
 
 class CaptureProject(_BaseModel):
@@ -501,12 +504,34 @@ class CaptureProject(_BaseModel):
             return "mute"
         return None
 
+    def remove_avoid_replacements(self, entry: CaptureEntryModel) -> list[CaptureEntryModel]:
+        """Retire only rows created to replace this exact Unstable capture.
+
+        Never delete WAVs: if a replacement was already recorded, keep its
+        entry metadata in the unused-recordings archive for possible recovery.
+        Legacy rows without provenance are deliberately left untouched.
+        """
+        removed = []
+        for candidate in tuple(self.entries):
+            if candidate.replaces_avoided_capture != entry.y_path:
+                continue
+            if candidate.status == "captured":
+                self.unused_recordings.setdefault(candidate.y_path, {
+                    "entry": candidate.model_dump(mode="json"), "context": None,
+                })
+            self.entries.remove(candidate)
+            removed.append(candidate)
+        return removed
+
     def clear_capture_classification(self, entry: CaptureEntryModel) -> None:
         """A successfully re-recorded setting becomes an ordinary data capture."""
         kind = self.classification_for_entry(entry)
         if kind is not None:
             marked = self.muted_settings if kind == "mute" else self.avoided_settings
-            marked.remove(entry.params)
+            if entry.params in marked:
+                marked.remove(entry.params)
+            if kind == "avoid":
+                self.remove_avoid_replacements(entry)
         self.unused_recordings.pop(entry.y_path, None)
 
     def pending_entries(self) -> list[CaptureEntryModel]:
@@ -682,8 +707,15 @@ def classify_capture(
         ), None)
         if row is None:
             raise ValueError("Selected Mute setting no longer exists")
-        if draft.classification_for_entry(row) is not None:
+        previous_kind = draft.classification_for_entry(row)
+        if previous_kind not in (None, "avoid"):
             raise ValueError("Setting already classified")
+        if previous_kind == "avoid":
+            # An Avoid point becomes a normal zero-target dataset capture.
+            # Its added replacement is no longer needed, but preserve any
+            # original WAV archived when the point first became Unstable.
+            draft.avoided_settings.remove(row.params)
+            draft.remove_avoid_replacements(row)
         draft.muted_settings.append(dict(row.params))
         if row.status == "captured":
             draft.unused_recordings[row.y_path] = {
@@ -759,6 +791,7 @@ def classify_capture(
         row = CaptureEntryModel(
             index=planned.index, split=split, params=planned.params,
             y_path=planned.y_path, is_corner=corner,
+            replaces_avoided_capture=old.y_path if classification == "avoid" else None,
         )
         before = next(
             (i for i, existing in enumerate(draft.entries)
