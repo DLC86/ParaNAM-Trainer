@@ -1369,9 +1369,8 @@ class _ParametricLightningModule(_LightningModule):
             else 1.0
         )
         losses = []
-        for size, (preds, targets, loss_dict) in self._size_steps(
-            batch, synthetic_mute=synthetic_mute
-        ):
+        steps = self._size_steps(batch, synthetic_mute=True) if synthetic_mute else self._size_steps(batch)
+        for size, (preds, targets, loss_dict) in steps:
             loss = _torch.zeros((), device=preds.device)
             for name, v in loss_dict.items():
                 if v.weight is not None and v.weight > 0.0:
@@ -1426,9 +1425,8 @@ class _ParametricLightningModule(_LightningModule):
     def validation_step(self, batch, batch_idx):
         capture_index = self._capture_index(self._val_capture_sampler, batch_idx)
         synthetic_mute = capture_index in self._synthetic_val_indices
-        for size, (preds, targets, loss_dict) in self._size_steps(
-            batch, synthetic_mute=synthetic_mute
-        ):
+        steps = self._size_steps(batch, synthetic_mute=True) if synthetic_mute else self._size_steps(batch)
+        for size, (preds, targets, loss_dict) in steps:
             if synthetic_mute:
                 self._collect_mute_power(self._val_mute_powers, size, preds)
             else:
