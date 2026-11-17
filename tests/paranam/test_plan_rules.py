@@ -421,9 +421,9 @@ def test_rule_conditions_can_have_different_thresholds_and_switch_positions():
         SwitchSpec("Mode", ("Normal", "Boost"), planning_mode="simple"),
     ]
     rule = PlanRule(
-        controls=("Gain", "Bias", "Mode"), operator=">", value=8,
-        operators={"Bias": ">", "Mode": "="},
-        thresholds={"Bias": 7, "Mode": "Boost"},
+        controls=("Gain", "Bias", "Mode"), operator="≥", value=9,
+        operators={"Bias": "≥", "Mode": "="},
+        thresholds={"Bias": 8, "Mode": "Boost"},
     )
     validate_plan_rules([c.to_param_spec() for c in controls], [rule])
     assert rule.excludes({"Gain": 9, "Bias": 8, "Mode": "Boost"})
@@ -444,7 +444,7 @@ def test_rule_conditions_can_have_different_thresholds_and_switch_positions():
     assert PlanRule.model_validate(rule.model_dump()).model_dump() == rule.model_dump()
 
     # A legacy single-threshold rule continues to work as before.
-    legacy = PlanRule(controls=("Gain", "Bias"), operator=">", value=8)
+    legacy = PlanRule(controls=("Gain", "Bias"), operator="≥", value=9)
     assert legacy.excludes({"Gain": 9, "Bias": 9})
     assert not legacy.excludes({"Gain": 9, "Bias": 8})
 
@@ -455,8 +455,8 @@ def test_different_thresholds_change_sampled_plan_and_exclusion_capacity():
         KnobSpec("Bias", 0, 10, step=1, default=5),
     ]
     rule = PlanRule(
-        controls=("Gain", "Bias"), operator=">", value=8,
-        thresholds={"Bias": 7},
+        controls=("Gain", "Bias"), operator="≥", value=9,
+        thresholds={"Bias": 8},
     )
     limit = rule_capture_limits(controls, [rule], n_train=24, n_validation=6)
     assert limit[0] == 1 and limit[1] >= 24 and limit[2] >= 6
@@ -479,22 +479,22 @@ def test_avoid_rule_editor_supports_different_controls_and_roundtrip(qapp):
     dialog = PlanRuleDialog(None, controls)
     for name in ("Gain", "Bias", "Mode"):
         dialog.rows[name][0].setChecked(True)
-    dialog.rows["Gain"][1].setCurrentText(">")
-    dialog.rows["Gain"][2].setValue(8)
-    dialog.rows["Bias"][1].setCurrentText(">")
-    dialog.rows["Bias"][2].setValue(7)
+    dialog.rows["Gain"][1].setCurrentText("≥")
+    dialog.rows["Gain"][2].setValue(9)
+    dialog.rows["Bias"][1].setCurrentText("≥")
+    dialog.rows["Bias"][2].setValue(8)
     dialog.rows["Mode"][2].setCurrentText("Boost")
     dialog.accept()
     rule = dialog.rule
     assert rule is not None
     assert rule.excludes({"Gain": 9, "Bias": 8, "Mode": "Boost"})
     assert not rule.excludes({"Gain": 9, "Bias": 7, "Mode": "Boost"})
-    assert describe_rule(rule) == "Avoid when Gain > 8 AND Bias > 7 AND Mode = Boost"
+    assert describe_rule(rule) == "Avoid when Gain ≥ 9 AND Bias ≥ 8 AND Mode = Boost"
 
     reloaded = PlanRule.model_validate(rule.model_dump(mode="json"))
     editor = PlanRuleDialog(None, controls, reloaded)
-    assert editor.rows["Gain"][2].value() == 8
-    assert editor.rows["Bias"][2].value() == 7
+    assert editor.rows["Gain"][2].value() == 9
+    assert editor.rows["Bias"][2].value() == 8
     assert editor.rows["Mode"][2].currentText() == "Boost"
     editor.accept()
     assert editor.rule == rule
@@ -507,13 +507,13 @@ def test_control_rename_preserves_mixed_rule_conditions(workspace):
              KnobSpec("Bias", 0, 10, default=5)]
     workspace.draft_controls = [c.to_dict() for c in knobs]
     workspace.preferences["draft_plan_rules"] = [PlanRule(
-        controls=("Gain", "Bias"), operator=">", value=8,
-        thresholds={"Bias": 7},
+        controls=("Gain", "Bias"), operator="≥", value=9,
+        thresholds={"Bias": 8},
     ).model_dump(mode="json")]
     workspace.rename_control("Bias", "Tone")
     rule = workspace.plan_rules()[0]
     assert rule.controls == ("Gain", "Tone")
-    assert rule.thresholds == {"Tone": 7}
+    assert rule.thresholds == {"Tone": 8}
     assert rule.excludes({"Gain": 9, "Tone": 8})
     assert not rule.excludes({"Gain": 9, "Tone": 7})
 
