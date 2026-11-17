@@ -1,87 +1,70 @@
-"""Beta 2: mute training modes are trainer-only and retain the shipped .pnam ABI."""
-
+"""Current synthetic-only Mute workflow and legacy preference migration."""
 import shutil
 
-import pytest
-import torch
+import soundfile as sf
 
 from nam.capture.params import KnobSpec
-from nam.train.parametric import _ParametricLightningModule
 from paranam import training
 from paranam.workspace import Workspace, read_json
 
 
-def _mute_ready(workspace):
+def prepare_mute_dataset(workspace):
     workspace.draft_controls = [
         KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True).to_dict()
     ]
+    workspace.preferences.update(n_train=12, n_validation=4, corners=True)
     workspace.generate_plan()
-    for entry in workspace.project.entries:
-        output = workspace.directory / entry.y_path
+    for row in workspace.project.entries:
+        if row.synthetic_mute:
+            assert row.status == "captured"
+            continue
+        output = workspace.directory / row.y_path
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            workspace.directory / workspace.project.input_for_split(entry.split),
+            workspace.directory / workspace.project.input_for_split(row.split),
             output,
         )
-        entry.status = "captured"
-        entry.delay = 0
+        row.status = "captured"
+        row.delay = 0
     workspace.save()
 
 
-@pytest.mark.parametrize("mode", ["anchor", "virtual", "weight"])
-def test_mode_is_saved_and_blocks_incompatible_resume(workspace, mode):
-    _mute_ready(workspace)
-    workspace.preferences["advanced_parametric"] = {"mute_training_mode": mode}
-    job = training.make_job(workspace)
-    spec = read_json(job / "spec.json")
-    assert spec["model"]["loss"]["mute_anchor"].get("mode", "anchor") == mode
-    assert spec["learning"]["rms_loss_normalization"]
-    assert spec["learning"]["snr_weighted_loss_normalization"]
-    (job / "resume-0.ckpt").touch()
-    assert training.job_can_resume(workspace, job)
-    workspace.preferences["advanced_parametric"]["mute_training_mode"] = (
-        "virtual" if mode != "virtual" else "weight"
-    )
-    assert not training.job_can_resume(workspace, job)
+def test_legacy_mute_method_preferences_do_not_restore_old_modes(workspace):
+    prepare_mute_dataset(workspace)
+    for old_mode in ("anchor", "virtual", "weight"):
+        workspace.preferences["advanced_parametric"] = dict(
+            mute_training_mode=old_mode,
+            mute_anchor_interval=9,
+            mute_anchor_batch_size=7,
+            mute_anchor_ny=1024,
+        )
+        options = workspace.training_options("parametric")
+        assert "mute_training_mode" not in options
+        assert not any(k.startswith("mute_anchor_") for k in options)
+        assert options["synthetic_mute_reference_rms"] is False
+        spec = read_json(training.make_job(workspace) / "spec.json")
+        assert spec["model"]["loss"]["synthetic_mute"] is True
+        assert "mute_anchor" not in spec["model"]["loss"]
+        assert spec["learning"]["synthetic_mute_train_indices"]
 
 
-@pytest.mark.parametrize("mode", ["virtual", "weight"])
-def test_new_mute_objective_backpropagates_without_extra_audio_forward(workspace, mode):
-    torch.set_num_threads(1)
-    _mute_ready(workspace)
-    workspace.preferences["advanced_parametric"] = {"mute_training_mode": mode}
-    spec = read_json(training.make_job(workspace) / "spec.json")
-    module = _ParametricLightningModule.init_from_config(spec["model"])
-    mute = module._loss_config.mute_anchor
-    assert mute is not None and mute.mode == mode
-    assert module.net._get_export_architecture() == "ParametricSlimmableContainer"
-    if mode == "virtual":
-        x = torch.randn(1, module.net.receptive_field + 16) * 0.1
-        loss = module._virtual_mute_step((x,), mute, 0)
-    else:
-        loss = module._mute_weight_losses(mute, 0).sum()
-    assert torch.isfinite(loss).item()
-    assert loss.requires_grad
-    loss.backward()
-    assert any(
-        parameter.grad is not None and torch.isfinite(parameter.grad).all().item()
-        for parameter in module.parameters()
-    )
-
-
-def test_mute_selector_persists_in_advanced_settings(window, workspace):
+def test_no_mute_method_selector_or_anchor_settings_in_ui(window, workspace):
     window._attach(workspace)
-    field = window.advanced_fields["mute_training_mode"]
-    assert field.currentData() == "anchor"
-    for method in ("virtual", "weight", "anchor"):
-        index = field.findData(method)
-        assert index >= 0
-        field.setCurrentIndex(index)
-        assert Workspace(workspace.directory).training_options("parametric")[
-            "mute_training_mode"
-        ] == method
-    field.setCurrentIndex(field.findData("weight"))
-    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
-    assert window.advanced_panel.layout().isRowVisible(field) is False
-    window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
-    assert field.currentData() == "weight"
+    assert "mute_training_mode" not in window.advanced_fields
+    assert not any(k.startswith("mute_anchor_") for k in window.advanced_fields)
+    assert window.advanced_fields["synthetic_mute_reference_rms"].isChecked() is False
+
+
+def test_mute_dataset_is_generated_immediately_and_shared(workspace):
+    prepare_mute_dataset(workspace)
+    muted = [row for row in workspace.project.entries if row.synthetic_mute]
+    assert muted
+    for split in ("train", "validation"):
+        rows = [row for row in muted if row.split == split]
+        if not rows:
+            continue
+        assert len({row.y_path for row in rows}) == 1
+        source = workspace.directory / workspace.project.input_for_split(split)
+        target = workspace.directory / rows[0].y_path
+        assert sf.info(source).frames == sf.info(target).frames
+        assert sf.info(source).samplerate == sf.info(target).samplerate
