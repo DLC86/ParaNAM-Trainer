@@ -699,11 +699,15 @@ class _ParametricLossConfig(_LossConfig):
     silence_anchor: _Optional[_SilenceAnchorConfig] = None
     silence_anchor_ramp: _Optional[_SilenceAnchorRampConfig] = None
     mute_anchor: _Optional[_MuteAnchorConfig] = None
+    synthetic_mute: bool = False
 
     @classmethod
     def parse_config(cls, config):
         parsed = super().parse_config(config)
         parsed["training_recipe"] = config.get("training_recipe", "legacy")
+        parsed["synthetic_mute"] = config.get("synthetic_mute", False)
+        if type(parsed["synthetic_mute"]) is not bool:
+            raise ValueError("synthetic_mute must be boolean")
         if parsed["training_recipe"] not in ("legacy", "a2"):
             raise ValueError("training_recipe must be legacy or a2")
         parsed["mel_weight"] = config.get("mel_weight")
@@ -803,6 +807,11 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._capture_mse_scales: tuple[float, ...] = ()
         self._capture_mrstft_scales: tuple[float, ...] = ()
+        self._synthetic_train_indices: frozenset[int] = frozenset()
+        self._synthetic_val_indices: frozenset[int] = frozenset()
+        self._synthetic_reference_rms = True
+        self._train_mute_powers: dict[str, list[float]] = {}
+        self._val_mute_powers: dict[str, list[float]] = {}
 
     @classmethod
     def parse_config(cls, config):
@@ -822,7 +831,10 @@ class _ParametricLightningModule(_LightningModule):
         checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
         mute = self._loss_config.mute_anchor
         checkpoint["mute_anchor_settings"] = mute.settings() if mute is not None else None
-        checkpoint["mute_training_mode"] = mute.mode if mute is not None else "anchor"
+        checkpoint["mute_training_mode"] = (
+            "synthetic" if self._loss_config.synthetic_mute else
+            mute.mode if mute is not None else "anchor"
+        )
         checkpoint["mute_anchor_corner_targets"] = (
             mute.corner_targets if mute is not None else None
         )
@@ -837,7 +849,10 @@ class _ParametricLightningModule(_LightningModule):
                 "Start a new training run to use the stabilized HyperA2 recipe."
             )
         mute = self._loss_config.mute_anchor
-        mode = mute.mode if mute is not None else "anchor"
+        mode = (
+            "synthetic" if self._loss_config.synthetic_mute else
+            mute.mode if mute is not None else "anchor"
+        )
         if checkpoint.get("mute_training_mode", "anchor") != mode:
             raise ValueError("Checkpoint uses a different mute training method.")
         settings = mute.settings() if mute is not None else None
@@ -870,6 +885,15 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler = train_sampler
         self._val_capture_sampler = val_sampler
 
+    def set_synthetic_mute_indices(
+        self, train_indices=(), validation_indices=(), *, reference_rms=True
+    ):
+        if not isinstance(reference_rms, bool):
+            raise ValueError("synthetic_mute_reference_rms must be boolean")
+        self._synthetic_train_indices = frozenset(train_indices)
+        self._synthetic_val_indices = frozenset(validation_indices)
+        self._synthetic_reference_rms = reference_rms
+
     def set_capture_mse_normalization(
         self, dataset, snr_weighted: bool = False, snr_noise_powers=None,
         rms_exponent: float = 2.0, rms_enabled: bool = True,
@@ -885,17 +909,22 @@ class _ParametricLightningModule(_LightningModule):
                 or not _isfinite(rms_exponent) or not 0.01 <= rms_exponent <= 2.0):
             raise ValueError("RMS loss normalization exponent must be between 0.01 and 2")
         target_power = 10.0 ** (-18.0 / 10.0)
-        floor_power = 10.0 ** (-60.0 / 10.0)
+        floor_power = 10.0 ** (-58.0 / 10.0)
         scales = []
         spectral_scales = []
-        for capture in _iter_inner_datasets(dataset):
+        for capture_index, capture in enumerate(_iter_inner_datasets(dataset)):
             y = capture.y
+            is_synthetic = capture_index in self._synthetic_train_indices
             total_power = _torch.mean(y.double().square()).item()
+            if is_synthetic and self._synthetic_reference_rms:
+                # The WAV stays exactly zero; only the RMS normalization reference
+                # uses -18 dBFS (the unity-weight reference).
+                total_power = target_power
             if not _isfinite(total_power):
                 raise ValueError("Cannot normalize capture with non-finite power")
 
             noise_power = 0.0
-            if snr_weighted:
+            if snr_weighted and not is_synthetic:
                 if capture._y_path is None or capture.sample_rate is None:
                     raise ValueError(
                         "SNR weighting requires the capture WAV path and sample rate"
@@ -1157,15 +1186,33 @@ class _ParametricLightningModule(_LightningModule):
     def on_train_epoch_start(self):
         self._train_metrics = _EpochMetrics()
         self._train_size_metrics = {}
+        self._train_mute_powers = {}
 
-    def _size_steps(self, batch):
+    def _collect_mute_power(self, store, size, preds):
+        key = "full" if size is None else str(size)
+        power, count = store.setdefault(key, [0.0, 0.0])
+        store[key] = [power + float(preds.detach().square().sum()), count + preds.numel()]
+
+    def _report_mute_power(self, store, bucket):
+        for size, (power, count) in store.items():
+            if count:
+                dbfs = 10.0 * _math.log10(max(power / count, 1e-20))
+                self._log_bucket({"Mute RMS dBFS": dbfs}, f"{bucket}/{size}")
+
+    def _size_steps(self, batch, *, synthetic_mute=False):
         if isinstance(self.net, _HyperA2):
             predictions = self.net.forward_sizes(*batch[:-1], pad_start=False)
             for index, size in enumerate(self.net.sizes):
                 with self.net.using_size(size):
                     preds, targets = predictions[:, index, :], batch[-1]
-                    result = preds, targets, self._get_loss_dict(preds, targets)
+                    result = preds, targets, (
+                        {"MSE": _LossItem(1.0, preds.square().mean())}
+                        if synthetic_mute else self._get_loss_dict(preds, targets)
+                    )
                 yield size, result
+        elif synthetic_mute:
+            preds = self.net(*batch[:-1], pad_start=False)
+            yield None, (preds, batch[-1], {"MSE": _LossItem(1.0, preds.square().mean())})
         else:
             yield None, self._shared_step(batch)
 
@@ -1309,6 +1356,7 @@ class _ParametricLightningModule(_LightningModule):
         if mute is not None and mute.mode == "virtual" and self.global_step % 20 == 19:
             return self._virtual_mute_step(batch, mute, self.global_step // 20)
         capture_index = self._capture_index(self._train_capture_sampler, batch_idx)
+        synthetic_mute = capture_index in self._synthetic_train_indices
         mse_scale = (
             self._capture_mse_scales[capture_index]
             if capture_index is not None and self._capture_mse_scales
@@ -1320,7 +1368,9 @@ class _ParametricLightningModule(_LightningModule):
             else 1.0
         )
         losses = []
-        for size, (preds, targets, loss_dict) in self._size_steps(batch):
+        for size, (preds, targets, loss_dict) in self._size_steps(
+            batch, synthetic_mute=synthetic_mute
+        ):
             loss = _torch.zeros((), device=preds.device)
             for name, v in loss_dict.items():
                 if v.weight is not None and v.weight > 0.0:
@@ -1336,11 +1386,14 @@ class _ParametricLightningModule(_LightningModule):
                     loss = loss + weight * v.value
             losses.append(loss)
             means = _bucket_means(loss_dict)
-            self._train_metrics.update(preds, targets, means, capture_index)
-            if size is not None:
-                self._train_size_metrics.setdefault(size, _EpochMetrics()).update(
-                    preds, targets, means, capture_index
-                )
+            if synthetic_mute:
+                self._collect_mute_power(self._train_mute_powers, size, preds)
+            else:
+                self._train_metrics.update(preds, targets, means, capture_index)
+                if size is not None:
+                    self._train_size_metrics.setdefault(size, _EpochMetrics()).update(
+                        preds, targets, means, capture_index
+                    )
         stacked = _torch.stack(losses)
         if mute is not None and mute.mode == "weight":
             stacked = stacked + mute.weight * self._mute_weight_losses(mute, self.global_step)
@@ -1362,23 +1415,32 @@ class _ParametricLightningModule(_LightningModule):
         self._log_bucket(self._train_metrics.compute(), _TRAIN_BUCKET)
         for size, metrics in self._train_size_metrics.items():
             self._log_bucket(metrics.compute(), f"{_TRAIN_BUCKET}/{size}")
+        self._report_mute_power(self._train_mute_powers, _TRAIN_BUCKET)
 
     def on_validation_epoch_start(self):
         self._val_metrics = _EpochMetrics()
         self._val_size_metrics = {}
+        self._val_mute_powers = {}
 
     def validation_step(self, batch, batch_idx):
         capture_index = self._capture_index(self._val_capture_sampler, batch_idx)
-        for size, (preds, targets, loss_dict) in self._size_steps(batch):
-            means = _bucket_means(loss_dict)
-            self._val_metrics.update(preds, targets, means, capture_index)
-            if size is not None:
-                self._val_size_metrics.setdefault(size, _EpochMetrics()).update(
-                    preds, targets, means, capture_index
-                )
+        synthetic_mute = capture_index in self._synthetic_val_indices
+        for size, (preds, targets, loss_dict) in self._size_steps(
+            batch, synthetic_mute=synthetic_mute
+        ):
+            if synthetic_mute:
+                self._collect_mute_power(self._val_mute_powers, size, preds)
+            else:
+                means = _bucket_means(loss_dict)
+                self._val_metrics.update(preds, targets, means, capture_index)
+                if size is not None:
+                    self._val_size_metrics.setdefault(size, _EpochMetrics()).update(
+                        preds, targets, means, capture_index
+                    )
         # Reduction happens once in on_validation_epoch_end; nothing to return.
 
     def on_validation_epoch_end(self):
+        self._report_mute_power(self._val_mute_powers, _VALIDATION_BUCKET)
         metrics = self._val_metrics.compute(include_worst=True)
         if not metrics:
             return
@@ -1700,6 +1762,16 @@ def main(
         train_sampler=train_dataloader.batch_sampler,
         val_sampler=val_dataloader.batch_sampler,
     )
+    model.set_synthetic_mute_indices(
+        learning_config.get("synthetic_mute_train_indices", ()),
+        learning_config.get("synthetic_mute_validation_indices", ()),
+        reference_rms=learning_config.get("synthetic_mute_reference_rms", True),
+    )
+    if (model._synthetic_train_indices or model._synthetic_val_indices) and (
+        not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler)
+        or not isinstance(val_dataloader.batch_sampler, _CaptureBatchSampler)
+    ):
+        raise ValueError("Synthetic mute captures require capture-grouped batches")
     rms = learning_config.get("rms_loss_normalization", True)
     if not isinstance(rms, bool):
         raise ValueError("rms_loss_normalization must be a boolean")
