@@ -123,11 +123,19 @@ def test_queue_can_enqueue_training_with_synthetic_validation(workspace, tmp_pat
     from paranam.synthetic_mute import materialize_synthetic_mutes
     from paranam.training_queue import TrainingQueue
 
+    # ESR requires a genuine validation signal. Exercise the valid mixed
+    # case, not an all-Mute validation split (which must remain rejected).
+    workspace.preferences["n_validation"] = 2
     small_ready(workspace)
-    row = workspace.project.entries_for_split("validation")[0]
+    validation = workspace.project.entries_for_split("validation")
+    assert len(validation) == 2
+    row = validation[0]
     workspace.project.muted_settings.append(dict(row.params))
     materialize_synthetic_mutes(workspace)
     workspace.save()
+    assert row.synthetic_mute
+    assert validation[1].status == "captured"
+    assert not validation[1].synthetic_mute
     assert not workspace.plan_changed()
     assert workspace.training_ready()
     queued = TrainingQueue(tmp_path / "queue").add(workspace)
