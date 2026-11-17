@@ -1,7 +1,6 @@
 """Normal dataset recordings for Mute settings, never physical captures.
 
-Only the opt-in Synthetic Mute Captures recipe calls this module. The ordinary
-capture planner and its silence-anchor behavior remain unchanged otherwise.
+Synthetic Mute Captures is the sole mute method; it runs as part of plan creation.
 """
 from __future__ import annotations
 
@@ -12,6 +11,8 @@ import soundfile as sf
 
 
 def is_mute_setting(project, params):
+    if params in project.avoided_settings:
+        return False
     if params in project.muted_settings:
         return True
     for knob in project.knob_specs():
@@ -29,53 +30,68 @@ def is_mute_setting(project, params):
     )
 
 
-def materialize_synthetic_mutes(workspace):
-    """Make selected Mute points completed, full-length, zero-target captures.
+def _shared_target(root, split, source):
+    """Generate one silent reference per split, only if needed."""
+    import os
+    import tempfile
 
-    Create a fresh path instead of overwriting a previously recorded WAV. A
-    pair of real and synthetic split inputs use their respective exact lengths.
-    """
+    info = sf.info(str(source))
+    if info.channels != 1:
+        raise ValueError(f"Expected mono DI for synthetic Mute: {source}")
+    relative = f"synthetic_mutes/{split}.wav"
+    destination = root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        old = sf.info(str(destination))
+        if (old.frames == info.frames and old.samplerate == info.samplerate
+                and old.channels == 1):
+            with sf.SoundFile(str(destination)) as wav:
+                if all(not np.any(chunk) for chunk in wav.blocks(
+                    blocksize=65536, dtype="float32"
+                )):
+                    return relative
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{split}-", suffix=".wav", dir=destination.parent
+    )
+    os.close(fd)
+    try:
+        zeros = np.zeros(65536, dtype=np.float32)
+        with sf.SoundFile(temporary, mode="w", samplerate=info.samplerate,
+                          channels=1, format="WAV", subtype="PCM_24") as out:
+            remaining = info.frames
+            while remaining:
+                count = min(remaining, len(zeros))
+                out.write(zeros[:count])
+                remaining -= count
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return relative
+
+
+def materialize_synthetic_mutes(workspace):
+    """Mark every selected Mute setting as completed using shared full-length zero WAVs."""
     project, root = workspace.project, Path(workspace.directory)
     if project.capture_type != "parametric":
         return 0
-    reserved = {row.y_path for row in project.entries}
+    grouped = {}
+    for row in project.entries:
+        if row.split in ("train", "validation") and is_mute_setting(project, row.params):
+            grouped.setdefault(row.split, []).append(row)
     created = 0
-    for index, row in enumerate(project.entries):
-        if row.split not in ("train", "validation") or not is_mute_setting(project, row.params):
-            continue
-        if row.synthetic_mute and (root / row.y_path).is_file():
-            continue
-        basename = f"synthetic-mute-{index:05d}-{row.split}"
-        suffix = 0
-        while True:
-            relative = f"captures/{basename}{'-' + str(suffix) if suffix else ''}.wav"
-            if relative not in reserved and not (root / relative).exists():
-                break
-            suffix += 1
-        reserved.add(relative)
-        target = root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        source = root / project.input_for_split(row.split)
-        info = sf.info(str(source))
-        if info.channels != 1:
-            raise ValueError(f"Expected mono DI for synthetic mute capture: {source}")
-        # Stream the target in fixed blocks rather than allocating a potentially
-        # multi-minute WAV's worth of zeros in memory.
-        with sf.SoundFile(str(target), mode="w", samplerate=info.samplerate,
-                          channels=1, format="WAV", subtype="PCM_24") as output:
-            remaining = info.frames
-            silence = np.zeros(65536, dtype=np.float32)
-            while remaining:
-                count = min(remaining, len(silence))
-                output.write(silence[:count])
-                remaining -= count
-        row.y_path = relative
-        row.status = "captured"
-        row.delay = 0
-        row.synthetic_mute = True
-        row.qa = None
-        row.captured_at = None
-        created += 1
+    for split, rows in grouped.items():
+        reference = _shared_target(root, split, root / project.input_for_split(split))
+        for row in rows:
+            if row.synthetic_mute and row.y_path == reference and row.status == "captured":
+                continue
+            row.y_path = reference
+            row.status = "captured"
+            row.delay = 0
+            row.synthetic_mute = True
+            row.qa = None
+            row.captured_at = None
+            created += 1
     return created
 
 
@@ -94,7 +110,8 @@ def ensure_mute_rule_corners(project, rules):
     controls = project.control_specs()
     by_name = {control.name: control for control in controls}
     avoid_rules = [rule for rule in rules if rule.kind == "avoid"]
-    occupied = {tuple(row.params[name] for name in by_name) for row in project.entries}
+    occupied = {tuple(row.params[name] for name in by_name)
+                for row in project.entries if row.split == "train"}
     next_index = max((row.index for row in project.entries if row.split == "train"), default=-1) + 1
     extra = []
     for rule_index, rule in enumerate(rules):
@@ -109,9 +126,9 @@ def ensure_mute_rule_corners(project, rules):
             operator, threshold = rule.condition_for(name)
             if operator == "=":
                 fixed[name] = threshold
-            elif operator == "<":
+            elif operator == "≤":
                 fixed[name] = control.min
-            elif operator == ">":
+            elif operator == "≥":
                 fixed[name] = control.max
         free = [control for control in controls if control.name not in fixed]
         # Prefer other controls at their maxima so a multi-Gain Mute corner
@@ -120,13 +137,9 @@ def ensure_mute_rule_corners(project, rules):
         for control in free:
             if hasattr(control, "enum_names"):
                 default = control.enum_names[control.default]
-                axes.append(tuple(dict.fromkeys(
-                    (default, *control.enum_names)
-                )))
+                axes.append(tuple(control.enum_names))
             else:
-                axes.append(tuple(dict.fromkeys(
-                    (control.max, control.min, control.default)
-                )))
+                axes.append((control.max, control.min))
         candidate = None
         for values in product(*axes):
             params = dict(fixed)

@@ -3694,6 +3694,9 @@ class WizardWindow(
 
             replacement, added = classify_capture(project, entry, classification)
             self.workspace.project = replacement
+            if classification == "mute":
+                from .synthetic_mute import materialize_synthetic_mutes
+                materialize_synthetic_mutes(self.workspace)
             if self.session is not None:
                 self.session.project = replacement
             self._confirmed_capture = None

@@ -110,11 +110,20 @@ def snapshot_workspace(workspace, root, *, editable=False):
         else preferences.get("custom_input", "")
     )
     project.validation_input = freeze(project.validation_input, "input_validation.wav")
+    synthetic_refs = {}
     for index, entry in enumerate(project.entries):
         if entry.y_path and entry.status == "captured":
-            entry.y_path = freeze(
-                entry.y_path, f"captures/entry-{index:05d}-{entry.split}.wav"
-            )
+            if entry.synthetic_mute:
+                source = entry.y_path
+                if source not in synthetic_refs:
+                    synthetic_refs[source] = freeze(
+                        source, f"captures/synthetic-mute-{entry.split}.wav"
+                    )
+                entry.y_path = synthetic_refs[source]
+            else:
+                entry.y_path = freeze(
+                    entry.y_path, f"captures/entry-{index:05d}-{entry.split}.wav"
+                )
     save_project(project, destination)
     atomic_write_json(destination / "paranam.json", preferences)
     previous = training.current_job(workspace.directory)

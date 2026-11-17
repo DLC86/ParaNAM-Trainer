@@ -129,7 +129,7 @@ def active_learning_warmup_epochs(max_epochs: int) -> int:
     return min(AL_WARMUP_EPOCHS, max(max_epochs - 1, 0))
 
 
-def build_data_config(project: CaptureProject, *, include_synthetic=False) -> dict[str, _Any]:
+def build_data_config(project: CaptureProject, *, include_synthetic=True) -> dict[str, _Any]:
     """
     Build the parametric ``data.json`` payload from the project's *captured* entries.
 
@@ -188,7 +188,7 @@ def build_data_config(project: CaptureProject, *, include_synthetic=False) -> di
     }
 
 
-def update_data_json(project: CaptureProject, project_dir: _Path, *, include_synthetic=False) -> _Path:
+def update_data_json(project: CaptureProject, project_dir: _Path, *, include_synthetic=True) -> _Path:
     path = _Path(project_dir) / DATA_FILENAME
     _atomic_write_json(path, build_data_config(project, include_synthetic=include_synthetic))
     return path

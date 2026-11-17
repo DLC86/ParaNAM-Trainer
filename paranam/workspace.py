@@ -50,7 +50,7 @@ DEFAULTS = {
 
 def recommended_epochs(kind: str, input_mode: str) -> int:
     """Suggested budget for a fresh run, not a mandatory training limit."""
-    return 200 if kind == "static" or input_mode == "trunc" else 50
+    return 200 if kind == "static" else 100
 
 
 def read_json(path: Path, default=None, *, tolerate_corrupt=False):
@@ -250,8 +250,8 @@ class Workspace:
             n_train=suggested_train,
             n_validation=suggested_val,
             lhs_method="sobol",
-            epochs=200,
-            parametric_epochs=200,
+            epochs=100,
+            parametric_epochs=100,
             static_epochs=200,
             batch_size=preset_batch_size("HyperA2"),
             advanced_parametric=training_preset("HyperA2"),
@@ -682,18 +682,12 @@ class Workspace:
             self._reuse_plan_recordings(replacement)
             return self._install_plan(replacement)
         rules = self.plan_rules()
-        synthetic_mode = (
-            self.training_options("parametric")["mute_training_mode"] == "synthetic"
-        )
+        synthetic_mode = True
         if synthetic_mode:
             from dataclasses import replace
             # Keep legacy Avoid exclusions, but admit marked Mute endpoints and
             # Mute-rule regions to the ordinary Sobol/validation/corner sampler.
-            planning_controls = [
-                replace(c, mute_at_min=False, mute_at_max=False)
-                if isinstance(c, KnobSpec) else c
-                for c in controls
-            ]
+            planning_controls = list(controls)
             planning_rules = [rule for rule in rules if rule.kind == "avoid"]
         else:
             planning_controls, planning_rules = controls, rules
@@ -701,8 +695,8 @@ class Workspace:
         switches_only = all_switches and (
             bool(rules) or prefs["n_train"] == __import__("math").prod(len(c.enum_names) for c in controls)
         )
-        if rules and switches_only:
-            states, _, _ = rule_capture_limits(controls, rules)
+        if planning_rules and switches_only:
+            states, _, _ = rule_capture_limits(controls, planning_rules)
             if prefs["n_train"] != states:
                 raise ValueError(f"Capture all {states} allowed switch states using each signal.")
         validation_count = prefs["n_validation"]
@@ -822,7 +816,7 @@ class Workspace:
         names = {c.name for c in controls}
         for old in self.project.entries:
             kind = self.project.classification_for_entry(old)
-            if kind is None or (synthetic_mode and kind == "mute"):
+            if kind is None or kind == "mute":
                 continue
             if set(old.params) != names:
                 continue  # No longer the same rig; the old point stays annotated.
@@ -868,10 +862,7 @@ class Workspace:
 
         install_signals(self.directory)
         self.project = replacement
-        synthetic = (
-            replacement.capture_type == "parametric"
-            and self.training_options("parametric")["mute_training_mode"] == "synthetic"
-        )
+        synthetic = replacement.capture_type == "parametric"
         if synthetic:
             from .synthetic_mute import materialize_synthetic_mutes
             materialize_synthetic_mutes(self)
@@ -897,10 +888,7 @@ class Workspace:
             return [
                 e for e in entries
                 if self.project.classification_for_entry(e) is None
-                or (
-                    e.synthetic_mute
-                    and self.training_options("parametric")["mute_training_mode"] == "synthetic"
-                )
+                or e.synthetic_mute
             ]
         imported = {
             e.capture_id for e in entries
