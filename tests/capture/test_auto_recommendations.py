@@ -39,25 +39,25 @@ def test_coarse_knob_with_complex_switch_recommends_feasible_splits():
     assert not _keys(val) & {tuple(p.items()) for p in corners}
 
 
-def test_mute_endpoints_limit_capacity_just_like_legacy_avoid_flags():
+def test_mute_endpoints_remain_in_the_grid_unlike_explicit_avoid_flags():
     muted = [KnobSpec(
         "Drive", 0, 10, step=0.5, default=5,
         mute_at_min=True, mute_at_max=True,
     )]
-    legacy = [KnobSpec(
+    normal = [KnobSpec("Drive", 0, 10, step=0.5, default=5)]
+    avoided = [KnobSpec(
         "Drive", 0, 10, step=0.5, default=5,
         avoid_zero=True, avoid_max=True,
     )]
-    assert capture_grid_limits(muted) == capture_grid_limits(legacy)
-    assert capture_recommendations(muted) == capture_recommendations(legacy)
-    assert capture_count_maxima(muted, 10, 4) == capture_count_maxima(
-        legacy, 10, 4
-    )
+    assert capture_grid_limits(muted) == capture_grid_limits(normal)
+    assert capture_grid_limits(muted) != capture_grid_limits(avoided)
+    assert capture_recommendations(muted) == capture_recommendations(normal)
+    assert capture_count_maxima(muted, 10, 4) == capture_count_maxima(normal, 10, 4)
     assert corner_settings(
         tuple(s.to_param_spec() for s in muted)
-    ) == corner_settings(tuple(s.to_param_spec() for s in legacy))
+    ) == corner_settings(tuple(s.to_param_spec() for s in normal))
     assert plan_captures(muted, n_train=10, n_validation=4, seed=7) == plan_captures(
-        legacy, n_train=10, n_validation=4, seed=7
+        normal, n_train=10, n_validation=4, seed=7
     )
 
 
