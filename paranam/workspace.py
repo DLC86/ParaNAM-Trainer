@@ -770,6 +770,7 @@ class Workspace:
         # Preserve discovered mute/unstable points across Plan edits.
         # Mark sampled matches and replace them, but retain the marked rows
         # in the Capture screen, even when this plan samples different points.
+        # Explicit Mute points must survive as synthetic zero targets after replan.
         from nam.capture.project import classify_capture
         old_muted = [dict(p) for p in self.project.muted_settings]
         old_avoided = [dict(p) for p in self.project.avoided_settings]
@@ -814,7 +815,7 @@ class Workspace:
         names = {c.name for c in controls}
         for old in self.project.entries:
             kind = self.project.classification_for_entry(old)
-            if kind is None or kind == "mute":
+            if kind is None:
                 continue
             if set(old.params) != names:
                 continue  # No longer the same rig; the old point stays annotated.
