@@ -660,8 +660,8 @@ class PlayActions:
         )
 
     def remove_play_models(self):
-        if getattr(self, "play_loader", None):
-            return
+        # A selection can still be loading its preview when Remove is clicked.
+        # Persist the hide immediately; refresh the list when the worker exits.
         removed = self._selected_asset_paths(self.play_model_list)
         if not removed:
             return
@@ -679,8 +679,11 @@ class PlayActions:
             self, "play_worker", None
         ):
             self.stop_playback()
-        self.refresh_play_models(force=True)
-        self.play_model_list.sync()
+        if getattr(self, "play_loader", None):
+            self._refresh_models_after_loader = True
+        else:
+            self.refresh_play_models(force=True)
+            self.play_model_list.sync()
         self.update_asset_remove_buttons()
 
     def remove_play_irs(self):
@@ -957,6 +960,10 @@ class PlayActions:
         self.play_loader.deleteLater()
         self.play_loader = None
         self.play_model.setEnabled(True)
+        if getattr(self, "_refresh_models_after_loader", False):
+            self._refresh_models_after_loader = False
+            self.refresh_play_models(force=True)
+            self.play_model_list.sync()
         self.play_open.setEnabled(True)
         self.play_refresh.setEnabled(True)
         self.play_size.setEnabled(
