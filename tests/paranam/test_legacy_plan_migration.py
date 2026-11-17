@@ -116,3 +116,19 @@ def test_compare_panel_stays_visible_without_model_controls(window):
     window.clear_play_controls()
     assert not window.play_controls.isHidden()
     assert window.play_controls.minimumHeight() >= 100
+
+
+def test_queue_can_enqueue_training_with_synthetic_validation(workspace, tmp_path):
+    from tests.paranam.test_queue import small_ready
+    from paranam.synthetic_mute import materialize_synthetic_mutes
+    from paranam.training_queue import TrainingQueue
+
+    small_ready(workspace)
+    row = workspace.project.entries_for_split("validation")[0]
+    workspace.project.muted_settings.append(dict(row.params))
+    materialize_synthetic_mutes(workspace)
+    workspace.save()
+    assert not workspace.plan_changed()
+    assert workspace.training_ready()
+    queued = TrainingQueue(tmp_path / "queue").add(workspace)
+    assert queued["job"]

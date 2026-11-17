@@ -342,7 +342,10 @@ class TrainingQueue:
                 snapshot, workspace.training_options(), stored_schedules(spec)
             )
         workspace.save()
-        return workspace
+        # Retrain is editable: reopen after recording _retrain_source_job so
+        # legacy per-knob Avoid thresholds migrate into Rules. Its source job
+        # remains frozen and the original recordings are never modified.
+        return Workspace(workspace.directory)
 
     def capture_round(self, identifier):
         """Editable active-learning branch; never record over frozen hardlinks."""

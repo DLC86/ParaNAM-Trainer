@@ -809,8 +809,9 @@ class Workspace:
             from .synthetic_mute import (
                 ensure_mute_endpoint_corners, ensure_mute_rule_corners,
             )
-            if prefs["corners"]:
-                ensure_mute_endpoint_corners(replacement, rules)
+            # Mute endpoints need explicit zero targets even when optional
+            # physical Corner captures are disabled.
+            ensure_mute_endpoint_corners(replacement, rules)
             ensure_mute_rule_corners(replacement, rules)
         if synthetic_mode:
             # The temporary planning controls only relax Mute constraints.
