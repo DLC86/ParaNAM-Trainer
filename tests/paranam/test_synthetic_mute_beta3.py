@@ -24,10 +24,6 @@ def _configure_joint_mute(workspace):
         controls=("Gain I", "Gain II"), operator="=", value=0, kind="mute"
     )
     workspace.preferences["draft_plan_rules"] = [rule.model_dump(mode="json")]
-    workspace.preferences["advanced_parametric"] = {
-        "mute_training_mode": "synthetic",
-        "synthetic_mute_reference_rms": True,
-    }
     workspace.preferences.update(n_train=12, n_validation=4, corners=True)
     workspace.generate_plan()
     return rule
@@ -52,7 +48,7 @@ def test_multicontrol_mute_rule_always_has_completed_synthetic_corner(workspace)
         audio, _ = sf.read(target, dtype="float32")
         assert not audio.any()
     included = build_data_config(project, include_synthetic=True)
-    omitted = build_data_config(project)
+    omitted = build_data_config(project, include_synthetic=False)
     assert any(item["y_path"] == selected[0].y_path for item in included["train"])
     assert all(item["y_path"] != selected[0].y_path for item in omitted["train"])
     assert workspace.training_capture_entries()
@@ -78,9 +74,9 @@ def test_synthetic_mute_job_contains_normal_dataset_and_no_anchor(workspace):
     assert spec["model"]["loss"].get("synthetic_mute") is True
     assert "mute_anchor" not in spec["model"]["loss"]
     assert spec["learning"]["synthetic_mute_train_indices"]
-    assert spec["learning"]["synthetic_mute_reference_rms"] is True
+    assert spec["learning"]["synthetic_mute_reference_rms"] is False
     assert spec["learning"]["rms_loss_normalization"] is True
-    assert spec["learning"]["snr_weighted_loss_normalization"] is True
+    assert spec["learning"]["snr_weighted_loss_normalization"] is False
     assert len(spec["data"]["train"]) > len(spec["learning"]["synthetic_mute_train_indices"])
 
 
@@ -147,8 +143,7 @@ def test_synthetic_mute_visible_as_captured_and_blue_tag(window, workspace):
     assert window.capture_table.item(row, 2).text() == "Captured"
     assert "Mute" in window.capture_table.item(row, 5).text()
     assert window.capture_table.item(row, 5).foreground().color().name() == "#53aaff"
-    assert window.advanced_fields["mute_training_mode"].findData("synthetic") >= 0
     field = window.advanced_fields["synthetic_mute_reference_rms"]
-    assert field.isChecked()
-    field.setChecked(False)
-    assert workspace.training_options()["synthetic_mute_reference_rms"] is False
+    assert not field.isChecked()
+    field.setChecked(True)
+    assert workspace.training_options()["synthetic_mute_reference_rms"] is True

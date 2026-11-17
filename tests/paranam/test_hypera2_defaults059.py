@@ -24,14 +24,11 @@ def requested_settings():
         "hypernetwork_learning_rate": 0.001,
         "hypernetwork_lr_decay": 0.998496613,
         "branch_loss_reduction": "sum",
-        "snr_weighted_loss_normalization": True,
+        "snr_weighted_loss_normalization": False,
+        "gradient_clipping": True,
         "rms_loss_normalization": True,
         "rms_loss_normalization_exponent": 2.0,
-        "mute_anchor_interval": 1,
-        "mute_anchor_batch_size": 2,
-        "mute_anchor_ny": 512,
-        "mute_training_mode": "anchor",
-        "synthetic_mute_reference_rms": True,
+        "synthetic_mute_reference_rms": False,
     }
 
 
@@ -42,7 +39,7 @@ def test_hypera2_preset_preserves_historical_fields_except_new_normalization_def
 def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_path):
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
     assert workspace.training_options() == requested_settings()
-    assert workspace.preferences["epochs"] == 200
+    assert workspace.preferences["epochs"] == 100
     assert workspace.training_batch_size() == 16
     workspace.preferences["advanced_parametric"] = training_preset("HyperWaveNet")
     workspace.save()
@@ -90,7 +87,7 @@ def test_0252_architecture_optimizer_safety_flags_and_both_decay_clocks(workspac
             "hypernetwork": {"interval": "step", "step_size": 62, "gamma": 0.998496613},
         },
     }
-    assert "gradient_clip_val" not in spec["learning"]["trainer"]
+    assert spec["learning"]["trainer"]["gradient_clip_val"] == 1.0
     assert spec["learning"]["trainer"]["benchmark"] is False
     assert spec["learning"]["trainer"]["deterministic"] is False
     assert spec["model"]["check_nonfinite_gradients"] is False

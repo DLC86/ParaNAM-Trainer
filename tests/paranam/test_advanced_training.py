@@ -12,6 +12,8 @@ def ready(ws):
         scheduled = options.get("rate_preset", "manual") != "manual" or options.get(
             "hypernetwork_rate_preset", "follow"
         ) not in ("manual", "follow")
+        if entry.synthetic_mute:
+            continue
         target.unlink(missing_ok=True)
         if scheduled:
             import os, shutil
@@ -52,7 +54,7 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
     assert not spec["data"].get("joint")  # User explicitly excludes RMS normalization.
     if kind == "parametric":
         assert spec["learning"]["rms_loss_normalization"] is True
-        assert spec["learning"]["snr_weighted_loss_normalization"] is True
+        assert spec["learning"]["snr_weighted_loss_normalization"] is False
         assert spec["model"]["net"]["config"]["hypernet"]["mode"] == "full"
         assert spec["model"]["net"]["config"]["hypernet"]["selector"] == {}
         assert spec["model"]["loss"]["training_recipe"] == "a2"
@@ -309,53 +311,40 @@ def test_legacy_zero_exponent_migrates_to_equivalent_snr_only_settings(workspace
     assert spec["learning"]["rms_loss_normalization_exponent"] == pytest.approx(0.01)
 
 
-def test_mute_anchor_fields_persist_and_reach_job(window, workspace):
+def test_synthetic_mute_reference_is_only_visible_option(window, workspace):
     from nam.capture.params import KnobSpec
 
     workspace.draft_controls = [KnobSpec("Gain", 0, 10, mute_at_min=True).to_dict()]
     workspace.generate_plan()
     ready(workspace)
     window._attach(workspace)
-    form = window.advanced_panel.layout()
+    assert "mute_training_mode" not in window.advanced_fields
+    assert not any(key.startswith("mute_anchor_") for key in window.advanced_fields)
+    field = window.advanced_fields["synthetic_mute_reference_rms"]
+    assert field.isChecked() is False
     initial_job = training.make_job(workspace)
+    spec = read_json(initial_job / "spec.json")
+    assert spec["model"]["loss"]["synthetic_mute"] is True
+    assert "mute_anchor" not in spec["model"]["loss"]
+    assert spec["learning"]["synthetic_mute_reference_rms"] is False
     (initial_job / "resume-0.ckpt").touch()
     assert training.job_can_resume(workspace, initial_job)
-    for row, (key, label, default, custom) in enumerate(
-        (
-            ("interval", "Mute Anchor Interval", 1, 3),
-            ("batch_size", "Mute Anchor Batch Size", 2, 4),
-            ("ny", "Mute Anchor NY", 512, 1000),
-        ),
-        start=form.rowCount() - 3,
-    ):
-        field = window.advanced_fields[f"mute_anchor_{key}"]
-        assert form.getWidgetPosition(field)[0] == row
-        assert form.labelForField(field).text() == label
-        assert field.minimum() == 1 and field.value() == default
-        field.setValue(custom)
-
+    field.setChecked(True)
     reopened = Workspace(workspace.directory)
+    assert reopened.training_options()["synthetic_mute_reference_rms"] is True
     assert not training.job_can_resume(reopened, initial_job)
-    job = training.make_job(reopened)
-    spec = read_json(job / "spec.json")
-    assert spec["model"]["loss"]["mute_anchor"] == {
-        "targets": [{"name": "Gain", "edge": "min"}],
-        "corner_targets": [{"Gain": 0.0}],
-        "weight": 0.25, "interval": 3, "batch_size": 4, "ny": 1000,
-    }
-    (job / "resume-0.ckpt").touch()
-    assert training.job_can_resume(reopened, job)
-    window.load_advanced_options("static")
-    assert not form.isRowVisible(window.advanced_fields["mute_anchor_interval"])
-
+    new = read_json(training.make_job(reopened) / "spec.json")
+    assert new["learning"]["synthetic_mute_reference_rms"] is True
 
 @pytest.mark.parametrize("kind", ["static", "parametric"])
-def test_mute_anchor_options_do_not_affect_jobs_without_mute_targets(workspace, kind):
+def test_legacy_mute_options_do_not_affect_new_jobs(workspace, kind):
     workspace.preferences["capture_type"] = kind
     workspace.generate_plan()
     ready(workspace)
     before = workspace.fingerprint()
-    workspace.preferences.setdefault("advanced_" + kind, {})["mute_anchor_interval"] = 7
+    workspace.preferences.setdefault("advanced_" + kind, {}).update(
+        mute_anchor_interval=7, mute_training_mode="virtual"
+    )
     assert workspace.fingerprint() == before
     spec = read_json(training.make_job(workspace) / "spec.json")
     assert "mute_anchor" not in spec["model"]["loss"]
