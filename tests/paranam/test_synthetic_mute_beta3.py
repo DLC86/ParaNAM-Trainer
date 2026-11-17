@@ -147,3 +147,76 @@ def test_synthetic_mute_visible_as_captured_and_blue_tag(window, workspace):
     assert not field.isChecked()
     field.setChecked(True)
     assert workspace.training_options()["synthetic_mute_reference_rms"] is True
+
+
+@pytest.mark.parametrize(
+    "method", ["standard", "maximin", "orthogonal",
+               "near_orthogonal", "sobol", "optimized"]
+)
+def test_all_sampling_methods_keep_muted_endpoints_but_preserve_avoid(workspace, method):
+    from nam.capture.params import KnobSpec
+
+    workspace.draft_controls = [
+        KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True).to_dict(),
+        KnobSpec("Tone", 0, 10, 1, 5).to_dict(),
+    ]
+    avoid = PlanRule(
+        controls=("Tone",), operator="≥", value=10, kind="avoid"
+    )
+    workspace.preferences["draft_plan_rules"] = [avoid.model_dump(mode="json")]
+    train, validation = (9, 9) if method == "orthogonal" else (12, 4)
+    workspace.preferences.update(
+        lhs_method=method, n_train=train, n_validation=validation,
+        corners=True,
+    )
+    workspace.generate_plan()
+    project = workspace.project
+    assert project.n_train_lhs == train
+    assert not any(row.params["Tone"] == 10 for row in project.entries)
+    assert not any("mute_edge" in row.y_path for row in project.entries)
+    assert any(row.synthetic_mute and row.params["Gain"] == 0
+               for row in project.entries)
+    corners = [row for row in project.entries if row.is_corner]
+    assert corners
+    assert all(row.params["Gain"] in (0, 10) for row in corners)
+    assert all(row.params["Tone"] in (0, 10) for row in corners)
+    assert all(row.params["Tone"] == 0 for row in corners)
+    assert all(row.status == "captured" and project.classification_for_entry(row) == "mute"
+               for row in project.entries if row.params["Gain"] == 0)
+
+
+def test_validation_and_training_mutes_share_one_wav_per_length(workspace):
+    workspace.draft_controls = [
+        KnobSpec("Gain", 0, 10, 1, 5).to_dict(),
+        KnobSpec("Tone", 0, 10, 1, 5).to_dict(),
+    ]
+    rule = PlanRule(
+        controls=("Gain",), operator="≤", value=5, kind="mute"
+    )
+    workspace.preferences["draft_plan_rules"] = [rule.model_dump(mode="json")]
+    workspace.preferences.update(n_train=16, n_validation=8, corners=True)
+    workspace.generate_plan()
+    project = workspace.project
+    split_paths = {}
+    for split in ("train", "validation"):
+        rows = [
+            e for e in project.entries if e.split == split and e.synthetic_mute
+        ]
+        assert len(rows) > 1
+        names = {e.y_path for e in rows}
+        assert len(names) == 1
+        relative = next(iter(names))
+        split_paths[split] = relative
+        target = workspace.directory / relative
+        source = workspace.directory / project.input_for_split(split)
+        assert sf.info(target).frames == sf.info(source).frames
+        assert sf.info(target).samplerate == sf.info(source).samplerate
+    # The two input lengths are not generally equal; only allocate another
+    # mute target when the validation length actually differs.
+    source_train = sf.info(workspace.directory / project.input_for_split("train"))
+    source_val = sf.info(workspace.directory / project.input_for_split("validation"))
+    if (source_train.frames == source_val.frames and
+            source_train.samplerate == source_val.samplerate):
+        assert split_paths["train"] == split_paths["validation"]
+    else:
+        assert split_paths["train"] != split_paths["validation"]
