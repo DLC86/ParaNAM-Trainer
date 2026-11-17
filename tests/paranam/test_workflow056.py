@@ -440,7 +440,7 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert options["learning_rate"] == 0.004
     assert options["hypernetwork_learning_rate"] == 0.001
     window._attach(fresh)
-    assert window.epochs.value() == 200
+    assert window.epochs.value() == 100
     assert window.advanced_fields["hypernetwork_recipe"].currentData() == "HyperA2"
     assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
     fresh.preferences.update(

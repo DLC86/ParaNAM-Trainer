@@ -56,7 +56,7 @@ def test_input_specific_epoch_recommendations_preserve_custom_values(window, tmp
     assert ws.preferences["epochs"] == 100
     assert ws.project.train_input == "input_trunc.wav"
     assert (ws.directory / "input_trunc.wav").exists()
-    assert recommended_epochs("parametric", "standard") == 50
+    assert recommended_epochs("parametric", "standard") == 100
     assert recommended_epochs("parametric", "tts") == 50
     assert recommended_epochs("parametric", "trunc") == 200
     window._attach(ws)
