@@ -110,6 +110,62 @@ def materialize_synthetic_mutes(workspace):
     return created
 
 
+def ensure_mute_endpoint_corners(project, rules):
+    """Restore exact muted endpoints where old Avoid thresholds shifted corners.
+
+    A single-control Avoid threshold at an explicitly muted endpoint does not
+    suppress its silent synthetic corner. Other Avoid rules still apply.
+    """
+    from nam.capture.planner import mute_corner_settings
+    from nam.capture.project import CaptureEntryModel
+
+    knobs = project.knob_specs()
+    by_name = {knob.name: knob for knob in knobs}
+    planned = {tuple(sorted(row.params.items())) for row in project.entries}
+    index = max(
+        (row.index for row in project.entries if row.split == "train"), default=-1
+    ) + 1
+    added = []
+    for params in mute_corner_settings(knobs):
+        key = tuple(sorted(params.items()))
+        if key in planned:
+            continue
+        for rule in rules:
+            if rule.kind != "avoid" or not rule.excludes(params):
+                continue
+            name = rule.controls[0] if len(rule.controls) == 1 else None
+            knob = by_name.get(name)
+            comparator = rule.condition_for(name)[0] if knob is not None else None
+            exempt = (
+                knob is not None and (
+                    (getattr(knob, "mute_at_min", False)
+                     and params[name] == knob.min
+                     and comparator in ("<", "≤", "="))
+                    or
+                    (getattr(knob, "mute_at_max", False)
+                     and params[name] == knob.max
+                     and comparator in (">", "≥", "="))
+                )
+            )
+            if not exempt:
+                break
+        else:
+            added.append(CaptureEntryModel(
+                index=index, split="train", params=params,
+                y_path=f"captures/corner_mute_endpoint_{index:03d}.wav",
+                is_corner=True,
+            ))
+            planned.add(key)
+            index += 1
+    if added:
+        position = next(
+            (i for i, row in enumerate(project.entries)
+             if row.split == "validation"), len(project.entries),
+        )
+        project.entries[position:position] = added
+    return added
+
+
 def ensure_mute_rule_corners(project, rules):
     """Reserve a real dataset row for each uncovered conjunctive Mute rule.
 
@@ -154,9 +210,9 @@ def ensure_mute_rule_corners(project, rules):
             operator, threshold = rule.condition_for(name)
             if operator == "=":
                 fixed[name] = threshold
-            elif operator == "≤":
+            elif operator in ("<", "≤"):
                 fixed[name] = control.min
-            elif operator == "≥":
+            elif operator in (">", "≥"):
                 fixed[name] = control.max
         free = [control for control in controls if control.name not in fixed]
         # Prefer other controls at their maxima so a multi-Gain Mute corner

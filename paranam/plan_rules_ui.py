@@ -62,7 +62,7 @@ class PlanRuleDialog(QDialog):
             operator = QComboBox()
             operator.setAccessibleName(f"Operator for {control.name}")
             is_switch = isinstance(control, SwitchSpec)
-            operator.addItems(["="] if is_switch else ["≤", "≥", "="])
+            operator.addItems(["="] if is_switch else ["<", "≤", "=", "≥", ">"])
             grid.addWidget(operator, i, 2)
             if is_switch:
                 value = QComboBox()

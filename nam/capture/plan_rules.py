@@ -12,31 +12,18 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-_OPERATORS = {"≤": operator.le, "≥": operator.ge, "=": operator.eq}
+_OPERATORS = {"<": operator.lt, "≤": operator.le, ">": operator.gt, "≥": operator.ge, "=": operator.eq}
 
 
 class PlanRule(BaseModel):
     controls: tuple[str, ...]
-    operator: Literal["≤", "≥", "="]
+    operator: Literal["<", "≤", ">", "≥", "="]
     value: float | str
     kind: Literal["avoid", "mute"] = "avoid"
     # Optional per-control overrides preserve backwards compatibility with
     # existing single-threshold rules and their JSON representation.
-    operators: dict[str, Literal["≤", "≥", "="]] = Field(default_factory=dict)
+    operators: dict[str, Literal["<", "≤", ">", "≥", "="]] = Field(default_factory=dict)
     thresholds: dict[str, float | str] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_inclusive_conditions(cls, data):
-        if isinstance(data, dict):
-            data = dict(data)
-            convert = {"<": "≤", ">": "≥"}
-            data["operator"] = convert.get(data.get("operator"), data.get("operator"))
-            data["operators"] = {
-                name: convert.get(op, op)
-                for name, op in data.get("operators", {}).items()
-            }
-        return data
 
     def condition_for(self, name):
         return (self.operators.get(name, self.operator),
@@ -93,7 +80,9 @@ def validate_plan_rules(specs, rules):
                 if (
                     (comparator == "=" and not spec.min <= threshold <= spec.max)
                     or (comparator == "≤" and threshold < spec.min)
+                    or (comparator == "<" and threshold <= spec.min)
                     or (comparator == "≥" and threshold > spec.max)
+                    or (comparator == ">" and threshold >= spec.max)
                 ):
                     raise ValueError(
                         f"Mute rule has no valid setting for {name!r}"

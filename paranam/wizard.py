@@ -793,20 +793,7 @@ class WizardWindow(
         self.control_mute_max = QCheckBox("Mute at maximum")
         for mute in (self.control_mute_min, self.control_mute_max):
             mute.setToolTip("Teach the neural model to output silence at this endpoint without recording the muted position or changing the exported model format.")
-        self.control_avoid_min = QCheckBox("Avoid <")
-        self.control_avoid_max = QCheckBox("Avoid >")
-        self.control_below = QDoubleSpinBox()
-        self.control_above = QDoubleSpinBox()
-        for checkbox, threshold in (
-            (self.control_avoid_min, self.control_below),
-            (self.control_avoid_max, self.control_above),
-        ):
-            threshold.setRange(-10000, 10000)
-            threshold.setDecimals(6)
-            threshold.setAccessibleName(checkbox.text() + " threshold")
-            checkbox.toggled.connect(threshold.setEnabled)
-            threshold.editingFinished.connect(self.save_control)
-        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), ("", self.control_mute_min), ("", self.control_mute_max), (self.control_avoid_min, self.control_below), (self.control_avoid_max, self.control_above)):
+        for caption, field in (("Minimum", self.control_min), ("Maximum", self.control_max), ("Step", self.control_step), ("Default", self.control_default), ("Capture density", self.control_bias), ("", self.control_gain), ("", self.control_clean_volume), ("", self.control_mute_min), ("", self.control_mute_max)):
             knob_form.addRow(caption, field)
         switch_page = QWidget()
         switch_layout = QVBoxLayout(switch_page)
@@ -853,7 +840,7 @@ class WizardWindow(
             field.editingFinished.connect(self.save_control)
         for field in (self.control_kind, self.control_bias, self.switch_mode, self.switch_default):
             field.currentIndexChanged.connect(self.save_control)
-        for field in (self.control_gain, self.control_clean_volume, self.control_mute_min, self.control_mute_max, self.control_avoid_min, self.control_avoid_max):
+        for field in (self.control_gain, self.control_clean_volume, self.control_mute_min, self.control_mute_max):
             field.clicked.connect(self.save_control)
         self.control_error = label("", "muted")
         editor.addWidget(self.control_error)
@@ -1900,6 +1887,9 @@ class WizardWindow(
         index = self.pages.currentIndex()
         if index == 1 and not self.apply_plan():
             return
+        if index == 2 and self.workspace.plan_changed():
+            if not self.apply_plan():
+                return
         if index == 2 and not self.workspace.training_ready():
             self.notify_error("Complete every capture in the plan first.")
             return
@@ -2613,10 +2603,6 @@ class WizardWindow(
             self.control_step,
             self.control_default,
             self.control_bias,
-            self.control_avoid_min,
-            self.control_avoid_max,
-            self.control_below,
-            self.control_above,
             self.switch_mode,
             self.switch_default,
         )
@@ -2649,10 +2635,6 @@ class WizardWindow(
             self.control_clean_volume.setChecked(knob.clean_volume)
             self.control_mute_min.setChecked(knob.mute_at_min)
             self.control_mute_max.setChecked(knob.mute_at_max)
-            self.control_avoid_min.setChecked(knob.avoid_below is not None)
-            self.control_avoid_max.setChecked(knob.avoid_above is not None)
-            self.control_below.setValue(knob.min if knob.avoid_below is None else knob.avoid_below)
-            self.control_above.setValue(knob.max if knob.avoid_above is None else knob.avoid_above)
             self.control_clean_volume.setEnabled(not knob.is_gain)
             self._control_volume_changed(knob.clean_volume, reset=False)
         finally:
@@ -2662,12 +2644,10 @@ class WizardWindow(
     def _control_volume_changed(self, checked, reset=True):
         if checked and reset:
             self.control_step.setValue(min(1.0, self.control_max.value() - self.control_min.value()))
-        for field in (self.control_gain, self.control_mute_min, self.control_mute_max, self.control_avoid_min, self.control_avoid_max):
+        for field in (self.control_gain, self.control_mute_min, self.control_mute_max):
             if checked and reset:
                 field.setChecked(False)
             field.setEnabled(not checked)
-        self.control_below.setEnabled(not checked and self.control_avoid_min.isChecked())
-        self.control_above.setEnabled(not checked and self.control_avoid_max.isChecked())
         self.control_bias.setEnabled(not checked)
 
     def _switch_items(self):
@@ -2776,8 +2756,6 @@ class WizardWindow(
                     self.control_step.value(),
                     self.control_default.value(),
                     is_gain=self.control_gain.isChecked(),
-                    avoid_below=self.control_below.value() if self.control_avoid_min.isChecked() else None,
-                    avoid_above=self.control_above.value() if self.control_avoid_max.isChecked() else None,
                     sampling_bias=self.control_bias.currentData(),
                     clean_volume=self.control_clean_volume.isChecked(),
                     mute_at_min=self.control_mute_min.isChecked(),

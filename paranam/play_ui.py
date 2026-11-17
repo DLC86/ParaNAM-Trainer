@@ -497,7 +497,7 @@ class PlayActions:
         self.play_controls_layout = ControlFlowLayout(self.play_controls)
         self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
         self.play_controls_layout.setHorizontalSpacing(24)
-        self.play_controls.hide()
+        self.play_controls.setMinimumHeight(108)
         self.play_values = []
         layout.addWidget(self.play_controls)
         controls = QGridLayout()
@@ -987,7 +987,7 @@ class PlayActions:
                 min(p["max"], max(p["min"], value))
                 for p, value in zip(info["controls"], values)
             ]
-        self.play_controls.setVisible(bool(info["controls"]))
+        self.play_controls.show()
         for index, control in enumerate(info["controls"]):
             frame = QWidget()
             column = QVBoxLayout(frame)
@@ -1070,7 +1070,7 @@ class PlayActions:
         )
 
     def clear_play_controls(self):
-        self.play_controls.hide()
+        # The Compare control panel stays visible even when it is empty.
         grid = self.play_controls_layout
         while grid.count():
             item = grid.takeAt(0)

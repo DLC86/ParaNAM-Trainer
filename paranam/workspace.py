@@ -96,16 +96,43 @@ def control_from_dict(data):
     return KnobSpec.from_dict(data)
 
 
+def legacy_avoid_rules(data):
+    """Translate old per-knob Avoid exclusions to strict per-control Rules."""
+    if data.get("type") == "switch":
+        return []
+    name = data["name"]
+    rules = []
+    for field, comparator in (("avoid_below", "<"), ("avoid_above", ">")):
+        if data.get(field) is not None:
+            rules.append(PlanRule(
+                controls=(name,), operator=comparator,
+                value=float(data[field]), kind="avoid",
+            ))
+    if data.get("avoid_zero") and data.get("avoid_below") is None:
+        rules.append(PlanRule(
+            controls=(name,), operator="=", value=float(data["min"]), kind="avoid",
+        ))
+    if data.get("avoid_max") and data.get("avoid_above") is None:
+        rules.append(PlanRule(
+            controls=(name,), operator="=", value=float(data["max"]), kind="avoid",
+        ))
+    return rules
+
+
+def merge_plan_rules(existing, additions):
+    rules = [PlanRule.model_validate(rule) for rule in existing]
+    for rule in additions:
+        if rule not in rules:
+            rules.append(rule)
+    return rules
+
+
 def migrate_knob_limits(data):
     if data.get("type") == "switch":
         return data
     data = dict(data)
-    # The capture grid is compared at six decimal places. One unit at that
-    # precision turns the former endpoint exclusion into a strict threshold.
-    if data.pop("avoid_zero", False) and data.get("avoid_below") is None:
-        data["avoid_below"] = round(round(data["min"], 6) + 0.000001, 6)
-    if data.pop("avoid_max", False) and data.get("avoid_above") is None:
-        data["avoid_above"] = round(round(data["max"], 6) - 0.000001, 6)
+    for key in ("avoid_zero", "avoid_max", "avoid_below", "avoid_above"):
+        data.pop(key, None)
     return control_from_dict(data).to_dict()
 
 
@@ -173,7 +200,7 @@ class Workspace:
             self.preferences.update(
                 n_train=self.project.n_train_lhs,
                 n_validation=sum(
-                    self.project.classification_for_entry(e) is None
+                    self.project.classification_for_entry(e) != "avoid"
                     for e in self.project.entries_for_split("validation")
                 ),
                 seed=self.project.seed,
@@ -183,16 +210,36 @@ class Workspace:
             self.preferences.update(
                 input_mode="custom", custom_input=self.project.train_input
             )
-        self.draft_controls = [
-            migrate_knob_limits(data)
-            for data in self.preferences.get(
-                "draft_controls", [c.to_dict() for c in self.project.control_specs()]
+        # Preserve frozen jobs byte-for-byte: their existing fingerprints must
+        # still validate. Editable projects and Retrain drafts migrate legacy
+        # knob exclusions to Rules without moving any existing recordings.
+        frozen = ("_queue_source_project" in stored
+                  and "_retrain_source_job" not in stored)
+        raw_project_controls = [c.model_dump() for c in self.project.knobs]
+        raw_drafts = self.preferences.get("draft_controls", raw_project_controls)
+        if frozen:
+            self.draft_controls = [control_from_dict(c).to_dict() for c in raw_drafts]
+        else:
+            committed = [
+                rule for c in raw_project_controls for rule in legacy_avoid_rules(c)
+            ]
+            draft_additions = [
+                rule for c in raw_drafts for rule in legacy_avoid_rules(c)
+            ]
+            self.project.plan_rules = merge_plan_rules(self.project.plan_rules, committed)
+            stored_rules = self.preferences.get(
+                "draft_plan_rules",
+                [rule.model_dump(mode="json") for rule in self.project.plan_rules],
             )
-        ]
-        self.project.knobs = [
-            KnobModel.from_knob_spec(control_from_dict(migrate_knob_limits(c.model_dump())))
-            for c in self.project.knobs
-        ]
+            self.preferences["draft_plan_rules"] = [
+                rule.model_dump(mode="json")
+                for rule in merge_plan_rules(stored_rules, draft_additions)
+            ]
+            self.draft_controls = [migrate_knob_limits(c) for c in raw_drafts]
+            self.project.knobs = [
+                KnobModel.from_knob_spec(control_from_dict(migrate_knob_limits(c)))
+                for c in raw_project_controls
+            ]
         reconcile_with_disk(self.project, self.directory)
         from nam.capture.output_gain import (
             volume_control,
@@ -533,7 +580,7 @@ class Workspace:
             or self.preferences["n_train"] != self.project.n_train_lhs
             or self.preferences["n_validation"]
             != sum(
-                self.project.classification_for_entry(e) is None
+                self.project.classification_for_entry(e) != "avoid"
                 for e in self.project.entries_for_split("validation")
             )
             or self.preferences["seed"] != self.project.seed
@@ -759,7 +806,11 @@ class Workspace:
         if prefs["corners"]:
             add_corner_captures(replacement)
         if synthetic_mode:
-            from .synthetic_mute import ensure_mute_rule_corners
+            from .synthetic_mute import (
+                ensure_mute_endpoint_corners, ensure_mute_rule_corners,
+            )
+            if prefs["corners"]:
+                ensure_mute_endpoint_corners(replacement, rules)
             ensure_mute_rule_corners(replacement, rules)
         if synthetic_mode:
             # The temporary planning controls only relax Mute constraints.
@@ -767,15 +818,21 @@ class Workspace:
             from nam.capture.project import KnobModel
             replacement.knobs = [KnobModel.from_knob_spec(c) for c in controls]
             replacement.plan_rules = list(rules)
-        # Preserve discovered mute/unstable points across Plan edits.
-        # Mark sampled matches and replace them, but retain the marked rows
-        # in the Capture screen, even when this plan samples different points.
-        # Explicit Mute points must survive as synthetic zero targets after replan.
+        # Retain discovered Mute classifications only at settings selected by
+        # the newly generated plan. A shifted, obsolete Mute corner must not
+        # silently be appended to the Capture list or training dataset.
+        # Keep Avoid history so unstable settings remain excluded.
         from nam.capture.project import classify_capture
-        old_muted = [dict(p) for p in self.project.muted_settings]
-        old_avoided = [dict(p) for p in self.project.avoided_settings]
         def key(p):
             return tuple(sorted(p.items()))
+        planned = {
+            key(row.params) for row in replacement.entries
+            if row.split in ("train", "validation")
+        }
+        old_muted = [
+            dict(p) for p in self.project.muted_settings if key(p) in planned
+        ]
+        old_avoided = [dict(p) for p in self.project.avoided_settings]
         marked = {
             **{key(p): "mute" for p in old_muted},
             **{key(p): "avoid" for p in old_avoided},
@@ -815,8 +872,8 @@ class Workspace:
         names = {c.name for c in controls}
         for old in self.project.entries:
             kind = self.project.classification_for_entry(old)
-            if kind is None:
-                continue
+            if kind is None or kind == "mute":
+                continue  # Only freshly planned points become synthetic Mute.
             if set(old.params) != names:
                 continue  # No longer the same rig; the old point stays annotated.
             match = next(
