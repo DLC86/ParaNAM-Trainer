@@ -712,13 +712,13 @@ class ControlDialog(QDialog):
         self.clean_volume = QCheckBox("Linear volume control")
         self.mute_at_min = QCheckBox("Mute at minimum")
         self.mute_at_min.setToolTip(
-            "Teach the neural model silence at the knob minimum AND exclude that "
-            "exact position from all training and validation captures, including corners."
+            "Use an automatically completed synthetic zero-output capture whenever "
+            "the sampler or Corner plan selects the knob's true minimum."
         )
         self.mute_at_max = QCheckBox("Mute at maximum")
         self.mute_at_max.setToolTip(
-            "Teach the neural model silence at the knob maximum AND exclude that "
-            "exact position from all training and validation captures, including corners."
+            "Use an automatically completed synthetic zero-output capture whenever "
+            "the sampler or Corner plan selects the knob's true maximum."
         )
         self.clean_volume.setToolTip(
             "Train at maximum volume and measure a separate short-signal attenuation curve. "
@@ -726,12 +726,8 @@ class ControlDialog(QDialog):
             "A silent minimum is identified by the absence of the timing test signal, "
             "not by a zero-noise recording."
         )
-        # Legacy Avoid min/max flags are still read and preserved for old
-        # projects. New controls use Mute at minimum/maximum to both train
-        # silence and exclude the endpoint from real captures.
-        # If an older project had both flags enabled at one endpoint,
-        # the new unified Mute checkbox owns its avoidance: turning it off
-        # must not leave an invisible legacy Avoid flag active.
+        # Retain compatibility with older saved Avoid min/max flags. New
+        # Mute endpoints are regular synthetic dataset examples, not Avoids.
         self._legacy_avoid_zero = bool(
             isinstance(control, KnobSpec)
             and control.avoid_zero

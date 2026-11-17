@@ -289,33 +289,27 @@ def test_mute_anchor_trains_both_hyper_a2_sizes_on_real_audio(monkeypatch):
     assert not any("mute" in spec.to_dict() for spec in model.param_specs)
 
 
-def test_mute_transition_extra_honors_avoided_defaults():
+def test_mute_sampling_never_adds_adjacent_step_even_with_avoid_limits():
     from nam.capture.params import KnobSpec
     from nam.capture.planner import _plan_captures_unadjusted, plan_captures
 
     controls = [
         KnobSpec("Gain", 0, 10, 1, default=5, mute_at_min=True),
-        KnobSpec("Tone", 0, 10, 1, default=5, avoid_below=7),
+        KnobSpec("Tone", 0, 10, 1, default=7, avoid_below=7),
     ]
-    for seed in range(12):
-        raw, _ = _plan_captures_unadjusted(
-            controls, n_train=1, n_validation=0, seed=seed, lhs_method="sobol",
+    for seed in range(4):
+        raw, raw_val = _plan_captures_unadjusted(
+            controls, n_train=2, n_validation=0, seed=seed, lhs_method="sobol",
             include_default_as_additional_capture=False,
         )
-        if raw[0].params["Gain"] == 1.0:
-            continue
-        train, validation = plan_captures(
-            controls, n_train=1, n_validation=0, seed=seed, lhs_method="sobol",
+        train, val = plan_captures(
+            controls, n_train=2, n_validation=0, seed=seed, lhs_method="sobol",
             include_default_as_additional_capture=False,
         )
-        assert not validation
-        assert len(train) == 2
-        assert train[1].params["Gain"] == 1.0
-        assert train[1].params["Tone"] >= 7.0
-        break
-    else:
-        pytest.fail("Expected a Sobol seed without the first unmuted Gain step")
-
+        assert train == raw and val == raw_val
+        assert len(train) == 2 and not val
+        assert all(row.params["Tone"] >= 7.0 for row in train)
+        assert not any("mute_edge" in row.y_path for row in train)
 
 def test_exact_discovered_mute_points_work_without_global_mute_endpoint(monkeypatch):
     from nam.train.parametric import _MuteAnchorConfig

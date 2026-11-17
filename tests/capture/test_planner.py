@@ -106,16 +106,14 @@ def test_extra_default_respects_small_grid_capacity_and_corners():
         )
 
 
-def test_no_default_capture_allows_muted_or_avoided_default_setting():
+def test_muted_default_is_a_valid_training_setting():
     knobs = [_KnobSpec("Gain", 0, 10, step=1, default=0, mute_at_min=True)]
-    train, validation = _plan_captures(
-        knobs, n_train=3, n_validation=1, seed=19,
-        include_default_as_additional_capture=False,
+    train, val = plan_captures(
+        knobs, n_train=4, n_validation=0,
+        include_default_as_additional_capture=True,
     )
-    assert len(train) in (3, 4) and len(validation) == 1
-    assert any(p.params["Gain"] == 1.0 for p in train)
-    assert all(p.params["Gain"] > 0 for p in train + validation)
-
+    assert any(entry.params["Gain"] == 0 for entry in train)
+    assert not val
 
 def test_plan_captures_counts_and_grid():
     train, validation = _plan_captures(_knobs(), n_train=8, n_validation=3, seed=0)

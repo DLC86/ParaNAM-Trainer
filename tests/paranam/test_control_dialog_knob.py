@@ -76,7 +76,7 @@ def test_schema_rejects_both_roles_even_without_the_dialog():
         KnobSpec("Volume", 0, 10, is_gain=True, clean_volume=True)
 
 
-def test_mute_endpoints_roundtrip_and_implicitly_exclude_captures(qapp):
+def test_mute_endpoints_roundtrip_and_remain_valid_sampling_points(qapp):
     dialog = ControlDialog()
     dialog.name.setText("Reverse Gain")
     dialog.mute_at_min.setChecked(True)
@@ -88,7 +88,7 @@ def test_mute_endpoints_roundtrip_and_implicitly_exclude_captures(qapp):
     assert restored.mute_at_min and restored.mute_at_max
     assert not restored.avoid_zero and not restored.avoid_max
     specs = restored.to_param_spec()
-    assert specs.avoid_zero and specs.avoid_max
+    assert not specs.avoid_zero and not specs.avoid_max
     with pytest.raises(ValueError, match="Linear volume"):
         KnobSpec("Volume", 0, 10, clean_volume=True, mute_at_max=True)
 

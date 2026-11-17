@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nam.capture.export import build_hyper_a2_model_config, mute_anchor_rule_targets
+from nam.capture.export import build_hyper_a2_model_config
 from nam.capture.params import KnobSpec
 from nam.capture.plan_rules import PlanRule
 from nam.capture.project import classify_capture, new_project, atomic_write_json
@@ -15,7 +15,9 @@ from tests.paranam.test_queue import small_ready
 from tests.paranam.test_recovery import saved_checkpoint
 
 
-def test_conditional_mute_excludes_double_zero_but_learns_region():
+def test_conditional_mute_is_dataset_supervision_without_anchor():
+    from paranam.synthetic_mute import ensure_mute_rule_corners
+
     controls = [
         KnobSpec("Gain I", 0, 10, 1, 5),
         KnobSpec("Gain II", 0, 10, 1, 5),
@@ -28,16 +30,11 @@ def test_conditional_mute_excludes_double_zero_but_learns_region():
         controls, n_train=12, n_validation=3, seed=123,
         plan_rules=[rule], lhs_method="sobol",
     )
-    assert not any(
-        e.params["Gain I"] == 0 and e.params["Gain II"] == 0
-        for e in project.entries
-    )
-    assert len(mute_anchor_rule_targets(project)) == 1
-    anchor = build_hyper_a2_model_config(project)["loss"]["mute_anchor"]
-    assert anchor["rule_targets"] == [rule.model_dump(mode="json")]
-    assert anchor["point_targets"] == [] if "point_targets" in anchor else True
+    ensure_mute_rule_corners(project, [rule])
+    assert any(entry.is_corner and rule.excludes(entry.params)
+               for entry in project.entries if entry.split == "train")
+    assert "mute_anchor" not in build_hyper_a2_model_config(project)["loss"]
     assert describe_rule(rule) == "Mute when Gain I = 0 AND Gain II = 0"
-
 
 def test_rule_kind_editor_roundtrip(qapp):
     controls = [
