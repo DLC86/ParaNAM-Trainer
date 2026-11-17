@@ -767,6 +767,9 @@ class Workspace:
         if prefs["corners"]:
             add_corner_captures(replacement)
         if synthetic_mode:
+            from .synthetic_mute import ensure_mute_rule_corners
+            ensure_mute_rule_corners(replacement, rules)
+        if synthetic_mode:
             # The temporary planning controls only relax Mute constraints.
             # The saved project keeps the actual user-defined controls/rules.
             from nam.capture.project import KnobModel
