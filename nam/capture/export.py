@@ -129,7 +129,7 @@ def active_learning_warmup_epochs(max_epochs: int) -> int:
     return min(AL_WARMUP_EPOCHS, max(max_epochs - 1, 0))
 
 
-def build_data_config(project: CaptureProject) -> dict[str, _Any]:
+def build_data_config(project: CaptureProject, *, include_synthetic=False) -> dict[str, _Any]:
     """
     Build the parametric ``data.json`` payload from the project's *captured* entries.
 
@@ -142,7 +142,7 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
         e.capture_id for e in project.captured_entries()
         if project.capture_type == "static" and e.split == "train" and e.validation_from_tail
     }
-    for entry in project.captured_entries():
+    for entry in project.captured_entries(include_synthetic=include_synthetic):
         if entry.split not in splits or (
             entry.split == "validation" and entry.capture_id in imported
         ):
@@ -188,9 +188,9 @@ def build_data_config(project: CaptureProject) -> dict[str, _Any]:
     }
 
 
-def update_data_json(project: CaptureProject, project_dir: _Path) -> _Path:
+def update_data_json(project: CaptureProject, project_dir: _Path, *, include_synthetic=False) -> _Path:
     path = _Path(project_dir) / DATA_FILENAME
-    _atomic_write_json(path, build_data_config(project))
+    _atomic_write_json(path, build_data_config(project, include_synthetic=include_synthetic))
     return path
 
 

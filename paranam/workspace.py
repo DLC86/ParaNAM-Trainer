@@ -682,6 +682,21 @@ class Workspace:
             self._reuse_plan_recordings(replacement)
             return self._install_plan(replacement)
         rules = self.plan_rules()
+        synthetic_mode = (
+            self.training_options("parametric")["mute_training_mode"] == "synthetic"
+        )
+        if synthetic_mode:
+            from dataclasses import replace
+            # Keep legacy Avoid exclusions, but admit marked Mute endpoints and
+            # Mute-rule regions to the ordinary Sobol/validation/corner sampler.
+            planning_controls = [
+                replace(c, mute_at_min=False, mute_at_max=False)
+                if isinstance(c, KnobSpec) else c
+                for c in controls
+            ]
+            planning_rules = [rule for rule in rules if rule.kind == "avoid"]
+        else:
+            planning_controls, planning_rules = controls, rules
         all_switches = all(isinstance(c, SwitchSpec) for c in controls)
         switches_only = all_switches and (
             bool(rules) or prefs["n_train"] == __import__("math").prod(len(c.enum_names) for c in controls)
@@ -696,7 +711,7 @@ class Workspace:
                 "For switch-only captures, validate every state once with the separate signal."
             )
         replacement = new_project(
-            controls,
+            planning_controls,
             n_train=prefs["n_train"],
             n_validation=0 if switches_only else validation_count,
             seed=prefs["seed"],
@@ -705,7 +720,7 @@ class Workspace:
             name=self.project.name,
             train_input=self.desired_train_input(),
             validation_input="input_validation.wav",
-            plan_rules=rules,
+            plan_rules=planning_rules,
             include_default_as_additional_capture=(
                 prefs["include_default_as_additional_capture"]
                 if not all_switches else None
@@ -751,6 +766,12 @@ class Workspace:
         replacement.include_initial_corners = prefs["corners"]
         if prefs["corners"]:
             add_corner_captures(replacement)
+        if synthetic_mode:
+            # The temporary planning controls only relax Mute constraints.
+            # The saved project keeps the actual user-defined controls/rules.
+            from nam.capture.project import KnobModel
+            replacement.knobs = [KnobModel.from_knob_spec(c) for c in controls]
+            replacement.plan_rules = list(rules)
         # Preserve discovered mute/unstable points across Plan edits.
         # Mark sampled matches and replace them, but retain the marked rows
         # in the Capture screen, even when this plan samples different points.
@@ -770,6 +791,7 @@ class Workspace:
                 (
                     row for row in replacement.entries
                     if key(row.params) in marked
+                    and not (synthetic_mode and marked[key(row.params)] == "mute")
                     and replacement.classification_for_entry(row) is None
                 ),
                 None,
@@ -796,7 +818,8 @@ class Workspace:
         # and QA if a new row can use the same filename.
         names = {c.name for c in controls}
         for old in self.project.entries:
-            if self.project.classification_for_entry(old) is None:
+            kind = self.project.classification_for_entry(old)
+            if kind is None or (synthetic_mode and kind == "mute"):
                 continue
             if set(old.params) != names:
                 continue  # No longer the same rig; the old point stays annotated.
@@ -842,9 +865,16 @@ class Workspace:
 
         install_signals(self.directory)
         self.project = replacement
+        synthetic = (
+            replacement.capture_type == "parametric"
+            and self.training_options("parametric")["mute_training_mode"] == "synthetic"
+        )
+        if synthetic:
+            from .synthetic_mute import materialize_synthetic_mutes
+            materialize_synthetic_mutes(self)
         self.preferences.pop("pending_calibration", None)
         self.save()
-        update_data_json(replacement, self.directory)
+        update_data_json(replacement, self.directory, include_synthetic=synthetic)
         return replacement
 
     def validation_matches(self):
@@ -864,6 +894,10 @@ class Workspace:
             return [
                 e for e in entries
                 if self.project.classification_for_entry(e) is None
+                or (
+                    e.synthetic_mute
+                    and self.training_options("parametric")["mute_training_mode"] == "synthetic"
+                )
             ]
         imported = {
             e.capture_id for e in entries

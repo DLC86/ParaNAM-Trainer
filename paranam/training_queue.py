@@ -142,6 +142,10 @@ def freeze_snr_noise(source, snapshot, source_project=None):
     for index, frozen in enumerate(snapshot.project.entries):
         if frozen.split != "train" or frozen.status != "captured":
             continue
+        if frozen.synthetic_mute:
+            # There is no real pre-blip noise recording for a synthetic target.
+            powers[Path(frozen.y_path).as_posix()] = None
+            continue
         original = (
             source_project.entries[index] if index < len(source_project.entries) else None
         )

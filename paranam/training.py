@@ -413,7 +413,11 @@ def make_job(workspace, resume=False, job_directory=None):
             "batch_size": workspace.training_batch_size(),
             "advanced_training": options,
         }
-        data = build_data_config(workspace.project)
+        synthetic = (
+            workspace.project.capture_type == "parametric"
+            and options.get("mute_training_mode") == "synthetic"
+        )
+        data = build_data_config(workspace.project, include_synthetic=synthetic)
         if not data["validation"]:
             raise ValueError(
                 "At least one validation capture is required to report a meaningful ESR."
@@ -428,9 +432,12 @@ def make_job(workspace, resume=False, job_directory=None):
             model = build_hyper_a2_model_config(workspace.project)
             mute = model["loss"].get("mute_anchor")
             mute_mode = options["mute_training_mode"]
-            if mute_mode not in ("anchor", "virtual", "weight"):
+            if mute_mode not in ("anchor", "virtual", "weight", "synthetic"):
                 raise ValueError(f"Unknown mute training method: {mute_mode!r}")
-            if mute is not None:
+            if mute_mode == "synthetic":
+                # No mute regularizer: the synthetic recordings are just data.
+                model["loss"].pop("mute_anchor", None)
+            if mute is not None and mute_mode != "synthetic":
                 # Keep pre-beta default Mute Anchor configs byte-compatible.
                 if mute_mode != "anchor":
                     mute["mode"] = mute_mode
@@ -585,6 +592,25 @@ def make_job(workspace, resume=False, job_directory=None):
         if not isinstance(snr_weighted, bool):
             raise ValueError("snr_weighted_loss_normalization must be a boolean")
         learning["snr_weighted_loss_normalization"] = snr_weighted
+        if synthetic:
+            paths = {
+                e.y_path: e for e in workspace.project.entries if e.synthetic_mute
+            }
+            learning["synthetic_mute_train_indices"] = [
+                i for i, row in enumerate(data["train"])
+                if row["y_path"] in paths
+            ]
+            learning["synthetic_mute_validation_indices"] = [
+                i for i, row in enumerate(data["validation"])
+                if row["y_path"] in paths
+            ]
+            learning["synthetic_mute_reference_rms"] = bool(
+                options["synthetic_mute_reference_rms"]
+            )
+            if not data["train"] or len(learning["synthetic_mute_train_indices"]) == len(data["train"]):
+                raise ValueError("Synthetic mute training needs at least one real training capture")
+            if len(learning["synthetic_mute_validation_indices"]) == len(data["validation"]):
+                raise ValueError("Validation ESR requires at least one non-mute capture")
         learning["checkpoint_metric"] = "ESR_full"
         learning["separate_size_checkpoints"] = True
         learning["export_checkpoints"] = False

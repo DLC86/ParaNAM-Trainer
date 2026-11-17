@@ -396,6 +396,8 @@ class CaptureEntryModel(_BaseModel):
     # that check compare like with like instead of firing on every capture after a
     # deliberate change. ``None`` for captures made before this was recorded.
     stream_config: _Optional[str] = None
+    # Generated zero-target WAV, not a physical recording. Shown as Captured / Mute.
+    synthetic_mute: bool = False
 
 
 class CaptureProject(_BaseModel):
@@ -493,7 +495,7 @@ class CaptureProject(_BaseModel):
         """An exact setting may be shown in Capture while excluded from training."""
         if entry.split not in ("train", "validation"):
             return None
-        if entry.params in self.muted_settings:
+        if entry.synthetic_mute or entry.params in self.muted_settings:
             return "mute"
         if entry.params in self.avoided_settings:
             return "avoid"
@@ -513,10 +515,13 @@ class CaptureProject(_BaseModel):
             if entry.status == "pending" and self.classification_for_entry(entry) is None
         ]
 
-    def captured_entries(self) -> list[CaptureEntryModel]:
+    def captured_entries(self, *, include_synthetic=False) -> list[CaptureEntryModel]:
         return [
             entry for entry in self.entries
-            if entry.status == "captured" and self.classification_for_entry(entry) is None
+            if entry.status == "captured" and (
+                (include_synthetic and entry.synthetic_mute)
+                or self.classification_for_entry(entry) is None
+            )
         ]
 
     def input_for_split(self, split: Literal["train", "validation", "gain"]) -> str:
