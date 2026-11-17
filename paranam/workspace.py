@@ -23,7 +23,6 @@ from nam.capture.project import (
     reconcile_with_disk,
     save_project,
 )
-from .recipes import MUTE_ANCHOR_OPTIONS
 
 DEFAULTS = {
     "capture_level_dbfs": 0.0,
@@ -954,18 +953,20 @@ class Workspace:
             # Existing saved advanced options continue to override this default.
             rms_loss_normalization=True,
             rms_loss_normalization_exponent=2.0,
-            snr_weighted_loss_normalization=True,
+            snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
             gradient_clipping=(kind == "parametric"),
             gradient_clip_val=1.0,
             check_nonfinite_gradients=(kind == "parametric"),
             hypernetwork_recipe="HyperA2",
-            mute_training_mode="anchor",
             synthetic_mute_reference_rms=True,
-            **MUTE_ANCHOR_OPTIONS,
         )
         options = {**defaults, **self.preferences.get("advanced_" + kind, {})}
+        # Retire the old beta mute objectives without breaking older projects.
+        options.pop("mute_training_mode", None)
+        for legacy_key in ("mute_anchor_interval", "mute_anchor_batch_size", "mute_anchor_ny"):
+            options.pop(legacy_key, None)
         # Older projects could set exponent=0 to keep only SNR attenuation.
         # The new independent switches represent that exact loss as RMS off,
         # leaving SNR as configured. Migrate the effective options, not the
@@ -1058,20 +1059,7 @@ class Workspace:
         if include_advanced:
             options = self.training_options()
             data["settings"]["advanced_training"] = options
-            uses_mute_anchor = (
-                self.project.capture_type == "parametric"
-                and bool(
-                    mute_anchor_targets(self.project)
-                    or mute_anchor_point_targets(self.project)
-                    or mute_anchor_rule_targets(self.project)
-                )
-            )
-            for key, default in MUTE_ANCHOR_OPTIONS.items():
-                if not uses_mute_anchor or options[key] == default:
-                    options.pop(key)
-            if not uses_mute_anchor or options["mute_training_mode"] == "anchor":
-                options.pop("mute_training_mode")
-            if options.get("mute_training_mode") != "synthetic" or options["synthetic_mute_reference_rms"]:
+            if options["synthetic_mute_reference_rms"]:
                 options.pop("synthetic_mute_reference_rms", None)
             static = self.project.capture_type == "static"
             rms_enabled = options["rms_loss_normalization"]

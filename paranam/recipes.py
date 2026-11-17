@@ -3,11 +3,6 @@
 import math
 from pathlib import Path
 
-from nam.capture.export import MUTE_ANCHOR_DEFAULTS
-
-MUTE_ANCHOR_OPTIONS = {
-    f"mute_anchor_{key}": default for key, default in MUTE_ANCHOR_DEFAULTS.items()
-}
 
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
@@ -61,15 +56,13 @@ def training_preset(name):
         fit_mrstft=True,
         rms_loss_normalization=True,
         rms_loss_normalization_exponent=2.0,
-        snr_weighted_loss_normalization=True,
+        snr_weighted_loss_normalization=False,
         mrstft_weight=0.0005,
         weight_decay=3.17e-7,
-        gradient_clipping=not hyper_a2,
+        gradient_clipping=True,
         gradient_clip_val=1.0,
         check_nonfinite_gradients=not hyper_a2,
-        mute_training_mode="anchor",
         synthetic_mute_reference_rms=True,
-        **MUTE_ANCHOR_OPTIONS,
     )
 
 

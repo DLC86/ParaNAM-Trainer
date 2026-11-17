@@ -650,8 +650,8 @@ class PlayActions:
         custom = bool(irs) and all(
             not Path(path).resolve().is_relative_to(BUNDLED.resolve()) for path in irs
         )
-        self.play_model_remove.setEnabled(bool(models) and self.play_model.isEnabled())
-        self.play_ir_remove.setEnabled(custom and self.play_ir.isEnabled())
+        self.play_model_remove.setEnabled(bool(models))
+        self.play_ir_remove.setEnabled(custom)
         self.play_model_remove.setToolTip(
             "Remove selected entries from this list; keep files on disk"
         )

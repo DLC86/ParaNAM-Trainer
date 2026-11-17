@@ -72,7 +72,6 @@ from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
 from .plan_rules_ui import PlanRuleDialog, describe_rule
-from .recipes import MUTE_ANCHOR_OPTIONS
 from .busy_overlay import foreground_operation, run_calculation
 from .project_files import change_project
 from .widgets import (
@@ -1162,7 +1161,7 @@ class WizardWindow(
         form = QFormLayout()
         self.epochs = QSpinBox()
         self.epochs.setRange(1, 100000)
-        self.epochs.setValue(50)
+        self.epochs.setValue(100)
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 128)
         self.batch_size.setValue(16)
@@ -1419,19 +1418,6 @@ class WizardWindow(
         self.advanced_fields["ny"].setToolTip(
             "Number of training output samples per window. Validation keeps its independent window."
         )
-        mute_training_mode = QComboBox()
-        mute_training_mode.addItem("Mute Anchor (audio forward)", "anchor")
-        mute_training_mode.addItem("Virtual mute captures (zero target)", "virtual")
-        mute_training_mode.addItem("Hypernetwork output-weight constraint", "weight")
-        mute_training_mode.addItem("Synthetic Mute Captures (dataset)", "synthetic")
-        mute_training_mode.setToolTip(
-            "Choose one training-only mute method. Virtual captures replace 5% of normal "
-            "training minibatches with zero-output targets, without an additional audio "
-            "forward. The Hypernetwork constraint penalizes the final output weights "
-            "without another audio forward. All methods preserve .pnam compatibility."
-        )
-        self.advanced_fields["mute_training_mode"] = mute_training_mode
-        advanced_form.addRow("Mute training method", mute_training_mode)
         synthetic_reference = QCheckBox("Use -18 dBFS RMS reference for synthetic Mute captures")
         synthetic_reference.setChecked(True)
         synthetic_reference.setToolTip(
@@ -1442,31 +1428,6 @@ class WizardWindow(
         self.advanced_fields["synthetic_mute_reference_rms"] = synthetic_reference
         advanced_form.addRow(synthetic_reference)
         synthetic_reference.toggled.connect(self.save_preferences)
-        mute_training_mode.currentIndexChanged.connect(self.save_preferences)
-        mute_training_mode.currentIndexChanged.connect(
-            lambda *_: self.refresh_mute_training_controls()
-        )
-        for key, caption, tooltip in (
-            (
-                "mute_anchor_interval", "Mute Anchor Interval",
-                "Apply Mute Anchor every N optimizer steps. Its loss weight is multiplied by N.",
-            ),
-            (
-                "mute_anchor_batch_size", "Mute Anchor Batch Size",
-                "Maximum number of examples selected from each training batch for Mute Anchor.",
-            ),
-            (
-                "mute_anchor_ny", "Mute Anchor NY",
-                "Maximum number of output samples to score per Mute Anchor example.",
-            ),
-        ):
-            field = QSpinBox()
-            field.setRange(1, 2**31 - 1)
-            field.setValue(MUTE_ANCHOR_OPTIONS[key])
-            field.setFixedWidth(260)
-            field.setToolTip(tooltip)
-            self.advanced_fields[key] = field
-            advanced_form.addRow(caption, field)
         for field in self.advanced_fields.values():
             if isinstance(field, (QSpinBox, QDoubleSpinBox)):
                 field.valueChanged.connect(self.save_training_numeric_preferences)
@@ -1666,10 +1627,7 @@ class WizardWindow(
         self.advanced_panel.layout().setRowVisible(
             self.advanced_fields["rms_loss_normalization_exponent"], parametric
         )
-        self.advanced_panel.layout().setRowVisible(
-            self.advanced_fields["mute_training_mode"], parametric
-        )
-        self.refresh_mute_training_controls(parametric)
+        self.refresh_synthetic_mute_controls(parametric)
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.advanced_fields["cudnn_benchmark"].setEnabled(
@@ -1684,20 +1642,12 @@ class WizardWindow(
         self.refresh_checkpoint_controls()
         self.refresh_rate_preview(kind)
 
-    def refresh_mute_training_controls(self, parametric=None):
+    def refresh_synthetic_mute_controls(self, parametric=None):
         if parametric is None:
             parametric = self.capture_kind.currentData() == "parametric"
-        enabled = (
-            parametric and
-            self.advanced_fields["mute_training_mode"].currentData() == "anchor"
-        )
         self.advanced_panel.layout().setRowVisible(
-            self.advanced_fields["synthetic_mute_reference_rms"],
-            parametric and self.advanced_fields["mute_training_mode"].currentData() == "synthetic",
+            self.advanced_fields["synthetic_mute_reference_rms"], parametric
         )
-        for key in MUTE_ANCHOR_OPTIONS:
-            field = self.advanced_fields[key]
-            self.advanced_panel.layout().setRowVisible(field, parametric and enabled)
 
     def refresh_loss_normalization_controls(self, parametric=None):
         if parametric is None:

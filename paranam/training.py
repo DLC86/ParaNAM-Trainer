@@ -124,41 +124,11 @@ def job_can_resume(workspace, job):
             != options["snr_weighted_loss_normalization"]
         ):
             return False
-        if options["mute_training_mode"] == "synthetic":
-            if not spec.get("model", {}).get("loss", {}).get("synthetic_mute"):
-                return False
-            if spec.get("learning", {}).get("synthetic_mute_reference_rms", True) != options["synthetic_mute_reference_rms"]:
-                return False
-        from nam.capture.export import (
-            MUTE_ANCHOR_DEFAULTS,
-            mute_anchor_settings,
-            mute_anchor_targets,
-            mute_anchor_corner_targets,
-            mute_anchor_point_targets,
-            mute_anchor_rule_targets,
-        )
-
-        if options["mute_training_mode"] != "synthetic" and (
-                mute_anchor_targets(workspace.project) or
-                mute_anchor_point_targets(workspace.project) or
-                mute_anchor_rule_targets(workspace.project)):
-            saved_mute = spec.get("model", {}).get("loss", {}).get("mute_anchor")
-            if saved_mute is None:
-                return False
-            if (saved_mute.get("targets") != mute_anchor_targets(workspace.project)
-                or saved_mute.get("corner_targets", ()) != mute_anchor_corner_targets(workspace.project)
-                or saved_mute.get("point_targets", []) != mute_anchor_point_targets(workspace.project)
-                or saved_mute.get("rule_targets", []) != mute_anchor_rule_targets(workspace.project)
-                or saved_mute.get("mode", "anchor") != options["mute_training_mode"]):
-                return False
-            try:
-                current_mute = mute_anchor_settings(
-                    {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}
-                )
-                if current_mute != mute_anchor_settings(saved_mute):
-                    return False
-            except (AttributeError, ValueError):
-                return False
+        if not spec.get("model", {}).get("loss", {}).get("synthetic_mute"):
+            return False
+        if (spec.get("learning", {}).get("synthetic_mute_reference_rms", True)
+                != options["synthetic_mute_reference_rms"]):
+            return False
     saved_trainer = spec.get("learning", {}).get("trainer", {})
     if bool(saved_trainer.get("benchmark", True)) != (
         options["cudnn_benchmark"] and not options["deterministic_training"]
@@ -419,10 +389,7 @@ def make_job(workspace, resume=False, job_directory=None):
             "batch_size": workspace.training_batch_size(),
             "advanced_training": options,
         }
-        synthetic = (
-            workspace.project.capture_type == "parametric"
-            and options.get("mute_training_mode") == "synthetic"
-        )
+        synthetic = workspace.project.capture_type == "parametric"
         data = build_data_config(workspace.project, include_synthetic=synthetic)
         if not data["validation"]:
             raise ValueError(
@@ -436,23 +403,10 @@ def make_job(workspace, resume=False, job_directory=None):
             model = model_config(workspace.project)
         else:
             model = build_hyper_a2_model_config(workspace.project)
-            mute = model["loss"].get("mute_anchor")
-            mute_mode = options["mute_training_mode"]
-            if mute_mode not in ("anchor", "virtual", "weight", "synthetic"):
-                raise ValueError(f"Unknown mute training method: {mute_mode!r}")
-            if mute_mode == "synthetic":
-                # No mute regularizer: the synthetic recordings are just data.
-                model["loss"].pop("mute_anchor", None)
-                model["loss"]["synthetic_mute"] = True
-            if mute is not None and mute_mode != "synthetic":
-                # Keep pre-beta default Mute Anchor configs byte-compatible.
-                if mute_mode != "anchor":
-                    mute["mode"] = mute_mode
-                mute.update(
-                    mute_anchor_settings(
-                        {key: options[f"mute_anchor_{key}"] for key in MUTE_ANCHOR_DEFAULTS}
-                    )
-                )
+            # The only mute objective is ordinary MSE against the
+            # synthesized full-length zero target; no anchor or special forwards.
+            model["loss"].pop("mute_anchor", None)
+            model["loss"]["synthetic_mute"] = True
             if workspace.project.output_gain:
                 # Reconcile saved calibration with the current Plan display order.
                 curve = dict(workspace.project.output_gain)
