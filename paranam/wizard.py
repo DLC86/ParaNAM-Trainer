@@ -3431,7 +3431,10 @@ class WizardWindow(
             header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.blockSignals(False)
         row_keys = tuple(
-            entry.capture_id if static else entry.y_path for entry in entries
+            entry.capture_id if static else (
+                entry.split, entry.index, tuple(sorted(entry.params.items()))
+            )
+            for entry in entries
         )
         if changed_kind or row_keys != self._capture_row_keys:
             self.capture_table.clearContents()
@@ -3525,7 +3528,8 @@ class WizardWindow(
             f"{len(entries)} static model(s) · {completed} of {len(counted)} required signals captured. Imported WAVs use their held-out tail for validation."
             if static
             else f"{completed} of {len(counted)} captured · {len(counted) - completed} remaining · "
-            f"{len(project.muted_settings)} Mute / {len(project.avoided_settings)} Unstable (still listed). "
+            f"{sum(e.synthetic_mute for e in project.entries)} Mute captures / "
+            f"{len(project.avoided_settings)} Unstable settings (still listed). "
             "Ordered to change fewer controls and turn knobs less."
         )
         if entries:
@@ -3613,7 +3617,9 @@ class WizardWindow(
                 self.record_button.setText("Record")
                 return
             self.record_button.setText(
-                "Re-record this setting"
+                "Synthetic Mute — no recording needed"
+                if entry.synthetic_mute
+                else "Re-record this setting"
                 if entry.status == "captured"
                 else "Record this setting"
             )
@@ -3631,11 +3637,12 @@ class WizardWindow(
         entry = self._capture_entries[row]
         if entry.split not in ("train", "validation"):
             return
-        if entry.status == "captured":
+        if entry.status == "captured" and not entry.synthetic_mute:
             answer = QMessageBox.question(
-                self, "Exclude an already recorded setting?",
-                "This capture will no longer participate in training or validation. "
-                "Its existing WAV will be preserved on disk. Continue?",
+                self, "Change an already recorded setting?",
+                "This capture's recorded WAV will be preserved on disk. "
+                "Mark it Mute to use a synthetic silent target, or Avoid "
+                "to exclude this setting. Continue?",
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
@@ -3657,7 +3664,7 @@ class WizardWindow(
             caption = "Mute" if classification == "mute" else "Unstable"
             self.capture_status.setText(
                 f"{caption} marked for the selected setting. "
-                f"{len(added)} replacement / adjacent-step capture(s) added; "
+                f"{len(added)} replacement capture(s) added; "
                 "existing recordings were preserved."
             )
         except Exception as error:
@@ -3689,6 +3696,13 @@ class WizardWindow(
 
     def record(self):
         if not self.workspace or self.busy() or not self.rig_ready.isChecked():
+            return
+        row = self.capture_table.currentRow()
+        if (0 <= row < len(self._capture_entries)
+                and self._capture_entries[row].synthetic_mute):
+            self.capture_status.setText(
+                "This Mute capture is already complete; no physical recording is needed."
+            )
             return
         references = (
             self.capture_level.level(),

@@ -423,6 +423,10 @@ class QueueActions:
             and not preparing_here
             and self.rig_ready.isChecked()
             and self.capture_table.currentRow() >= 0
+            and not (
+                self.capture_table.currentRow() < len(getattr(self, "_capture_entries", ()))
+                and self._capture_entries[self.capture_table.currentRow()].synthetic_mute
+            )
         )
         self.load_capture_button.setEnabled(
             present and not active and not preparing_here and self.capture_table.currentRow() >= 0

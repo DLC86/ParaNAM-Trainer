@@ -453,26 +453,14 @@ def build_concat_model_config(project: CaptureProject) -> dict[str, _Any]:
     }
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
-    mute_targets = mute_anchor_targets(project)
-    mute_points = mute_anchor_point_targets(project)
-    mute_rules = mute_anchor_rule_targets(project)
     loss = {
         "val_loss": "esr",
         "mrstft_weight": 0.0005,
-        # Both anchors together: the held one wins parked-param silence outright, and the
-        # moving one is what keeps a knob turn from clicking.
+        # Existing temporal silence-anchor regularizers are unrelated to mute
+        # combinations and remain available for the legacy Concat architecture.
         "silence_anchor": {"weight": 1.0, "batch_size": 8, "ny": 512},
         "silence_anchor_ramp": {"weight": 1.0, "batch_size": 8, "ny": 512},
     }
-    if mute_targets or mute_points or mute_rules:
-        loss["mute_anchor"] = {
-            "targets": mute_targets,
-            "corner_targets": mute_anchor_corner_targets(project),
-            **({"point_targets": mute_points} if mute_points else {}),
-            **({"rule_targets": mute_rules} if mute_rules else {}),
-            "weight": 0.25,
-            **MUTE_ANCHOR_DEFAULTS,
-        }
     return {
         **_calibration_metadata(project),
         "net": {"name": "ConcatWaveNet", "config": config},
@@ -533,20 +521,7 @@ def build_hyper_model_config(project: CaptureProject) -> dict[str, _Any]:
     }
     if project.sample_rate is not None:
         config["sample_rate"] = float(project.sample_rate)
-    mute_targets = mute_anchor_targets(project)
-    mute_points = mute_anchor_point_targets(project)
-    mute_rules = mute_anchor_rule_targets(project)
     loss = {"val_loss": "esr", "mrstft_weight": 0.0005}
-    if mute_targets or mute_points or mute_rules:
-        # Training-only targets: never add player-facing model fields.
-        loss["mute_anchor"] = {
-            "targets": mute_targets,
-            "corner_targets": mute_anchor_corner_targets(project),
-            **({"point_targets": mute_points} if mute_points else {}),
-            **({"rule_targets": mute_rules} if mute_rules else {}),
-            "weight": 0.25,
-            **MUTE_ANCHOR_DEFAULTS,
-        }
     return {
         **_calibration_metadata(project),
         "net": {"name": "HyperWaveNet", "config": config},

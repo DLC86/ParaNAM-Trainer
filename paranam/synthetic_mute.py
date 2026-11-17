@@ -80,8 +80,23 @@ def materialize_synthetic_mutes(workspace):
         if row.split in ("train", "validation") and is_mute_setting(project, row.params):
             grouped.setdefault(row.split, []).append(row)
     created = 0
+    shared_train = None
+    if "train" in grouped:
+        shared_train = _shared_target(
+            root, "train", root / project.input_for_split("train")
+        )
     for split, rows in grouped.items():
-        reference = _shared_target(root, split, root / project.input_for_split(split))
+        reference = shared_train if split == "train" else None
+        if split == "validation" and shared_train is not None:
+            training = sf.info(str(root / project.input_for_split("train")))
+            validation = sf.info(str(root / project.input_for_split("validation")))
+            if (training.frames == validation.frames
+                    and training.samplerate == validation.samplerate):
+                reference = shared_train
+        if reference is None:
+            reference = _shared_target(
+                root, split, root / project.input_for_split(split)
+            )
         for row in rows:
             if row.synthetic_mute and row.y_path == reference and row.status == "captured":
                 continue
