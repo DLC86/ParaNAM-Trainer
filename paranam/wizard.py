@@ -1423,6 +1423,7 @@ class WizardWindow(
         mute_training_mode.addItem("Mute Anchor (audio forward)", "anchor")
         mute_training_mode.addItem("Virtual mute captures (zero target)", "virtual")
         mute_training_mode.addItem("Hypernetwork output-weight constraint", "weight")
+        mute_training_mode.addItem("Synthetic Mute Captures (dataset)", "synthetic")
         mute_training_mode.setToolTip(
             "Choose one training-only mute method. Virtual captures replace 5% of normal "
             "training minibatches with zero-output targets, without an additional audio "
@@ -1431,6 +1432,16 @@ class WizardWindow(
         )
         self.advanced_fields["mute_training_mode"] = mute_training_mode
         advanced_form.addRow("Mute training method", mute_training_mode)
+        synthetic_reference = QCheckBox("Use -18 dBFS RMS reference for synthetic Mute captures")
+        synthetic_reference.setChecked(True)
+        synthetic_reference.setToolTip(
+            "Checked: silence remains literal zero but its RMS normalization factor "
+            "is unity (-18 dBFS reference). Unchecked: use the measured zero "
+            "power and global -58 dBFS floor."
+        )
+        self.advanced_fields["synthetic_mute_reference_rms"] = synthetic_reference
+        advanced_form.addRow(synthetic_reference)
+        synthetic_reference.toggled.connect(self.save_preferences)
         mute_training_mode.currentIndexChanged.connect(self.save_preferences)
         mute_training_mode.currentIndexChanged.connect(
             lambda *_: self.refresh_mute_training_controls()
@@ -1679,6 +1690,10 @@ class WizardWindow(
         enabled = (
             parametric and
             self.advanced_fields["mute_training_mode"].currentData() == "anchor"
+        )
+        self.advanced_panel.layout().setRowVisible(
+            self.advanced_fields["synthetic_mute_reference_rms"],
+            parametric and self.advanced_fields["mute_training_mode"].currentData() == "synthetic",
         )
         for key in MUTE_ANCHOR_OPTIONS:
             field = self.advanced_fields[key]
