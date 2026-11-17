@@ -31,6 +31,7 @@ def requested_settings():
         "mute_anchor_batch_size": 2,
         "mute_anchor_ny": 512,
         "mute_training_mode": "anchor",
+        "synthetic_mute_reference_rms": True,
     }
 
 
