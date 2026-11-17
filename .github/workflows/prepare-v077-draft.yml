@@ -26,6 +26,7 @@ on:
       - 'paranam/workspace.py'
       - 'paranam/training_queue.py'
       - 'tests/paranam/test_workspace.py'
+      - 'tests/paranam/test_legacy_plan_migration.py'
       - 'tests/paranam/test_queue.py'
       - 'tests/paranam/test_wizard.py'
       - 'tests/paranam/test_workflow052.py'
