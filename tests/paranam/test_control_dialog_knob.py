@@ -31,8 +31,8 @@ def test_knob_options_follow_requested_order_and_labels(qapp):
     assert dialog.clean_volume.text() == "Linear volume control"
     assert dialog.mute_at_min.text() == "Mute at minimum"
     assert dialog.mute_at_max.text() == "Mute at maximum"
-    assert "exclude" in dialog.mute_at_min.toolTip()
-    assert "exclude" in dialog.mute_at_max.toolTip()
+    assert "synthetic" in dialog.mute_at_min.toolTip()
+    assert "synthetic" in dialog.mute_at_max.toolTip()
     label = form.itemAt(4, QFormLayout.ItemRole.LabelRole).widget()
     assert label.text() == "Capture density"
     dialog.close()
