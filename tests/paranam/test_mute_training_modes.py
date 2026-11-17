@@ -12,7 +12,9 @@ def prepare_mute_dataset(workspace):
     workspace.draft_controls = [
         KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True).to_dict()
     ]
-    workspace.preferences.update(n_train=12, n_validation=4, corners=True)
+    # One 0..10 knob has eleven distinct physical settings.  Keep this
+    # synthetic-Mute fixture below that capacity while retaining both splits.
+    workspace.preferences.update(n_train=6, n_validation=3, corners=True)
     workspace.generate_plan()
     for row in workspace.project.entries:
         if row.synthetic_mute:

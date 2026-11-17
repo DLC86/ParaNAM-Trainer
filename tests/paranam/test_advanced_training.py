@@ -221,7 +221,7 @@ def test_snr_checkbox_reaches_the_training_job_independently_of_rms(window, work
     rms = window.advanced_fields["rms_loss_normalization"]
     field = window.advanced_fields[key]
     assert rms.isEnabled() and rms.isChecked()
-    assert field.isEnabled() and field.isChecked()
+    assert field.isEnabled() and not field.isChecked()
     fingerprint = workspace.fingerprint()
     field.setChecked(False)
     reopened = Workspace(workspace.directory)

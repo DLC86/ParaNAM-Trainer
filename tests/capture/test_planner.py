@@ -108,7 +108,7 @@ def test_extra_default_respects_small_grid_capacity_and_corners():
 
 def test_muted_default_is_a_valid_training_setting():
     knobs = [_KnobSpec("Gain", 0, 10, step=1, default=0, mute_at_min=True)]
-    train, val = plan_captures(
+    train, val = _plan_captures(
         knobs, n_train=4, n_validation=0,
         include_default_as_additional_capture=True,
     )

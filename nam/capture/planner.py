@@ -1086,7 +1086,8 @@ def _plan_captures_unadjusted(
     if any(spec.type == "switch" and spec.simple_switch for spec in specs):
         return _plan_simple_switches(
             knobs, specs, n_train, n_validation, seed, lhs_method,
-            validation_method, policy, external_exclude=external_exclude,
+            validation_method, policy, rules=rules,
+            external_exclude=external_exclude,
         )
     if any(spec.type == "switch" for spec in specs):
         switches = [spec for spec in specs if spec.type == "switch"]
@@ -1560,7 +1561,7 @@ def _inverse_bias(unit, spec):
 def _plan_simple_switches(
     controls, specs, n_train, n_validation, seed, lhs_method,
     validation_method="independent", anchor_policy="inside",
-    external_exclude=None,
+    rules=(), external_exclude=None,
 ):
     complex_specs = tuple(
         s for s in specs if s.type == "switch" and not s.simple_switch

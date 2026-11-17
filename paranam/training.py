@@ -124,7 +124,16 @@ def job_can_resume(workspace, job):
             != options["snr_weighted_loss_normalization"]
         ):
             return False
-        if not spec.get("model", {}).get("loss", {}).get("synthetic_mute"):
+        # Lightweight/legacy jobs without a synthetic target remain resumable
+        # when this project has no synthetic Mute captures.  Requiring the
+        # recipe unconditionally made ordinary projects (and frozen jobs)
+        # impossible to resume after the synthetic-Mute rollout.
+        has_synthetic_mutes = any(
+            entry.synthetic_mute for entry in workspace.project.entries
+        )
+        if (has_synthetic_mutes and not spec.get("model", {}).get("loss", {}).get(
+                "synthetic_mute"
+        )):
             return False
         if (spec.get("learning", {}).get("synthetic_mute_reference_rms", False)
                 != options["synthetic_mute_reference_rms"]):

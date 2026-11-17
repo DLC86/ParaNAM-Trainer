@@ -300,21 +300,23 @@ def test_capture_view_marks_mute_and_unstable_without_hiding_rows(window, worksp
     assert first.params in project.muted_settings
     # Ordinary Mute marks are virtual training targets, not replacement WAVs.
     assert len(project.entries) == count
-    assert any(row.y_path == first.y_path for row in project.entries)
+    assert any(
+        row.params == first.params and row.synthetic_mute for row in project.entries
+    )
     assert "mute" in window.capture_summary.text().lower()
     first_row = next(
         i for i, row in enumerate(window._capture_entries)
-        if row.y_path == first.y_path
+        if row.params == first.params
     )
     assert "Mute" in window.capture_table.item(first_row, 5).text()
     window.capture_table.selectRow(first_row)
     assert not window.mark_mute_button.isEnabled()
     assert not window.mark_avoid_button.isEnabled()
-    assert window.record_button.text() == "Record this setting"
+    assert window.record_button.text() == "Synthetic Mute — no recording needed"
 
     second_row = next(
         i for i, row in enumerate(window._capture_entries)
-        if row.y_path != first.y_path
+        if row.params != first.params
         and row.split in ("train", "validation")
         and project.classification_for_entry(row) is None
     )
@@ -335,9 +337,11 @@ def test_capture_view_marks_mute_and_unstable_without_hiding_rows(window, worksp
     reopened = Workspace(workspace.directory)
     assert first.params in reopened.project.muted_settings
     assert second.params in reopened.project.avoided_settings
-    assert {first.y_path, second.y_path}.issubset(
-        {entry.y_path for entry in reopened.project.entries}
+    assert any(
+        entry.params == first.params and entry.synthetic_mute
+        for entry in reopened.project.entries
     )
+    assert any(entry.params == second.params for entry in reopened.project.entries)
 
 
 def test_mute_capture_row_stays_selectable_for_later_recording(window, workspace):
@@ -347,12 +351,12 @@ def test_mute_capture_row_stays_selectable_for_later_recording(window, workspace
     window.classify_selected_capture("mute")
     row = next(
         i for i, entry in enumerate(window._capture_entries)
-        if entry.y_path == original.y_path
+        if entry.params == original.params
     )
     window.capture_table.selectRow(row)
     assert window._capture_entries[row].params == original.params
     assert window.capture_table.item(row, 5).text().startswith("Mute")
-    assert window.record_button.text() == "Record this setting"
+    assert window.record_button.text() == "Synthetic Mute — no recording needed"
     assert not hasattr(window, "undo_last_capture_mark")
 
 

@@ -159,10 +159,11 @@ def test_discovered_mute_and_avoid_points_survive_replanning(workspace):
     assert avoided in workspace.project.avoided_settings
     assert any(e.params == muted for e in workspace.project.entries)
     assert any(e.params == avoided for e in workspace.project.entries)
-    assert all(
-        e.params not in (muted, avoided)
-        for e in workspace.training_capture_entries()
-    )
+    training_rows = workspace.training_capture_entries()
+    # Avoided rows are excluded, while Mute rows remain as synthetic silent
+    # targets in the dataset.
+    assert all(e.params != avoided for e in training_rows)
+    assert any(e.params == muted and e.synthetic_mute for e in training_rows)
     assert not workspace.plan_changed()
     reopened = Workspace(workspace.directory)
     assert muted in reopened.project.muted_settings

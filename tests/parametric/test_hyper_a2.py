@@ -390,7 +390,9 @@ def test_virtual_mute_corners_exclude_the_clean_volume_output_extension():
     )
     model = build_hyper_a2_model_config(project)
     assert [p["name"] for p in model["net"]["config"]["params"]] == ["Gain"]
-    assert model["loss"]["mute_anchor"]["corner_targets"] == [{"Gain": 0.0}]
+    # Mute extrema are now materialized as shared synthetic WAVs; the old
+    # virtual mute-anchor loss is deliberately absent from HyperA2.
+    assert "mute_anchor" not in model["loss"]
 
 
 def test_virtual_muted_corners_override_random_quota_until_all_are_covered(monkeypatch):
