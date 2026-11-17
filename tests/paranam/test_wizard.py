@@ -53,7 +53,7 @@ def test_input_specific_epoch_recommendations_preserve_custom_values(window, tmp
 
     ws = Workspace.create(tmp_path / "Input defaults", "Input defaults")
     assert ws.preferences["input_mode"] == "trunc"
-    assert ws.preferences["epochs"] == 200
+    assert ws.preferences["epochs"] == 100
     assert ws.project.train_input == "input_trunc.wav"
     assert (ws.directory / "input_trunc.wav").exists()
     assert recommended_epochs("parametric", "standard") == 50

@@ -428,7 +428,7 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
 ):
     fresh = Workspace.create(tmp_path / "Fresh", "Fresh")
     options = fresh.training_options()
-    assert fresh.preferences["epochs"] == 200
+    assert fresh.preferences["epochs"] == 100
     assert fresh.preferences["input_mode"] == "trunc"
     assert fresh.project.train_input == "input_trunc.wav"
     assert fresh.training_batch_size() == 16

@@ -223,34 +223,34 @@ def test_snr_checkbox_reaches_the_training_job_independently_of_rms(window, work
     assert rms.isEnabled() and rms.isChecked()
     assert field.isEnabled() and not field.isChecked()
     fingerprint = workspace.fingerprint()
-    field.setChecked(False)
+    field.setChecked(True)
     reopened = Workspace(workspace.directory)
-    assert reopened.training_options()[key] is False
+    assert reopened.training_options()[key] is True
     assert reopened.training_options()["rms_loss_normalization"] is True
     assert reopened.fingerprint() != fingerprint
     job = training.make_job(reopened)
     spec = read_json(job / "spec.json")
     assert spec["learning"]["rms_loss_normalization"] is True
-    assert spec["learning"][key] is False
+    assert spec["learning"][key] is True
     (job / "resume-0.ckpt").touch()
     assert training.job_can_resume(reopened, job)
 
     # Turning RMS on/off must never change the SNR selection.
     rms.setChecked(False)
-    assert field.isEnabled() and not field.isChecked()
+    assert field.isEnabled() and field.isChecked()
     assert not training.job_can_resume(Workspace(workspace.directory), job)
     rms.setChecked(True)
-    assert field.isEnabled() and not field.isChecked()
+    assert field.isEnabled() and field.isChecked()
     assert training.job_can_resume(Workspace(workspace.directory), job)
 
     # SNR mode, like RMS mode, is incompatible with the saved optimizer state.
-    field.setChecked(True)
+    field.setChecked(False)
     enabled = Workspace(workspace.directory)
     assert not training.job_can_resume(enabled, job)
     assert enabled.fingerprint() == fingerprint
     enabled_spec = read_json(training.make_job(enabled) / "spec.json")
     assert enabled_spec["learning"]["rms_loss_normalization"] is True
-    assert enabled_spec["learning"][key] is True
+    assert enabled_spec["learning"][key] is False
     window.load_advanced_options("static")
     assert not rms.isEnabled() and not field.isEnabled()
 
