@@ -555,7 +555,7 @@ def new_project(
         knobs, n_train=n_train, n_validation=n_validation, seed=seed,
         lhs_method=lhs_method,
         validation_method=validation_method,
-        rules=plan_rules,
+        rules=tuple(r for r in plan_rules if r.kind == "avoid"),
         include_default_as_additional_capture=include_default_as_additional_capture,
     )
     entries = [
@@ -614,7 +614,7 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
     }
     existing_keys.update(
         tuple(point[spec.name] for spec in specs)
-        for point in project.muted_settings + project.avoided_settings
+        for point in project.avoided_settings
     )
     train_indices = [entry.index for entry in project.entries if entry.split == "train"]
     next_index = max(train_indices) + 1 if train_indices else 0
@@ -625,7 +625,7 @@ def add_corner_captures(project: CaptureProject) -> tuple[list[CaptureEntryModel
         exclude=existing_keys,
         index_offset=next_index,
         filename_start=corner_count,
-        rules=project.plan_rules,
+        rules=tuple(r for r in project.plan_rules if r.kind == "avoid"),
     )
     added = [
         CaptureEntryModel(
@@ -673,6 +673,23 @@ def classify_capture(
         raise ValueError("Classification must be mute or avoid")
     if project.capture_type != "parametric" or entry.split not in ("train", "validation"):
         raise ValueError("Only parametric training/validation settings can be classified")
+    if classification == "mute":
+        # Mute marks do not replace Sobol/Corner/Validation slots.
+        draft = project.model_copy(deep=True)
+        row = next((
+            item for item in draft.entries
+            if item.split == entry.split and item.params == entry.params
+        ), None)
+        if row is None:
+            raise ValueError("Selected Mute setting no longer exists")
+        if draft.classification_for_entry(row) is not None:
+            raise ValueError("Setting already classified")
+        draft.muted_settings.append(dict(row.params))
+        if row.status == "captured":
+            draft.unused_recordings[row.y_path] = {
+                "entry": row.model_dump(mode="json"), "context": None
+            }
+        return draft, []
     if all(isinstance(knob, SwitchSpec) for knob in project.knob_specs()):
         raise ValueError("Switch-only states cannot be dynamically replaced with another distinct setting")
     draft = project.model_copy(deep=True)

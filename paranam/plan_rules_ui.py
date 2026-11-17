@@ -31,8 +31,8 @@ class PlanRuleDialog(QDialog):
         layout = QVBoxLayout(self)
         detail = QLabel(
             "All selected conditions must be true (AND). Avoid excludes unstable "
-            "combinations. Mute excludes recordings and teaches the model silence "
-            "through a virtual training anchor. Each control has its own condition."
+            "combinations. Mute uses ordinary full-length synthetic silent captures "
+            "at selected positions. Each control has its own condition."
         )
         detail.setWordWrap(True)
         layout.addWidget(detail)
@@ -62,7 +62,7 @@ class PlanRuleDialog(QDialog):
             operator = QComboBox()
             operator.setAccessibleName(f"Operator for {control.name}")
             is_switch = isinstance(control, SwitchSpec)
-            operator.addItems(["="] if is_switch else ["<", ">", "="])
+            operator.addItems(["="] if is_switch else ["≤", "≥", "="])
             grid.addWidget(operator, i, 2)
             if is_switch:
                 value = QComboBox()
@@ -82,7 +82,7 @@ class PlanRuleDialog(QDialog):
                 else:
                     value.setValue(float(threshold))
             else:
-                operator.setCurrentText("=" if is_switch else ">")
+                operator.setCurrentText("=" if is_switch else "≥")
             checked.toggled.connect(self.update_fields)
             self.rows[control.name] = (checked, operator, value)
         grid.setColumnStretch(3, 1)
