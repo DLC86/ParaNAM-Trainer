@@ -1,5 +1,6 @@
 import json as _json
 from math import isfinite as _isfinite
+from math import log10 as _log10
 from dataclasses import dataclass as _dataclass
 from dataclasses import fields as _fields
 from pathlib import Path as _Path
@@ -1196,7 +1197,7 @@ class _ParametricLightningModule(_LightningModule):
     def _report_mute_power(self, store, bucket):
         for size, (power, count) in store.items():
             if count:
-                dbfs = 10.0 * _math.log10(max(power / count, 1e-20))
+                dbfs = 10.0 * _log10(max(power / count, 1e-20))
                 self._log_bucket({"Mute RMS dBFS": dbfs}, f"{bucket}/{size}")
 
     def _size_steps(self, batch, *, synthetic_mute=False):
