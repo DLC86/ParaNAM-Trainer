@@ -441,7 +441,7 @@ def test_rms_normalizes_training_mse_and_preserves_targets(amplitude):
     module.set_capture_mse_normalization(dataset)
     module.on_train_epoch_start()
     loss = module.training_step((_torch.zeros(1, 8), y[None, :8]), 0)
-    scale = 10 ** -1.8 / max(amplitude**2, 10 ** -6)
+    scale = 10 ** -1.8 / max(amplitude**2, 10 ** (-58.0 / 10.0))
     assert module._capture_mse_scales == _pytest.approx((scale,))
     assert loss.item() == _pytest.approx(amplitude**2 * scale)
     assert _torch.equal(dataset.y, y)
@@ -449,14 +449,14 @@ def test_rms_normalizes_training_mse_and_preserves_targets(amplitude):
 
 @_pytest.mark.parametrize("exponent", [0.01, 1.0, 2.0])
 def test_rms_loss_exponent_adjusts_capture_weight(exponent):
-    amplitude = 0.001  # -60 dBFS: extreme ratio exercises the floor
+    amplitude = 0.001  # -60 dBFS: below the new -58 dBFS floor
     y = _torch.full((16,), amplitude)
     dataset = _Dataset(
         x=_torch.zeros_like(y), y=y, nx=1, ny=8, require_input_pre_silence=None
     )
     module = _ParametricLightningModule(_MockBaseNet(1.0))
     module.set_capture_mse_normalization(dataset, rms_exponent=exponent)
-    expected = (10 ** (-18.0 / 20.0) / amplitude) ** exponent
+    expected = (10 ** -1.8 / max(amplitude**2, 10 ** (-58.0 / 10.0))) ** (exponent / 2.0)
     assert module._capture_mse_scales == _pytest.approx((expected,))
 
 
