@@ -14,7 +14,7 @@ def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
         KnobSpec("Treble", 0, 3, 1, 1),
         KnobSpec("Volume", 0, 2, 1, 1, clean_volume=True),
     ]
-    rule = PlanRule(controls=("Bass", "Treble"), operator=">", value=1)
+    rule = PlanRule(controls=("Bass", "Treble"), operator="≥", value=2)
     assert rule_capture_limits(knobs, [rule])[:2] == (1, 10)
     project = new_project(knobs, n_train=5, n_validation=3, plan_rules=[rule],
                           validation_method="farthest")
@@ -29,7 +29,7 @@ def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
     assert gain[0].params["Volume"] == 2
     assert any(rule.excludes(e.params) for e in gain)
 
-    project.plan_rules.append(PlanRule(controls=("Volume",), operator="<", value=1))
+    project.plan_rules.append(PlanRule(controls=("Volume",), operator="≤", value=0))
     initialize_calibration(project)
     assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {0, 1, 2}
 
@@ -126,119 +126,80 @@ def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_en
 
 
 @pytest.mark.parametrize(
-    "mute_flags,forbidden",
+    "mute_flags,muted_edges",
     [
         ({"mute_at_min": True}, {0.0}),
         ({"mute_at_max": True}, {10.0}),
         ({"mute_at_min": True, "mute_at_max": True}, {0.0, 10.0}),
     ],
 )
-def test_muted_endpoint_is_excluded_from_training_validation_and_corners(
-    mute_flags, forbidden
-):
+def test_mute_extrema_are_in_sample_and_real_corners(mute_flags, muted_edges):
     from nam.capture.planner import (
         _capture_grid_values, corner_capture_count, plan_corner_captures,
-        mute_corner_settings,
     )
-
     controls = [
         KnobSpec("Drive", 0, 10, 1, default=5, **mute_flags),
         KnobSpec("Tone", 0, 10, 1, default=5),
         SwitchSpec("Mode", ("A", "B")),
     ]
-    drive_spec = controls[0].to_param_spec()
-    assert not forbidden.intersection(_capture_grid_values(drive_spec, 1))
+    assert muted_edges.issubset(set(_capture_grid_values(controls[0].to_param_spec(), 1)))
     train, validation = plan_captures(
         controls, n_train=20, n_validation=8, seed=31
     )
     corners, _ = plan_corner_captures(controls)
-    virtual = mute_corner_settings(controls)
+    assert len(train) == 20 and len(validation) == 8
     assert corner_capture_count(controls) == len(corners)
-    assert len(virtual) == (8 if len(forbidden) == 2 else 4)
-    assert all(
-        any(row[k.name] == getattr(k, "min" if e == "min" else "max")
-            for k in controls if hasattr(k, "mute_at_min")
-            for e in ("min", "max") if getattr(k, f"mute_at_{e}"))
-        for row in virtual
-    )
-    # Muted corners no longer require WAVs, not even at the adjacent step.
-    assert not any(
-        row.params["Drive"] == (1.0 if mute_flags.get("mute_at_min") else 9.0)
-        for row in corners
-        if mute_flags.get("mute_at_min") or mute_flags.get("mute_at_max")
-    )
-    assert all(
-        row.params["Drive"] not in ({1.0} if mute_flags.get("mute_at_min") else set())
-        | ({9.0} if mute_flags.get("mute_at_max") else set())
-        for row in corners
-    )
-    for endpoint in ({1.0} if mute_flags.get("mute_at_min") else set()) | (
-        {9.0} if mute_flags.get("mute_at_max") else set()
-    ):
-        assert any(row.params["Drive"] == endpoint for row in train)
-    assert all(
-        row.params["Drive"] not in forbidden
-        for row in [*train, *validation, *corners]
-    )
+    assert all(r.params["Drive"] in (0.0, 10.0) for r in corners)
+    assert muted_edges.issubset({r.params["Drive"] for r in corners})
+    assert not any("mute_edge" in row.y_path for row in train + validation + corners)
     assert {row.params["Mode"] for row in train} == {"A", "B"}
 
 
 @pytest.mark.parametrize("edge", ["min", "max"])
-def test_muted_endpoint_cannot_be_the_required_default(edge):
+def test_muted_endpoint_can_also_be_the_default(edge):
+    endpoint = 0 if edge == "min" else 10
     controls = [
-        KnobSpec(
-            "Drive", 0, 10, 1,
-            default=0 if edge == "min" else 10,
-            **{f"mute_at_{edge}": True},
-        )
+        KnobSpec("Drive", 0, 10, 1, default=endpoint,
+                 **{f"mute_at_{edge}": True})
     ]
-    with pytest.raises(ValueError, match=f"default.*{edge}|{edge}.*default|Mute"):
-        plan_captures(controls, n_train=4, n_validation=0)
+    train, _ = plan_captures(controls, n_train=4, n_validation=0)
+    assert any(row.params["Drive"] == endpoint for row in train)
 
 
-def test_both_mute_edges_require_an_interior_capture_position():
-    with pytest.raises(ValueError, match="No usable knob positions"):
-        KnobSpec("Toggle", 0, 1, 1, mute_at_min=True, mute_at_max=True)
+def test_both_mute_edges_do_not_require_an_interior_capture_position():
+    knob = KnobSpec("Toggle", 0, 1, 1, mute_at_min=True, mute_at_max=True)
+    assert not knob.to_param_spec().avoid_zero
+    assert not knob.to_param_spec().avoid_max
 
 
-def test_mute_anchor_targets_ignore_switches_and_keep_both_endpoints():
+def test_mute_flags_do_not_add_anchor_or_player_fields():
     from nam.capture.export import build_hyper_a2_model_config
-
     project = new_project([
         KnobSpec("Drive", 0, 10, mute_at_min=True, mute_at_max=True),
         SwitchSpec("Mode", ("A", "B")),
     ], n_train=8, n_validation=2)
     model = build_hyper_a2_model_config(project)
-    assert model["loss"]["mute_anchor"]["targets"] == [
-        {"name": "Drive", "edge": "min"},
-        {"name": "Drive", "edge": "max"},
-    ]
+    assert "mute_anchor" not in model["loss"]
     assert "mute_at_min" not in model["net"]["config"]["params"][0]
     assert "mute_at_max" not in model["net"]["config"]["params"][0]
 
 
-def test_mute_corners_are_virtual_while_nonmuted_corners_remain_recordable():
-    from nam.capture.planner import mute_corner_settings, plan_corner_captures
-
+def test_real_corners_include_mute_extrema():
+    from nam.capture.planner import plan_corner_captures
     controls = [
         KnobSpec("Gain", 0, 10, 0.5, 5, mute_at_min=True, is_gain=True),
         KnobSpec("Tone", 0, 10, 0.5, 5),
         KnobSpec("Presence", 0, 10, 0.5, 5),
     ]
-    virtual = mute_corner_settings(controls)
-    real, _ = plan_corner_captures(controls)
-    assert len(virtual) == 4
-    assert len(real) == 4
-    assert {(r["Gain"], r["Tone"], r["Presence"]) for r in virtual} == {
-        (0.0, 0.0, 0.0), (0.0, 0.0, 10.0),
-        (0.0, 10.0, 0.0), (0.0, 10.0, 10.0),
-    }
-    assert all(row.params["Gain"] == 10.0 for row in real)
+    corners, _ = plan_corner_captures(controls)
+    assert len(corners) == 8
+    assert {row.params["Gain"] for row in corners} == {0.0, 10.0}
+    assert all(all(value in (0.0, 10.0) for value in row.params.values())
+               for row in corners)
 
 
-def test_sobol_reserves_only_missing_mute_transition_without_changing_sampled_points():
+def test_sobol_uses_unchanged_draws_without_additional_mute_edges():
     from nam.capture.planner import _plan_captures_unadjusted
-
     controls = [
         KnobSpec("Gain", 0, 10, 1, 5, mute_at_min=True),
         KnobSpec("Tone", 0, 10, 1, 5),
@@ -250,71 +211,48 @@ def test_sobol_reserves_only_missing_mute_transition_without_changing_sampled_po
     train, val = plan_captures(
         controls, n_train=8, n_validation=4, seed=17, lhs_method="sobol"
     )
-    assert val == raw_val
-    assert train[:len(raw)] == raw
-    assert len(train) in (8, 9)
-    assert any(row.params["Gain"] == 1.0 for row in train)
-    assert len({tuple(row.params.values()) for row in train + val}) == len(train) + len(val)
-    assert all(row.params["Gain"] != 0.0 for row in train + val)
+    assert train == raw and val == raw_val
+    assert len(train) == 8 and len(val) == 4
+    assert len({tuple(row.params.values()) for row in train + val}) == 12
 
 
-def test_marked_mute_corner_gets_exact_virtual_target_and_adjacent_steps():
-    """Two bridged gains are silent only *together*, never as separate mute knobs."""
+def test_marking_a_mute_corner_does_not_add_adjacent_samples():
     from nam.capture.export import build_hyper_a2_model_config
     from nam.capture.project import classify_capture
-
     controls = [
         KnobSpec("Gain I", 0, 10, 1, 5),
         KnobSpec("Gain II", 0, 10, 1, 5),
         KnobSpec("Tone", 0, 10, 1, 5),
     ]
-    project = new_project(
-        controls, n_train=1, n_validation=0, lhs_method="sobol"
-    )
+    project = new_project(controls, n_train=1, n_validation=0, lhs_method="sobol")
     add_corner_captures(project)
     corner = next(
         row for row in project.entries if row.is_corner
         and row.params == {"Gain I": 0.0, "Gain II": 0.0, "Tone": 0.0}
     )
     marked, added = classify_capture(project, corner, "mute")
-    assert not project.muted_settings  # original not mutated on success
+    assert added == []
     assert marked.muted_settings == [corner.params]
-    assert len(added) == 3
-    assert {tuple(row.params.values()) for row in added} == {
-        (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
-    }
-    assert all(row.status == "pending" for row in added)
-    model = build_hyper_a2_model_config(marked)
-    anchors = model["loss"]["mute_anchor"]
-    assert anchors["targets"] == []
-    assert anchors["corner_targets"] == []
-    assert anchors["point_targets"] == [corner.params]
+    assert "mute_anchor" not in build_hyper_a2_model_config(marked)["loss"]
     assert any(row.y_path == corner.y_path for row in marked.entries)
     assert marked.classification_for_entry(
         next(row for row in marked.entries if row.y_path == corner.y_path)
     ) == "mute"
 
 
-def test_mute_corner_does_not_duplicate_an_already_planned_adjacent_step():
+def test_mute_corner_never_adds_adjacent_steps():
     from nam.capture.project import classify_capture
-
     controls = [
         KnobSpec("Gain I", 0, 10, 1, 5),
         KnobSpec("Gain II", 0, 10, 1, 5),
     ]
     project = new_project(controls, n_train=1, n_validation=0)
     add_corner_captures(project)
-    first = project.entries_for_split("train")[0]
-    first.params = {"Gain I": 1.0, "Gain II": 5.0}
-    corner = next(
-        row for row in project.entries if row.is_corner
-        and row.params == {"Gain I": 0.0, "Gain II": 0.0}
-    )
-    new, adjacent = classify_capture(project, corner, "mute")
-    assert len(adjacent) == 1
-    assert adjacent[0].params == {"Gain I": 0.0, "Gain II": 1.0}
-    assert new.muted_settings == [corner.params]
-
+    corner = next(row for row in project.entries if row.is_corner
+                  and row.params == {"Gain I": 0.0, "Gain II": 0.0})
+    updated, adjacent = classify_capture(project, corner, "mute")
+    assert adjacent == []
+    assert updated.muted_settings == [corner.params]
 
 @pytest.mark.parametrize("classification", ["mute", "avoid"])
 def test_dynamic_replacement_preserves_held_out_counts_and_existing_audio(classification):
@@ -399,38 +337,29 @@ def test_avoiding_a_corner_does_not_infer_mute_or_new_safe_boundaries():
 
 def test_rerecorded_capture_clears_classification_but_retains_new_samples():
     from nam.capture.project import classify_capture
-    from nam.capture.export import build_data_config, mute_anchor_point_targets
+    from nam.capture.export import build_data_config
 
-    knobs = [KnobSpec("Gain I", 0, 10, 1, 5),
-             KnobSpec("Gain II", 0, 10, 1, 5)]
+    knobs = [
+        KnobSpec("Gain I", 0, 10, 1, 5),
+        KnobSpec("Gain II", 0, 10, 1, 5),
+    ]
     project = new_project(knobs, n_train=1, n_validation=0)
     add_corner_captures(project)
     original = next(
-        e for e in project.entries
-        if e.is_corner and e.params == {"Gain I": 0.0, "Gain II": 0.0}
+        row for row in project.entries if row.is_corner
+        and row.params == {"Gain I": 0.0, "Gain II": 0.0}
     )
     classified, added = classify_capture(project, original, "mute")
-    assert not classified.capture_mark_history
-    assert len(added) == 2
-    original_row = next(
-        e for e in classified.entries if e.y_path == original.y_path
-    )
-    assert classified.classification_for_entry(original_row) == "mute"
-    assert original_row not in classified.pending_entries()
-    assert mute_anchor_point_targets(classified) == [original.params]
-
-    original_row.status = "captured"
-    assert original_row not in classified.captured_entries()
-    classified.clear_capture_classification(original_row)
-    assert classified.classification_for_entry(original_row) is None
-    assert original_row in classified.captured_entries()
-    assert mute_anchor_point_targets(classified) == []
-    assert any(row.y_path == added[0].y_path for row in classified.entries)
-    assert any(
-        sample["y_path"] == original.y_path
-        for sample in build_data_config(classified)["train"]
-    )
-
+    assert not added
+    row = next(row for row in classified.entries if row.y_path == original.y_path)
+    assert classified.classification_for_entry(row) == "mute"
+    assert row not in classified.pending_entries()
+    row.status = "captured"
+    classified.clear_capture_classification(row)
+    assert classified.classification_for_entry(row) is None
+    assert row in classified.captured_entries()
+    assert any(capture["y_path"] == original.y_path
+               for capture in build_data_config(classified)["train"])
 
 def test_legacy_undo_history_recovers_classified_rows_when_opened(tmp_path):
     from nam.capture.project import classify_capture, save_project, load_project
@@ -589,56 +518,46 @@ def test_control_rename_preserves_mixed_rule_conditions(workspace):
     assert not rule.excludes({"Gain": 9, "Tone": 7})
 
 
-def test_mute_corner_transition_ignores_other_classified_training_points():
+def test_mute_corner_does_not_replace_other_marked_training_points():
     from nam.capture.project import classify_capture
-
     controls = [
         KnobSpec("Gain I", 0, 10, 1, 5),
         KnobSpec("Gain II", 0, 10, 1, 5),
     ]
     project = new_project(controls, n_train=1, n_validation=0)
     add_corner_captures(project)
-    original = project.entries_for_split("train")[0]
-    original.params = {"Gain I": 1.0, "Gain II": 5.0}
-    with_mute, replacement = classify_capture(project, original, "mute")
-    assert replacement == []
-    corner = next(
-        row for row in with_mute.entries if row.is_corner
-        and row.params == {"Gain I": 0.0, "Gain II": 0.0}
-    )
-    marked, transitions = classify_capture(with_mute, corner, "mute")
-    assert {"Gain I": 1.0, "Gain II": 0.0} in [
-        row.params for row in transitions
-    ]
-    assert marked.muted_settings == [original.params, corner.params]
+    first = project.entries_for_split("train")[0]
+    first.params = {"Gain I": 1.0, "Gain II": 5.0}
+    earlier, replacements = classify_capture(project, first, "mute")
+    assert replacements == []
+    corner = next(row for row in earlier.entries if row.is_corner
+                  and row.params == {"Gain I": 0.0, "Gain II": 0.0})
+    marked, additions = classify_capture(earlier, corner, "mute")
+    assert additions == []
+    assert marked.muted_settings == [first.params, corner.params]
 
 
+def test_joint_mute_rule_retains_valid_points_and_requires_real_corner():
+    from paranam.synthetic_mute import ensure_mute_rule_corners
+    from nam.capture.export import build_hyper_a2_model_config
 
-def test_conditional_mute_rule_covers_only_jointly_muted_gain_region():
-    from nam.capture.export import (
-        build_hyper_a2_model_config, mute_anchor_rule_targets,
-    )
     controls = [
         KnobSpec("Gain I", 0, 10, 1, 5),
         KnobSpec("Gain II", 0, 10, 1, 5),
         KnobSpec("Tone", 0, 10, 1, 5),
     ]
-    rule = PlanRule(
-        controls=("Gain I", "Gain II"), operator="=", value=0,
-        kind="mute",
-    )
+    rule = PlanRule(controls=("Gain I", "Gain II"),
+                    operator="=", value=0, kind="mute")
     project = new_project(
         controls, n_train=12, n_validation=4, seed=9,
         plan_rules=[rule], lhs_method="sobol",
     )
-    assert all(not rule.excludes(e.params) for e in project.entries)
+    ensure_mute_rule_corners(project, [rule])
+    assert any(row.split == "train" and row.is_corner
+               and rule.excludes(row.params) for row in project.entries)
     assert not rule.excludes({"Gain I": 0, "Gain II": 5, "Tone": 0})
     assert not rule.excludes({"Gain I": 5, "Gain II": 0, "Tone": 0})
-    assert mute_anchor_rule_targets(project) == [rule.model_dump(mode="json")]
-    loss = build_hyper_a2_model_config(project)["loss"]["mute_anchor"]
-    assert loss["rule_targets"] == [rule.model_dump(mode="json")]
-    assert loss["targets"] == []
-
+    assert "mute_anchor" not in build_hyper_a2_model_config(project)["loss"]
 
 def test_avoid_rules_remain_backward_compatible_without_explicit_kind():
     old = {"controls": ["Gain", "Tone"], "operator": "<", "value": 2}
@@ -674,7 +593,7 @@ def test_rule_editor_mute_kind_roundtrips_and_rejects_empty_region(qapp):
     reloaded.close()
 
     impossible = PlanRule(
-        controls=("Gain I",), operator="<", value=0, kind="mute"
+        controls=("Gain I",), operator="≤", value=-1, kind="mute"
     )
     with pytest.raises(ValueError, match="no valid setting"):
         validate_plan_rules([controls[0].to_param_spec()], [impossible])
