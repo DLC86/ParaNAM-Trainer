@@ -124,6 +124,11 @@ def job_can_resume(workspace, job):
             != options["snr_weighted_loss_normalization"]
         ):
             return False
+        if options["mute_training_mode"] == "synthetic":
+            if not spec.get("model", {}).get("loss", {}).get("synthetic_mute"):
+                return False
+            if spec.get("learning", {}).get("synthetic_mute_reference_rms", True) != options["synthetic_mute_reference_rms"]:
+                return False
         from nam.capture.export import (
             MUTE_ANCHOR_DEFAULTS,
             mute_anchor_settings,
@@ -133,7 +138,8 @@ def job_can_resume(workspace, job):
             mute_anchor_rule_targets,
         )
 
-        if (mute_anchor_targets(workspace.project) or
+        if options["mute_training_mode"] != "synthetic" and (
+                mute_anchor_targets(workspace.project) or
                 mute_anchor_point_targets(workspace.project) or
                 mute_anchor_rule_targets(workspace.project)):
             saved_mute = spec.get("model", {}).get("loss", {}).get("mute_anchor")
@@ -437,6 +443,7 @@ def make_job(workspace, resume=False, job_directory=None):
             if mute_mode == "synthetic":
                 # No mute regularizer: the synthetic recordings are just data.
                 model["loss"].pop("mute_anchor", None)
+                model["loss"]["synthetic_mute"] = True
             if mute is not None and mute_mode != "synthetic":
                 # Keep pre-beta default Mute Anchor configs byte-compatible.
                 if mute_mode != "anchor":
