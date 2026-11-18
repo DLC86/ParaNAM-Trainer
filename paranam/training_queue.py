@@ -575,10 +575,69 @@ class TrainingQueue:
         entry = self.get(identifier)
         if not entry:
             raise ValueError("Select a training instance.")
-        if entry["state"] in ACTIVE:
-            raise ValueError("Pause or stop this job before changing total epochs.")
         if type(epochs) is not int or not 1 <= epochs <= 1000000:
             raise ValueError("Total epochs must be between 1 and 1000000.")
+        if entry["state"] in ACTIVE:
+            # The worker owns worker.lock throughout training; this live edit
+            # must NOT wait for that lock. A dedicated atomic target file lets
+            # the running Lightning callback adopt the new limit at a batch
+            # boundary, without touching optimizer state or checkpoint files.
+            from .recovery import require_resolved
+
+            with self.lock:
+                data = read_json(self.path, {"version": 1, "entries": []})
+                require_resolved(self.path)
+                active = next(
+                    (item for item in data["entries"] if item["id"] == identifier),
+                    None,
+                )
+                if active is None:
+                    raise ValueError("The selected training job no longer exists.")
+                if active["state"] not in ACTIVE:
+                    # Status changed while the menu was open; use the dormant
+                    # path rather than writing a request to a stopped worker.
+                    entry = active
+                else:
+                    job = Path(active["job"])
+                    require_resolved(job / "spec.json")
+                    require_resolved(job / "progress.json")
+                    spec = read_json(job / "spec.json", {})
+                    progress = training.job_progress(job)
+                    if not spec or not Path(spec.get("project", "")).is_dir():
+                        raise ValueError("The training snapshot is unavailable.")
+                    completed = max(
+                        [int(progress.get("completed_epoch") or 0),
+                         int(progress.get("epoch") or 0)]
+                        + [
+                            int(read_json(job / f"resume-{member}.json", {}).get(
+                                "completed_epoch"
+                            ) or 0)
+                            for member in range(int(spec["members"]))
+                        ]
+                    )
+                    if epochs < completed:
+                        raise ValueError(
+                            f"Total epochs cannot be lower than the {completed} "
+                            "already reached or started."
+                        )
+                    if epochs == int(spec["preferences"]["epochs"]):
+                        return
+                    workspace = Workspace(Path(spec["project"]))
+                    workspace.preferences["epochs"] = epochs
+                    workspace.preferences[
+                        "static_epochs" if active["kind"] == "static"
+                        else "parametric_epochs"
+                    ] = epochs
+                    workspace.save()
+                    spec["preferences"]["epochs"] = epochs
+                    spec["learning"]["trainer"]["max_epochs"] = epochs
+                    spec["fingerprint"] = workspace.fingerprint()
+                    atomic_write_json(job / "spec.json", spec)
+                    # Do not update progress.json here: the worker writes it
+                    # frequently. It will acknowledge the target and refresh
+                    # the visible epochs counter at the next batch boundary.
+                    atomic_write_json(job / "epoch-target.json", {"epochs": epochs})
+                    return
         job = Path(entry["job"])
         spec = read_json(job / "spec.json")
         if not spec or not Path(spec.get("project", "")).is_dir():
