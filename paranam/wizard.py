@@ -3400,6 +3400,13 @@ class WizardWindow(
                 "Tags/Warnings",
             ]
         self._capture_entries = entries
+        # Legacy captures can store params with Linear Volume (or a fixed
+        # switch) appended last. Present the current rig-control order without
+        # changing the stored settings, filenames or recorded WAV paths.
+        control_order = {
+            control.name: index
+            for index, control in enumerate(project.control_specs())
+        }
         knob_ranges = {
             control.name: (control.min, control.max)
             for control in project.control_specs()
@@ -3465,7 +3472,10 @@ class WizardWindow(
                         if isinstance(value, (float, int))
                         else f"{name}={value}"
                     )
-                    for name, value in entry.params.items()
+                    for name, value in sorted(
+                        entry.params.items(),
+                        key=lambda item: control_order.get(item[0], len(control_order)),
+                    )
                 )
                 columns = [
                     "Volume" if entry.split == "gain" else entry.split.title(),
