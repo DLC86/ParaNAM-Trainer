@@ -604,6 +604,26 @@ class SounddeviceRecorder:
                 f"Input channel {input_channel} is out of range for a device with "
                 f"{input_channels} input channels."
             )
+        if monitor_return_enabled:
+            monitors = [
+                channel for channel in (monitor_output_left, monitor_output_right)
+                if channel is not None
+            ]
+            if not monitors:
+                raise AudioDeviceError(
+                    "Select at least one Monitor output in Audio settings to monitor Return."
+                )
+            if any(not 1 <= channel <= output_channels for channel in monitors):
+                raise AudioDeviceError("Monitor output is outside the device's channel range.")
+            reserved = {output_channel}
+            if use_loopback:
+                reserved.add(loopback_output_channel)
+            if len(set(monitors)) != len(monitors) or any(
+                channel in reserved for channel in monitors
+            ):
+                raise AudioDeviceError(
+                    "Monitor outputs must be distinct from Send and loopback outputs."
+                )
         if use_loopback:
             if not 1 <= loopback_output_channel <= output_channels:
                 raise AudioDeviceError(
@@ -644,6 +664,15 @@ class SounddeviceRecorder:
             count = min(frames, len(playback) - position)
             end = position + count
             outgoing[:count] = playback_frame[position:end]
+            if monitor_return_enabled:
+                # CoreAudio/non-ASIO uses this callback, not AsioRecorder.
+                # Monitor the live Return directly on the chosen physical
+                # outputs, never on Send or the clean loopback.
+                returned = incoming[:count, input_channel - 1]
+                if monitor_output_left is not None:
+                    outgoing[:count, monitor_output_left - 1] = returned
+                if monitor_output_right is not None:
+                    outgoing[:count, monitor_output_right - 1] = returned
             recording[position:end] = incoming[:count]
             position = end
             if position == len(playback):
