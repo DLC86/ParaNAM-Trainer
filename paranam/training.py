@@ -82,6 +82,17 @@ def legacy_checkpoint(job, member):
     return result
 
 
+def _matches_legacy_fingerprint(workspace, spec, batch_size=None):
+    from .cadences import legacy_cadence_fingerprint
+
+    saved = spec.get("fingerprint")
+    if not saved:
+        return False
+    return saved == workspace.legacy_knob_fingerprint(spec, batch_size) or (
+        saved == legacy_cadence_fingerprint(workspace, spec, batch_size)
+    )
+
+
 def job_can_resume(workspace, job):
     if not job:
         return False
@@ -212,15 +223,9 @@ def job_can_resume(workspace, job):
                 include_gradient_safety=False,
             )
         )
-    from .cadences import legacy_cadence_fingerprint
-
-    if spec.get("fingerprint") not in fingerprints:
-        alias = legacy_cadence_fingerprint(
-            workspace, spec, spec.get("preferences", {}).get("batch_size")
-        )
-        if alias is not None:
-            fingerprints.append(alias)
-    if spec.get("fingerprint") not in fingerprints:
+    if spec.get("fingerprint") not in fingerprints and not _matches_legacy_fingerprint(
+        workspace, spec, spec.get("preferences", {}).get("batch_size")
+    ):
         # Older jobs did not fingerprint these controls. Resume only if their
         # actual recipe matches the options currently shown in the application.
         options = workspace.training_options()
@@ -1538,11 +1543,9 @@ def run_job(job):
     elapsed_base = float(shared.get("elapsed", 0))
     clock_start = time.monotonic()
     with FileLock(str(workspace.directory / "training" / "worker.lock"), timeout=0):
-        from .cadences import legacy_cadence_fingerprint
-
         if (
             workspace.fingerprint() != spec["fingerprint"]
-            and legacy_cadence_fingerprint(workspace, spec) != spec["fingerprint"]
+            and not _matches_legacy_fingerprint(workspace, spec)
         ):
             raise ValueError("Project changed since this training job was prepared")
         os.chdir(workspace.directory)

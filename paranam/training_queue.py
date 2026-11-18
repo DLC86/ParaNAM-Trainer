@@ -697,7 +697,6 @@ class TrainingQueue:
             if device not in ("auto", "cpu"):
                 raise ValueError("Choose Automatic or CPU for this instance")
             workspace.preferences["device"] = device
-        workspace.save()
         # The job belongs to its own snapshot, never the currently open UI project.
         (workspace.directory / "training").mkdir(exist_ok=True)
         atomic_write_json(
@@ -731,6 +730,8 @@ class TrainingQueue:
             spec["preferences"]["device"] = workspace.preferences["device"]
             spec["fingerprint"] = workspace.fingerprint()
             atomic_write_json(job / "spec.json", spec)
+        # A rejected Resume must not persist edits to the frozen capture plan.
+        workspace.save()
         self.update(identifier, state="queued", pid=None, pid_started=None, error=None)
         progress = training.job_progress(job)
         progress.update(

@@ -660,10 +660,7 @@ def test_queue_rename_context_targets_right_clicked_job(window, workspace, monke
     assert window.selected_job_id == first["id"]
 
 
-@pytest.mark.parametrize("previous_retrain", [False, True])
-def test_retrain_keeps_legacy_volume_limit_and_recorded_dataset(
-    workspace, tmp_path, previous_retrain
-):
+def legacy_volume_job(workspace, tmp_path, previous_retrain):
     from nam.capture.params import KnobSpec
     from nam.capture.plan_rules import PlanRule
 
@@ -695,10 +692,24 @@ def test_retrain_keeps_legacy_volume_limit_and_recorded_dataset(
             settings["_retrain_source_job"] = str(tmp_path / "earlier-job")
     atomic_write_json(project / "capture_project.json", plan)
     atomic_write_json(project / "paranam.json", prefs)
-    atomic_write_json(job / "spec.json", spec)
+    # Calculate the historical fingerprint from the original on-disk controls.
+    from nam.capture.project import load_project
 
+    frozen = Workspace(project)
+    frozen.project = load_project(project)
+    spec["fingerprint"] = frozen.fingerprint()
+    atomic_write_json(job / "spec.json", spec)
+    return queue, entry, spec, plan, [other, limit]
+
+
+@pytest.mark.parametrize("previous_retrain", [False, True])
+def test_retrain_keeps_legacy_volume_limit_and_recorded_dataset(
+    workspace, tmp_path, previous_retrain
+):
+    queue, entry, spec, plan, rules = legacy_volume_job(workspace, tmp_path, previous_retrain)
+    project = Path(spec["project"])
     editable = queue.retrain(entry["id"])
-    assert editable.plan_rules() == editable.project.plan_rules == [other, limit]
+    assert editable.plan_rules() == editable.project.plan_rules == rules
     assert not editable.plan_changed()
     retrained = queue.add(editable)
     result = read_json(Path(retrained["job"]) / "spec.json")
@@ -706,3 +717,45 @@ def test_retrain_keeps_legacy_volume_limit_and_recorded_dataset(
     assert result["learning"]["synthetic_mute_train_indices"] == []
     assert result["learning"]["synthetic_mute_validation_indices"] == []
     assert read_json(project / "capture_project.json") == plan
+
+
+@pytest.mark.parametrize("state", ["original", "migrated", "changed_audio", "changed_rule"])
+def test_resume_legacy_retrained_job(workspace, tmp_path, state):
+    from zipfile import ZipFile
+
+    queue, entry, spec, plan, rules = legacy_volume_job(workspace, tmp_path, True)
+    job = Path(entry["job"])
+    project = Path(spec["project"])
+    if state != "original":
+        # 0.8.1 saved the converted controls before checking the fingerprint.
+        plan["knobs"][0]["avoid_below"] = None
+        plan["plan_rules"] = [r.model_dump(mode="json") for r in rules]
+        if state == "changed_rule":
+            plan["plan_rules"][-1]["value"] = 2.0
+        atomic_write_json(project / "capture_project.json", plan)
+        prefs = read_json(project / "paranam.json")
+        prefs["draft_controls"][0].pop("avoid_below")
+        prefs["draft_plan_rules"] = list(plan["plan_rules"])
+        atomic_write_json(project / "paranam.json", prefs)
+    if state == "changed_audio":
+        path = project / spec["data"]["train"][0]["y_path"]
+        # This test's frozen WAV is hardlinked to the fixture cache.
+        replacement = tmp_path / "changed.wav"
+        replacement.write_bytes(path.read_bytes() + b"changed")
+        replacement.replace(path)
+    with ZipFile(job / "resume-0.ckpt", "w") as archive:
+        archive.writestr("checkpoint", b"existing epoch")
+    before = (job / "resume-0.ckpt").read_bytes()
+    if state.startswith("changed"):
+        with pytest.raises(ValueError, match="does not match"):
+            queue.prepare_resume(entry["id"])
+        assert read_json(job / "spec.json") == spec
+        assert read_json(project / "capture_project.json") == plan
+        assert queue.get(entry["id"])["state"] == "paused"
+    else:
+        queue.prepare_resume(entry["id"])
+        after = read_json(job / "spec.json")
+        assert queue.get(entry["id"])["state"] == "queued"
+        assert after["data"] == spec["data"]
+        assert Workspace(project).fingerprint() == after["fingerprint"]
+    assert (job / "resume-0.ckpt").read_bytes() == before

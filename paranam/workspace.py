@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import time
@@ -213,8 +214,12 @@ class Workspace:
         # Preserve frozen jobs byte-for-byte: their existing fingerprints must
         # still validate. Editable projects and Retrain drafts migrate legacy
         # knob exclusions to Rules without moving any existing recordings.
+        # Retrain provenance survives enqueueing. The new job owns a spec
+        # next to its project; an editable Retrain copy has no spec there.
+        has_job_spec = (self.directory.name == "project"
+                        and (self.directory.parent / "spec.json").is_file())
         frozen = ("_queue_source_project" in stored
-                  and "_retrain_source_job" not in stored)
+                  and ("_retrain_source_job" not in stored or has_job_spec))
         raw_project_controls = [c.model_dump() for c in self.project.knobs]
         raw_drafts = self.preferences.get("draft_controls", raw_project_controls)
         if frozen:
@@ -1043,6 +1048,28 @@ class Workspace:
         if options["deterministic_training"] is True:
             options["cudnn_benchmark"] = False
         return options
+
+    def legacy_knob_fingerprint(self, spec, batch_size=None):
+        """Verify a frozen job whose old Avoid limits were already saved as Rules."""
+        prefs = spec.get("preferences", {})
+        if not spec.get("queue_snapshot") or not prefs.get("_retrain_source_job"):
+            return None
+        saved = prefs.get("draft_controls", [])
+        limits = [rule for control in saved for rule in legacy_avoid_rules(control)]
+        if not limits or self.project.plan_rules != merge_plan_rules(
+            prefs.get("draft_plan_rules", []), limits
+        ):
+            return None
+        current = [c.to_dict() for c in self.project.control_specs()]
+        if current != [migrate_knob_limits(c) for c in saved]:
+            return None
+        # Change only the representation of the equivalent controls for this
+        # comparison. Hash the actual files, windows, settings and metadata.
+        old = copy.copy(self)
+        old.project = self.project.model_copy(update={
+            "knobs": [KnobModel.from_knob_spec(control_from_dict(c)) for c in saved]
+        })
+        return old.fingerprint(batch_size=batch_size)
 
     def fingerprint(
         self,

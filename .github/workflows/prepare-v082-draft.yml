@@ -5,6 +5,9 @@ on:
     branches: ['beta/0.8.2-retrain']
     paths:
       - '.github/workflows/prepare-v082-draft.yml'
+      - 'paranam/**'
+      - 'tests/paranam/**'
+      - 'docs/release-0.8.2.md'
 permissions:
   contents: write
   actions: write
