@@ -226,7 +226,11 @@ def advance_calibration(project, root):
     if state.get("method") != "grid" and state.get("status") != "ready":
         initialize_calibration(project)
         state = project.output_gain_state
-    entries = [e for e in project.entries if e.split == "gain"]
+    entries = [
+        e for e in project.entries
+        if e.split == "gain"
+        and e.user_metadata.get("output_gain", {}).get("phase") != "reference_repeat"
+    ]
     main = [
         e for e in entries
         if e.user_metadata.get("output_gain", {}).get("context") == "max"
@@ -243,8 +247,9 @@ def advance_calibration(project, root):
     repeat_path = reference_entry.user_metadata.get("output_gain", {}).get("repeat_y_path")
     repeat = None
     if repeat_path:
-        repeat_file = Path(root) / repeat_path
-        if repeat_file.is_file():
+        repeat_file = (Path(root) / repeat_path).resolve()
+        capture_root = (Path(root) / "captures").resolve()
+        if repeat_file.is_relative_to(capture_root) and repeat_file.is_file():
             import soundfile as sf
             repeat_audio, repeat_rate = sf.read(
                 repeat_file, dtype="float64", always_2d=True
