@@ -139,6 +139,11 @@ def classify_volume_capture(
         result = compare_waveforms(reference, measured, rate)
     except ValueError as exc:
         return dict(status="inconclusive", reason=str(exc))
+    if repeat_reference is None:
+        return dict(
+            status="inconclusive", residual_db=round(result.residual_db, 2),
+            reason="No automatic repeat reference; recapture the maximum-volume setting",
+        )
     floor_db = result.noise_db
     repeat_db = None
     if repeat_reference is not None:
