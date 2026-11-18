@@ -960,6 +960,16 @@ def reconcile_with_disk(project: CaptureProject, project_dir: _Path) -> list[str
             )
     known = {str(_Path(entry.y_path)) for entry in project.entries}
     known.update(str(_Path(path)) for path in project.unused_recordings)
+    # Automatic second max-volume pass is an auxiliary WAV, never a row
+    # in the capture plan. Treat it as owned by its primary reference.
+    known.update(
+        str(_Path(repeat_path))
+        for entry in project.entries
+        for repeat_path in [
+            entry.user_metadata.get("output_gain", {}).get("repeat_y_path")
+        ]
+        if repeat_path
+    )
     captures_dir = project_dir / CAPTURES_DIRNAME
     if captures_dir.is_dir():
         for wav_path in sorted(captures_dir.glob("*.wav")):
@@ -1017,6 +1027,16 @@ def clear_captures(project: CaptureProject, project_dir: _Path) -> list[str]:
         except OSError as exc:
             notes.append(f"{entry.y_path}: could not delete ({exc}); left as is.")
             continue
+        repeat_path = entry.user_metadata.get("output_gain", {}).get("repeat_y_path")
+        if repeat_path:
+            auxiliary = (project_dir / repeat_path).resolve()
+            root = (project_dir / CAPTURES_DIRNAME).resolve()
+            if auxiliary.is_relative_to(root):
+                try:
+                    auxiliary.unlink(missing_ok=True)
+                except OSError as exc:
+                    notes.append(f"{repeat_path}: could not delete ({exc}).")
+            entry.user_metadata.get("output_gain", {}).pop("repeat_y_path", None)
         entry.status = "pending"
         entry.delay = None
         entry.captured_at = None
