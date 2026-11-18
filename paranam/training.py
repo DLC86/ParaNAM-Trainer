@@ -962,6 +962,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             self.trainer = None
             self.last_log_update = 0
             self.export_request_stamp = None
+            self.epoch_target_stamp = object()
             from .batch_timing import BatchTiming
 
             self.timing = BatchTiming()
@@ -1059,6 +1060,17 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             fit(); fit_loop.max_epochs is what controls its exit condition.
             """
             trainer = trainer or self.trainer
+            target_path = job / "epoch-target.json"
+            try:
+                stat = target_path.stat()
+                stamp = (stat.st_mtime_ns, stat.st_size)
+            except FileNotFoundError:
+                stamp = None
+            # Batch callbacks can run many times per second. Avoid parsing
+            # and validating a JSON document when no epoch edit occurred.
+            if stamp == self.epoch_target_stamp:
+                return int(spec["preferences"]["epochs"])
+            self.epoch_target_stamp = stamp
             previous = int(spec["preferences"]["epochs"])
             target = requested_total_epochs(job, spec)
             if trainer is not None and trainer.fit_loop.max_epochs != target:
