@@ -1241,9 +1241,10 @@ class CaptureSession:
         # honoured is refused now rather than after the user has sat through a capture.
         from .output_gain import volume_control
 
+        volume = volume_control(self.project)
         if (
             entry.split != "gain"
-            and volume_control(self.project) is not None
+            and volume is not None
             and self.project.output_gain_state.get("status") != "ready"
         ):
             raise CaptureSessionError(
@@ -1253,7 +1254,19 @@ class CaptureSession:
         lead = self._alignment_lead()
 
         x, sample_rate = self._input_for_split(entry.split)
-        playback, preamble = build_playback(x, sample_rate)
+        # Two consecutive passes during a single recording. A silent gap
+        # prevents the first pass's tail from contaminating the second.
+        # Only the first pass enters the calibration curve and capture list.
+        volume_reference = (
+            entry.split == "gain" and volume is not None
+            and entry.params.get(volume.name) == volume.max
+        )
+        repeat_gap = sample_rate if volume_reference else 0
+        played_input = (
+            _np.concatenate([x, _np.zeros(repeat_gap, dtype=x.dtype), x])
+            if volume_reference else x
+        )
+        playback, preamble = build_playback(played_input, sample_rate)
         loopback_playback = (
             self._loopback_playback(playback)
             if self.project.audio.loopback_enabled
@@ -1280,9 +1293,14 @@ class CaptureSession:
         if loopback_used:
             lead = self._ensure_alignment_margin(latency, lead)
         delay, shift = self._alignment(latency, loopback_used, lead)
-        y = self._aligned_target(main, preamble, len(x), shift)
+        aligned = self._aligned_target(main, preamble, len(played_input), shift)
+        y = aligned[:len(x)]
+        repeat_y = (
+            aligned[len(x) + repeat_gap:len(x) + repeat_gap + len(x)]
+            if volume_reference else None
+        )
 
-        ending_offset = preamble.n_samples + len(x)
+        ending_offset = preamble.n_samples + len(played_input)
         ending_preamble = _PlayedPreamble.from_playback(
             playback[ending_offset:], preamble.n_samples, sample_rate
         )
@@ -1333,7 +1351,9 @@ class CaptureSession:
                 loopback,
                 sample_rate,
                 preamble_samples=preamble.n_samples,
-                input_samples=len(x),
+                input_samples=len(played_input),
+                playback_override=playback * self._send_gain() if volume_reference else None,
+                loopback_playback_override=loopback_playback if volume_reference else None,
             )
             target = (self.project_dir / entry.y_path).resolve()
             root = self.project_dir.resolve()
@@ -1372,8 +1392,25 @@ class CaptureSession:
             loopback,
             sample_rate,
             preamble_samples=preamble.n_samples,
-            input_samples=len(x),
+            input_samples=len(played_input),
+            playback_override=playback * self._send_gain() if volume_reference else None,
+            loopback_playback_override=loopback_playback if volume_reference else None,
         )
+        if repeat_y is not None:
+            if not _np.isfinite(repeat_y).all():
+                raise CaptureSessionError("Repeated volume reference contains non-finite audio")
+            repeat_peak = float(_np.max(_np.abs(repeat_y)))
+            if repeat_peak >= CLIPPING_THRESHOLD:
+                qa.clipping = True
+                qa.messages.append(
+                    "The automatic second max-volume pass clipped; lower the "
+                    "return level and record this volume position again."
+                )
+            repeat_path = _Path(entry.y_path).with_stem(
+                _Path(entry.y_path).stem + "-repeat"
+            ).as_posix()
+            self._write_wav(self.project_dir / repeat_path, repeat_y, sample_rate)
+            entry.user_metadata.setdefault("output_gain", {})["repeat_y_path"] = repeat_path
         self._write_capture_wav(entry, y, sample_rate)
         if entry.split == "gain" and not verified_silent_volume:
             # Re-recording a previously muted position must invalidate its
@@ -1738,6 +1775,8 @@ class CaptureSession:
         *,
         preamble_samples: int,
         input_samples: int,
+        playback_override: _Optional[_np.ndarray] = None,
+        loopback_playback_override: _Optional[_np.ndarray] = None,
     ) -> None:
         """
         Save the recordings as they came off the interface: the whole stream, blips and
@@ -1758,19 +1797,36 @@ class CaptureSession:
             self._write_wav(loopback_path, loopback, sample_rate)
 
         x_path = self.project.input_for_split(entry.split)
+        playback_name = playback_input_path(
+            self.project_dir, x_path,
+            0.0 if loopback is not None else self.project.capture_level_dbfs,
+        ).name
+        main_playback_name = playback_input_path(
+            self.project_dir, x_path, self.project.capture_level_dbfs,
+        ).name
+        if playback_override is not None:
+            # Standard input playbacks contain only one pass. Preserve the
+            # actual double-length stream for raw timing audit/recovery.
+            stem = _Path(entry.y_path).stem
+            main_playback_name = stem + "-repeat-playback-main.wav"
+            self._write_wav(
+                self.project_dir / _CAPTURES_RAW_DIRNAME / main_playback_name,
+                playback_override, sample_rate,
+            )
+            playback_name = main_playback_name
+            if loopback_playback_override is not None:
+                playback_name = stem + "-repeat-playback-loopback.wav"
+                self._write_wav(
+                    self.project_dir / _CAPTURES_RAW_DIRNAME / playback_name,
+                    loopback_playback_override, sample_rate,
+                )
         update_raw_manifest(
             self.project_dir,
             {
                 "y_path": entry.y_path,
                 "x_path": x_path,
-                "playback": playback_input_path(
-                    self.project_dir,
-                    x_path,
-                    0.0 if loopback is not None else self.project.capture_level_dbfs,
-                ).name,
-                "main_playback": playback_input_path(
-                    self.project_dir, x_path, self.project.capture_level_dbfs
-                ).name,
+                "playback": playback_name,
+                "main_playback": main_playback_name,
                 "capture_level_dbfs": self.project.capture_level_dbfs,
                 "raw": amp_path.name,
                 "raw_loopback": loopback_path.name if loopback is not None else None,
