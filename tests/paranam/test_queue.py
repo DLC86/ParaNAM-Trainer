@@ -658,3 +658,51 @@ def test_queue_rename_context_targets_right_clicked_job(window, workspace, monke
     assert table.item(0, 0).text() == "Renamed from context menu"
     assert table.item(0, 1).text() == first["name"]
     assert window.selected_job_id == first["id"]
+
+
+@pytest.mark.parametrize("previous_retrain", [False, True])
+def test_retrain_keeps_legacy_volume_limit_and_recorded_dataset(
+    workspace, tmp_path, previous_retrain
+):
+    from nam.capture.params import KnobSpec
+    from nam.capture.plan_rules import PlanRule
+
+    volume = KnobSpec("Volume", 0, 10, 1, 5)
+    tone = KnobSpec("Tone", 0, 10, 1, 5)
+    limit = PlanRule(controls=("Volume",), operator="<", value=1, kind="avoid")
+    other = PlanRule(controls=("Tone",), operator=">", value=8, kind="avoid")
+    workspace.draft_controls = [volume.to_dict(), tone.to_dict()]
+    workspace.preferences["draft_plan_rules"] = [
+        r.model_dump(mode="json") for r in (other, limit)
+    ]
+    small_ready(workspace)
+    queue = TrainingQueue(tmp_path / "queue")
+    entry = queue.add(workspace)
+    queue.update(entry["id"], state="paused")
+
+    # Recreate the legacy on-disk representation for these recorded settings.
+    job = Path(entry["job"])
+    spec = read_json(job / "spec.json")
+    project = Path(spec["project"])
+    plan = read_json(project / "capture_project.json")
+    prefs = read_json(project / "paranam.json")
+    plan["knobs"][0].update(avoid_below=1.0, mute_at_min=True)
+    plan["plan_rules"] = [other.model_dump(mode="json")]
+    for settings in (prefs, spec["preferences"]):
+        settings["draft_controls"][0].update(avoid_below=1.0, mute_at_min=True)
+        settings["draft_plan_rules"] = list(plan["plan_rules"])
+        if previous_retrain:
+            settings["_retrain_source_job"] = str(tmp_path / "earlier-job")
+    atomic_write_json(project / "capture_project.json", plan)
+    atomic_write_json(project / "paranam.json", prefs)
+    atomic_write_json(job / "spec.json", spec)
+
+    editable = queue.retrain(entry["id"])
+    assert editable.plan_rules() == editable.project.plan_rules == [other, limit]
+    assert not editable.plan_changed()
+    retrained = queue.add(editable)
+    result = read_json(Path(retrained["job"]) / "spec.json")
+    assert result["data"] == spec["data"]
+    assert result["learning"]["synthetic_mute_train_indices"] == []
+    assert result["learning"]["synthetic_mute_validation_indices"] == []
+    assert read_json(project / "capture_project.json") == plan

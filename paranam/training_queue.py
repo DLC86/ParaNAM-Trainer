@@ -332,7 +332,12 @@ class TrainingQueue:
         workspace.preferences["custom_input"] = source_input
         workspace.preferences["_queue_source_project"] = entry["project"]
         workspace.preferences["_retrain_source_job"] = str(Path(entry["job"]).resolve())
-        workspace.draft_controls = copy.deepcopy(snapshot.draft_controls)
+        # Start the editor from the plan that supplied the frozen recordings.
+        # Old spec preferences may predate migration of knob limits into rules.
+        workspace.draft_controls = [c.to_dict() for c in workspace.project.control_specs()]
+        workspace.preferences["draft_plan_rules"] = [
+            rule.model_dump(mode="json") for rule in workspace.project.plan_rules
+        ]
         workspace.project.user_metadata = copy.deepcopy(snapshot.project.user_metadata)
         if isinstance(effective, dict):
             from .cadences import editable_cadences, stored_schedules
