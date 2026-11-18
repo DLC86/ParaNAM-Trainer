@@ -40,14 +40,22 @@ jobs:
           jq -e '.id == 450665438 and .draft == true and .prerelease == true and .tag_name == "v0.8.3"' current.json
           release_id="$(jq -r .id current.json)"
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="v0.8.3" \
             -f target_commitish="$GITHUB_SHA" \
             -f body="$(cat docs/release-0.8.3.md)" \
             -f name="ParaNAM Trainer 0.8.3" \
             -F draft=true -F prerelease=true > current.json
           jq -e --arg sha "$GITHUB_SHA" \
-            '.id == 450665438 and .draft == true and .target_commitish == $sha' current.json
+            '.id == 450665438 and .draft == true and .target_commitish == $sha and .tag_name == "v0.8.3"' current.json
           test "$release_id" != null
           echo "Draft: https://github.com/$GH_REPO/releases/tag/v0.8.3 (ID $release_id)"
+          # Cancel superseded native installer runs before starting replacements.
+          # This prevents an old commit uploading last over the revised files.
+          for previous_run in $(gh api "repos/$GH_REPO/actions/runs?per_page=80" \
+            --jq '.workflow_runs[] | select(.name == "ParaNAM native installers" and (.status == "queued" or .status == "in_progress")) | .id'); do
+            echo "Cancelling superseded installer run $previous_run"
+            gh api --method POST "repos/$GH_REPO/actions/runs/$previous_run/cancel" || true
+          done
           # Existing installer workflow tests the frozen binaries and uploads
           # all five packages directly to this draft. keep_draft prevents
           # publication even after the final asset verification succeeds.
