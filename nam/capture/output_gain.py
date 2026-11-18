@@ -278,6 +278,18 @@ def advance_calibration(project, root):
     if state.get("screen_decision") != "accepted":
         from .volume_linearity import classify_volume_capture, MAX_RESIDUAL_DB
 
+        # The GUI calls this after every completed gain capture. Reanalyzing
+        # every earlier WAV on every call would be quadratic and block Capture
+        # for long validation signals. Cache by reference and WAV file versions.
+        cache = state.setdefault("linearity_cache", {})
+        def fingerprint(path):
+            stat = path.stat()
+            return (stat.st_size, stat.st_mtime_ns)
+        ref_version = fingerprint(Path(root) / reference_entry.y_path)
+        repeat_version = (
+            fingerprint((Path(root) / repeat_path).resolve())
+            if repeat is not None else None
+        )
         reports = []
         nonlinear = []
         inconclusive = []
@@ -288,12 +300,27 @@ def advance_calibration(project, root):
             if entry.user_metadata.get("output_gain", {}).get("silent_minimum"):
                 reports.append({"volume": position, "status": "verified_silent"})
                 continue
-            measured = _signal(project, root, entry)
-            # Never silently accept a very quiet non-mute as linear. The
-            # waveform classifier returns inconclusive when SNR is insufficient.
-            outcome = classify_volume_capture(
-                reference, measured, project.sample_rate, repeat_reference=repeat
-            )
+            path = Path(root) / entry.y_path
+            version = repr((
+                "waveform-null-v1", MAX_RESIDUAL_DB,
+                reference_entry.y_path, ref_version,
+                repeat_path, repeat_version,
+                entry.y_path, fingerprint(path),
+            ))
+            previous = cache.get(entry.y_path)
+            if isinstance(previous, dict) and previous.get("version") == version:
+                outcome = dict(previous["result"])
+            else:
+                measured = _signal(project, root, entry)
+                # Never silently accept a very quiet non-mute as linear.
+                # The classifier returns inconclusive when SNR is insufficient.
+                outcome = classify_volume_capture(
+                    reference, measured, project.sample_rate, repeat_reference=repeat
+                )
+                cache[entry.y_path] = {
+                    "version": version,
+                    "result": dict(outcome),
+                }
             outcome["volume"] = position
             reports.append(outcome)
             if outcome["status"] == "nonlinear":
