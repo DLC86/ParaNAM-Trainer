@@ -3,7 +3,21 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['.github/workflows/prepare-v081-draft.yml']
+    paths:
+      - '.github/workflows/prepare-v081-draft.yml'
+      - 'paranam/updates.py'
+      - 'paranam/wizard.py'
+      - 'paranam/evaluation.py'
+      - 'paranam/training.py'
+      - 'paranam/training_queue.py'
+      - 'nam/capture/session.py'
+      - 'tests/paranam/test_updates.py'
+      - 'tests/paranam/test_release_081.py'
+      - 'tests/paranam/test_evaluation.py'
+      - 'tests/capture/test_session.py'
+      - 'docs/release-0.8.1.md'
+      - 'paranam/__init__.py'
+      - 'pyproject.toml'
 permissions:
   contents: write
   actions: write

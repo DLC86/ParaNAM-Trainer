@@ -363,3 +363,116 @@ def test_windows_helper_waits_checks_hash_and_uses_exact_install_path(tmp_path):
     assert "Start-Process -FilePath" in script
     assert "-Wait -PassThru" in script
     assert "/NORESTART" in script and "/CLOSEAPPLICATIONS" in script
+
+
+def test_cumulative_notes_include_all_newer_published_versions_in_numeric_order():
+    latest = updates.release_info(published_release("1.0.3"))
+    latest["notes"] = "Latest changes"
+    intermediate = published_release("1.0.2")
+    intermediate["body"] = "**Intermediate changes**"
+    older = published_release("0.9.0")
+    older["body"] = "Older changes"
+    installed = published_release("0.8.1")
+    draft = published_release("1.0.1")
+    draft["draft"] = True
+    prerelease = published_release("1.0.0")
+    prerelease["prerelease"] = True
+    invalid = published_release("0.9.9")
+    invalid["html_url"] = "https://example.com/untrusted"
+    duplicate = published_release("1.0.2")
+    duplicate["body"] = "Duplicate notes should not appear"
+
+    notes = updates.cumulative_release_notes(
+        latest,
+        [installed, older, intermediate, duplicate, draft, prerelease, invalid],
+        installed_version="0.8.1",
+    )
+    assert notes.index("## Version 1.0.3") < notes.index("## Version 1.0.2")
+    assert notes.index("## Version 1.0.2") < notes.index("## Version 0.9.0")
+    for expected in ("Latest changes", "**Intermediate changes**", "Older changes"):
+        assert expected in notes
+    assert "## Version 0.8.1" not in notes
+    assert "## Version 1.0.1" not in notes
+    assert "## Version 1.0.0" not in notes
+    assert "## Version 0.9.9" not in notes
+    assert notes.count("## Version 1.0.2") == 1
+    assert "Duplicate notes" not in notes
+
+
+def test_check_worker_uses_paginated_history_but_only_latest_verified_installer(
+    monkeypatch, qapp
+):
+    newest = published_release("99.2.0")
+    newest["body"] = "Newest notes"
+    earlier = published_release("99.1.0")
+    earlier["body"] = "Earlier notes"
+    previous = published_release("99.0.0")
+    previous["body"] = "First notes"
+    seen = []
+
+    def fake_open(url):
+        seen.append(url)
+        if url == updates.API_URL:
+            payload = newest
+        elif url.endswith("page=1"):
+            payload = [newest, earlier]
+        elif url.endswith("page=2"):
+            payload = [previous]
+        else:
+            raise AssertionError(f"Unexpected URL {url}")
+        return io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(updates, "RELEASES_PER_PAGE", 2)
+    monkeypatch.setattr(updates, "open_url", fake_open)
+    worker = updates.UpdateWorker()
+    reported = []
+    worker.checked.connect(reported.append)
+    worker.run()
+    assert len(reported) == 1
+    info = reported[0]
+    assert info["tag"] == newest["tag_name"]
+    assert info["asset"]["name"] == newest["assets"][0]["name"]
+    assert all(key in info["notes"] for key in ("Newest notes", "Earlier notes", "First notes"))
+    assert len(seen) == 3
+
+
+def test_missing_history_shows_latest_notes_and_clearly_marks_missing_versions(
+    monkeypatch, qapp
+):
+    newest = published_release("99.3.0")
+    newest["body"] = "Most recent release fixes"
+    attempts = []
+
+    def fake_open(url):
+        attempts.append(url)
+        if url == updates.API_URL:
+            return io.BytesIO(json.dumps(newest).encode("utf-8"))
+        raise OSError("GitHub history temporarily unavailable")
+
+    monkeypatch.setattr(updates, "open_url", fake_open)
+    worker = updates.UpdateWorker()
+    reported, failures = [], []
+    worker.checked.connect(reported.append)
+    worker.failed.connect(failures.append)
+    worker.run()
+    assert not failures and len(reported) == 1
+    assert reported[0]["asset"]["name"] == newest["assets"][0]["name"]
+    assert "Most recent release fixes" in reported[0]["notes"]
+    assert "full release history could not be loaded" in reported[0]["notes"]
+    assert attempts == [updates.API_URL, f"{updates.API_RELEASES_URL}?per_page=100&page=1"]
+
+
+def test_update_notes_render_each_version_in_single_scrollable_browser(window, qapp):
+    latest = updates.release_info(published_release("99.5.0"))
+    latest["notes"] = "**Latest**"
+    older = published_release("99.4.0")
+    older["body"] = "*Older*"
+    latest["notes"] = updates.cumulative_release_notes(
+        latest, [older], installed_version="0.8.1"
+    )
+    window._update_checked(latest)
+    text = window._update_notes.toPlainText()
+    assert text.index("Version 99.5.0") < text.index("Version 99.4.0")
+    assert "Latest" in text and "Older" in text
+    assert window._update_notes.verticalScrollBar() is not None
+    window._update_dialog.reject()

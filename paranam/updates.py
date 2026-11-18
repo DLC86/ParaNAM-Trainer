@@ -30,7 +30,11 @@ from . import __version__
 
 REPOSITORY = "DLC86/ParaNAM-Trainer"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+API_RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases/latest"
+RELEASE_HISTORY_URL = f"https://github.com/{REPOSITORY}/releases"
+RELEASES_PER_PAGE = 100
+MAX_HISTORY_PAGES = 20
 
 
 def update_download_root():
@@ -137,6 +141,84 @@ def release_info(document, suffix=None):
     )
 
 
+
+def cumulative_release_notes(latest, documents, installed_version=None, *, complete=True):
+    """Combine stable release notes newer than the installed version.
+
+    Only the independently verified /releases/latest response may determine
+    the target installer. History entries are used solely to display notes.
+    """
+    installed = version_number(installed_version or __version__)
+    newest = version_number(latest["version"])
+    versions = {newest: (latest["version"], latest["notes"])}
+
+    for document in documents:
+        if not isinstance(document, dict) or document.get("draft") or document.get("prerelease"):
+            continue
+        tag = document.get("tag_name")
+        if not isinstance(tag, str):
+            continue
+        try:
+            number = version_number(tag)
+        except ValueError:
+            continue
+        if not installed < number < newest:
+            continue
+        expected = (
+            f"https://github.com/{REPOSITORY}/releases/tag/"
+            f"{urllib.parse.quote(tag, safe='')}"
+        )
+        if document.get("html_url") != expected:
+            continue
+        # A version must not occur twice when GitHub contains duplicate tags.
+        versions.setdefault(
+            number,
+            (".".join(map(str, number)), str(document.get("body") or "")[:12000]),
+        )
+
+    sections = [
+        f"## Version {version}\n\n{notes or '_No release notes provided._'}"
+        for number, (version, notes) in sorted(versions.items(), reverse=True)
+        if number > installed
+    ]
+    if not complete:
+        sections.append(
+            f"*The full release history could not be loaded. "
+            f"[View all releases on GitHub]({RELEASE_HISTORY_URL}).*"
+        )
+    return "\n\n---\n\n".join(sections)
+
+
+def fetch_cumulative_release_notes(latest, cancelled=None):
+    """Fetch published release history on the updater worker, never on the GUI.
+
+    Missing or malformed history leaves the latest release installable and
+    makes the incomplete changelog clear to the user.
+    """
+    documents = []
+    complete = True
+    for page in range(1, MAX_HISTORY_PAGES + 1):
+        if cancelled is not None and cancelled.is_set():
+            break
+        url = f"{API_RELEASES_URL}?per_page={RELEASES_PER_PAGE}&page={page}"
+        try:
+            with open_url(url) as response:
+                payload = response.read(4_000_001)
+            if len(payload) > 4_000_000:
+                raise ValueError("Release history response is too large")
+            releases = json.loads(payload)
+            if not isinstance(releases, list):
+                raise ValueError("Invalid GitHub release history")
+        except (OSError, ValueError, TypeError):
+            complete = False
+            break
+        documents.extend(releases)
+        if len(releases) < RELEASES_PER_PAGE:
+            break
+    else:
+        complete = False
+    return cumulative_release_notes(latest, documents, complete=complete)
+
 class GithubRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, new_url):
         parsed = urllib.parse.urlsplit(new_url)
@@ -157,7 +239,7 @@ def open_url(url):
             "User-Agent": f"ParaNAM-Trainer/{__version__}",
             "Accept": (
                 "application/vnd.github+json"
-                if url == API_URL
+                if url == API_URL or url.startswith(API_RELEASES_URL + "?")
                 else "application/octet-stream"
             ),
         },
@@ -188,6 +270,8 @@ class UpdateWorker(QThread):
                 if len(payload) > 2_000_000:
                     raise ValueError("Release metadata is too large")
                 info = release_info(json.loads(payload))
+                if version_number(info["version"]) > version_number(__version__):
+                    info["notes"] = fetch_cumulative_release_notes(info, self.cancelled)
                 if not self.cancelled.is_set():
                     self.checked.emit(info)
                 return
@@ -360,6 +444,7 @@ class UpdateActions:
         layout.addWidget(text)
         notes = QTextBrowser()
         notes.setOpenExternalLinks(True)
+        notes.setToolTip("Changes in every published release since the installed version")
         # QTextBrowser uses Qt's GitHub-flavored Markdown renderer: headings,
         # emphasis, lists, links, code blocks and tables remain formatted.
         notes.setMarkdown(self.update_info["notes"])
