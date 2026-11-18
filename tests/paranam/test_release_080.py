@@ -110,13 +110,19 @@ def test_completed_job_epoch_extension_keeps_checkpoints_and_resumes(
     assert (job / "resume-0.ckpt").read_bytes() == before
 
 
-def test_queue_epoch_change_rejects_live_worker(workspace, tmp_path):
+def test_queue_epoch_change_live_worker_preserves_progress(workspace, tmp_path):
+    # Live edits are now supported, and the running worker is the sole writer
+    # of its progress.json and checkpoint state.
     small_ready(workspace)
     queue = TrainingQueue(tmp_path / "queue")
     entry = queue.add(workspace)
+    job = Path(entry["job"])
     queue.update(entry["id"], state="running")
-    with pytest.raises(ValueError, match="Pause or stop"):
-        queue.set_total_epochs(entry["id"], 20)
+    before = read_json(job / "progress.json")
+    queue.set_total_epochs(entry["id"], 20)
+    assert read_json(job / "epoch-target.json") == {"epochs": 20}
+    assert read_json(job / "progress.json") == before
+    assert read_json(job / "spec.json")["preferences"]["epochs"] == 20
 
 
 def test_installer_frozen_queue_retains_snr_metadata(workspace, tmp_path):
