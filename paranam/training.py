@@ -1758,8 +1758,23 @@ def run_job(job):
                         atomic_write_json(exported, model_dict)
                 if member not in completed:
                     completed.append(member)
+                next_member = member + 1
+                # Never display 0 completed epochs when an existing job's
+                # target is extended. Show the next member's real checkpoint
+                # progress, or the just-finished epoch for the final member.
+                display_member = (
+                    next_member if next_member < spec["members"] else member
+                )
+                display_epochs = int(
+                    read_json(job / f"resume-{display_member}.json", {}).get(
+                        "completed_epoch"
+                    ) or 0
+                )
                 shared.update(
-                    completed_members=list(completed), member=member + 1, epoch=0
+                    completed_members=list(completed),
+                    member=next_member,
+                    epoch=display_epochs,
+                    completed_epoch=display_epochs,
                 )
                 atomic_write_json(job / "progress.json", shared)
                 member += 1
