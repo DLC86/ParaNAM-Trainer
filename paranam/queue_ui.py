@@ -120,9 +120,9 @@ class QueueActions:
         menu = QMenu(table)
         rename = menu.addAction("Rename…")
         change = menu.addAction("Change total epochs…")
-        change.setEnabled(entry["state"] not in {
-            "starting", "running", "scoring", "pausing", "stopping"
-        })
+        # The live worker adopts new epoch targets at batch boundaries.
+        # Keep the action available for running and starting jobs too.
+        change.setEnabled(True)
         selected = menu.exec(table.viewport().mapToGlobal(point))
         if selected == rename:
             self.rename_queue_job(entry_id)
@@ -169,7 +169,11 @@ class QueueActions:
         for member in range(int(spec["members"])):
             done = read_json(job / f"resume-{member}.json", {})
             completed = max(completed, int(done.get("completed_epoch") or 0))
-        if entry["state"] == "completed":
+        if entry["state"] in {
+            "completed", "starting", "running", "scoring", "pausing", "stopping"
+        }:
+            # During an epoch, the worker has already started using its
+            # optimizer state. Do not offer a target below that epoch.
             completed = max(completed, int(progress.get("epoch") or 0))
         value, accepted = QInputDialog.getInt(
             self, "Change total epochs",
