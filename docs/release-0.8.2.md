@@ -13,3 +13,9 @@ The 0.20 dB peak/RMS-attenuation difference warning has been replaced by a gain-
 The maximum-volume calibration point automatically plays the validation signal **twice in one continuous capture**, separated by a short silent gap. The second pass is stored as an internal auxiliary WAV for the repeatability estimate. It does not create another Plan/Capture entry and requires no manual action. The ordinary volume level sweep and exported RMS/PCHIP attenuation curve are unchanged.
 
 For previously recorded maximum-volume references that do not contain an automatic repeat pass, the waveform check is inconclusive until that reference is recaptured. Dismissing a warning still permits completing calibration at the user's discretion.
+
+## Capture control order and existing WAV compatibility
+
+Train, Validation, Corner and Linear Volume calibration captures now use the rig's declared control order both in generated WAV filenames and in the Capture table's **Control settings** column. Fixed controls such as Linear Volume are no longer moved to the end merely because the sampling core processes them separately.
+
+Existing projects do not rename any WAVs. The Capture table displays their controls in the correct order even if the saved parameter dictionary was ordered differently. When a compatible plan is regenerated, recorded captures are matched by split and control name/value pairs rather than filename formatting, so old WAVs with the former suffix order are reused without re-recording.
