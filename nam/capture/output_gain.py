@@ -289,13 +289,8 @@ def advance_calibration(project, root):
                 reports.append({"volume": position, "status": "verified_silent"})
                 continue
             measured = _signal(project, root, entry)
-            peak, rms = _dbfs(measured)
-            # All-zero recordings are not a meaningful null test. The real
-            # recording session can independently verify a muted endpoint.
-            if peak < -100 or rms < -100:
-                reports.append({"volume": position, "status": "inconclusive",
-                                "reason": "Capture is below -100 dBFS"})
-                continue
+            # Never silently accept a very quiet non-mute as linear. The
+            # waveform classifier returns inconclusive when SNR is insufficient.
             outcome = classify_volume_capture(
                 reference, measured, project.sample_rate, repeat_reference=repeat
             )
