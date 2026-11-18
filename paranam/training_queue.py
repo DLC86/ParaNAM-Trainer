@@ -676,6 +676,9 @@ class TrainingQueue:
                 spec["learning"]["trainer"]["max_epochs"] = epochs
                 spec["fingerprint"] = workspace.fingerprint()
                 atomic_write_json(job / "spec.json", spec)
+                # Replace any live-worker override as well. Otherwise an
+                # earlier target could take precedence after pause/resume.
+                atomic_write_json(job / "epoch-target.json", {"epochs": epochs})
                 progress["epochs"] = epochs
                 if epochs > previous:
                     # Every member needs the extra epochs, including members
