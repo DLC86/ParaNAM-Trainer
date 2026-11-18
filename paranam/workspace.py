@@ -624,7 +624,20 @@ class Workspace:
                 }
 
         def key(entry, context):
-            return (tuple(context), entry.split, entry.capture_id, tuple(sorted(entry.params.items())))
+            # Linear Volume now records two takes at identical maximum-knob
+            # settings. Distinguish the repeat reference from the primary take
+            # when reusing recordings across plan regeneration; otherwise one
+            # can silently overwrite the other in the reuse lookup.
+            gain_role = (
+                "reference_repeat"
+                if entry.split == "gain"
+                and entry.user_metadata.get("output_gain", {}).get("phase") == "reference_repeat"
+                else "primary"
+            )
+            return (
+                tuple(context), entry.split, entry.capture_id,
+                tuple(sorted(entry.params.items())), gain_role,
+            )
 
         available = {}
         for path, record in pool.items():
