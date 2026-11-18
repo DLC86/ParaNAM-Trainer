@@ -255,6 +255,7 @@ class ControlScene(QWidget):
         self.blink_timer = QTimer(self)
         self.blink_timer.setInterval(40)
         self.blink_timer.timeout.connect(self.update)
+        self.show_knob_range_labels = False  # Capture omits tiny min/max labels.
         self.setMinimumHeight(180)
 
     def set_controls(self, controls, values):
@@ -315,7 +316,7 @@ class ControlScene(QWidget):
         """
         area = QRectF(x + 10, y + 134, width - 20, 29)
         current_font = QFont("Inter", 15, QFont.Weight.Bold)
-        previous_font = QFont("Inter", 10)
+        previous_font = QFont("Inter", 10, QFont.Weight.Bold)
         current_metrics = QFontMetrics(current_font)
         previous_metrics = QFontMetrics(previous_font)
         gap = 6
@@ -365,8 +366,8 @@ class ControlScene(QWidget):
             self._control_value_layout(value, old, x, y, width)
         )
         if previous_text:
-            painter.setFont(QFont("Inter", 10))
-            painter.setPen(QColor("#bcbcbc"))
+            painter.setFont(QFont("Inter", 10, QFont.Weight.Bold))
+            painter.setPen(QColor("#b0b0b0"))
             painter.drawText(
                 previous_rect,
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -525,14 +526,15 @@ class ControlScene(QWidget):
                                 white, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
                             ))
                             painter.drawArc(ring, start_angle, span_angle)
-                painter.setFont(QFont("Inter", 8))
-                painter.setPen(QColor(MUTED))
-                for side, limit in ((-1, control.min), (1, control.max)):
-                    painter.drawText(
-                        QRectF(center.x() + side * 37 - 22, center.y() + 30, 44, 15),
-                        Qt.AlignmentFlag.AlignCenter,
-                        format_knob_value(limit, control.min, control.max),
-                    )
+                if self.show_knob_range_labels:
+                    painter.setFont(QFont("Inter", 8))
+                    painter.setPen(QColor(MUTED))
+                    for side, limit in ((-1, control.min), (1, control.max)):
+                        painter.drawText(
+                            QRectF(center.x() + side * 37 - 22, center.y() + 30, 44, 15),
+                            Qt.AlignmentFlag.AlignCenter,
+                            format_knob_value(limit, control.min, control.max),
+                        )
                 painter.setBrush(QColor("#2e2e2e"))
                 painter.setPen(QPen(QColor("#656565"), 1))
                 painter.drawEllipse(center, 30, 30)
@@ -567,6 +569,7 @@ class PlanControlScene(ControlScene):
     def __init__(self, parent=None):
         super().__init__()
         self.setParent(parent)
+        self.show_knob_range_labels = True  # Plan retains min/max labels.
         self.controls = []
         self.current = -1
         self._drag_index = None
