@@ -110,36 +110,14 @@ def initialize_calibration(project):
         entry for entry in project.entries
         if entry.split != "gain"
         or (
-            entry.user_metadata.get("output_gain", {}).get("context") == "max"
+            entry.user_metadata.get("output_gain", {}).get("phase") != "reference_repeat"
+            and entry.user_metadata.get("output_gain", {}).get("context") == "max"
             and entry.params.get(control.name) in positions
             and all(entry.params.get(name) == value for name, value in context.items()
                     if name != control.name)
         )
     ]
     _append(project, positions, context, "grid")
-    # A second capture at maximum volume establishes the real repeatability
-    # floor for the normalized waveform null test. It is never a spline knot.
-    if not any(
-        e.split == "gain"
-        and e.user_metadata.get("output_gain", {}).get("phase") == "reference_repeat"
-        for e in project.entries
-    ):
-        reference = next(
-            e for e in project.entries
-            if e.split == "gain"
-            and e.params[control.name] == control.max
-        )
-        project.entries.insert(
-            next((i for i, e in enumerate(project.entries) if e.split != "gain"),
-                 len(project.entries)),
-            CaptureEntryModel(
-                index=max(e.index for e in project.entries) + 1,
-                split="gain",
-                params=dict(reference.params),
-                y_path="captures/gain_reference_repeat.wav",
-                user_metadata={"output_gain": {"phase": "reference_repeat", "context": "max"}},
-            ),
-        )
     gain_entries = sorted(
         (entry for entry in project.entries if entry.split == "gain"),
         key=lambda entry: float(entry.params[control.name]),
@@ -254,21 +232,29 @@ def advance_calibration(project, root):
         if e.user_metadata.get("output_gain", {}).get("context") == "max"
         and e.user_metadata.get("output_gain", {}).get("phase") != "reference_repeat"
     ]
-    repeat_entry = next(
-        (e for e in entries
-         if e.user_metadata.get("output_gain", {}).get("phase") == "reference_repeat"),
-        None,
-    )
     reference_entry = next((e for e in main if e.params[control.name] == control.max), None)
     if reference_entry is None or len(main) < 2:
         raise ValueError("Linear Volume requires its maximum and at least one lower measurement")
     if reference_entry.status != "captured":
         return 0
-    # In a newly generated plan both max-volume takes are recorded first.
-    # Do not judge any other take without its repeatability reference.
-    if repeat_entry is not None and repeat_entry.status != "captured":
-        return 0
+    # The max-volume capture contains two consecutive passes recorded in one
+    # operation. The second WAV is an auxiliary file, not a planned capture.
     reference = _signal(project, root, reference_entry)
+    repeat_path = reference_entry.user_metadata.get("output_gain", {}).get("repeat_y_path")
+    repeat = None
+    if repeat_path:
+        repeat_file = Path(root) / repeat_path
+        if repeat_file.is_file():
+            import soundfile as sf
+            repeat_audio, repeat_rate = sf.read(
+                repeat_file, dtype="float64", always_2d=True
+            )
+            if (
+                repeat_rate == project.sample_rate
+                and repeat_audio.shape == (len(reference), 1)
+                and np.isfinite(repeat_audio).all()
+            ):
+                repeat = repeat_audio[:, 0]
     ref_peak, ref_rms = _dbfs(reference)
     if ref_peak <= -220 or ref_rms <= -220:
         raise ValueError(
@@ -287,7 +273,6 @@ def advance_calibration(project, root):
     if state.get("screen_decision") != "accepted":
         from .volume_linearity import classify_volume_capture, MAX_RESIDUAL_DB
 
-        repeat = _signal(project, root, repeat_entry) if repeat_entry is not None else None
         reports = []
         nonlinear = []
         inconclusive = []
