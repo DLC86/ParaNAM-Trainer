@@ -1615,10 +1615,18 @@ def run_job(job):
                     spec["original_project"], workspace
                 )
                 atomic_write_json(job / "spec.json", spec)
-            completed = shared.get("completed_members", [])
-            for member in range(spec["members"]):
-                if member in completed:
+            completed = list(shared.get("completed_members", []))
+            member = 0
+            while member < spec["members"]:
+                target = requested_total_epochs(job, spec)
+                saved = read_json(job / f"resume-{member}.json", {})
+                saved_epochs = int(saved.get("completed_epoch") or 0)
+                if member in completed and saved_epochs >= target:
+                    member += 1
                     continue
+                if member in completed:
+                    completed.remove(member)
+                    shared["completed_members"] = list(completed)
                 pl.seed_everything(938 + spec["round"] * 101 + member, workers=True)
                 output = job / f"member-{member}"
                 output.mkdir(exist_ok=True)
@@ -1666,6 +1674,14 @@ def run_job(job):
                         epoch_checkpoint(progress, job),
                     ],
                 )
+                # A live epoch increase may arrive after Lightning decided
+                # its old fit loop was finished. Continue the same member
+                # from its existing durable checkpoint rather than marking it
+                # complete at the obsolete target.
+                target = requested_total_epochs(job, spec)
+                saved = read_json(job / f"resume-{member}.json", {})
+                if int(saved.get("completed_epoch") or 0) < target:
+                    continue
                 if selector is not None:
                     chosen = selector.selected_checkpoints()
                     if all(chosen.values()):
@@ -1716,11 +1732,26 @@ def run_job(job):
                             ),
                         )
                         atomic_write_json(exported, model_dict)
-                completed.append(member)
+                if member not in completed:
+                    completed.append(member)
                 shared.update(
                     completed_members=list(completed), member=member + 1, epoch=0
                 )
                 atomic_write_json(job / "progress.json", shared)
+                member += 1
+                if member == spec["members"]:
+                    # The target can increase while a later ensemble member is
+                    # training. Revisit earlier members that only reached the
+                    # old limit, preserving each member's own optimizer state.
+                    target = requested_total_epochs(job, spec)
+                    pending = [
+                        index for index in range(spec["members"])
+                        if int(read_json(job / f"resume-{index}.json", {}).get(
+                            "completed_epoch"
+                        ) or 0) < target
+                    ]
+                    if pending:
+                        member = pending[0]
             # Select the member with the lowest checkpoint ESR. All outputs are nested A2.
             quality = []
             for member in completed:
@@ -1805,7 +1836,7 @@ def run_job(job):
                 additions = _propose_captures(workspace, job, spec, shared)
             shared.update(
                 status="needs_captures" if additions else "completed",
-                epoch=spec["preferences"]["epochs"],
+                epoch=requested_total_epochs(job, spec),
                 eta=0,
                 message=(
                     f"{len(additions)} new captures suggested"
