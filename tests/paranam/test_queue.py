@@ -518,13 +518,44 @@ def test_completed_training_can_extend_epoch_target_without_new_instance(workspa
     assert read_json(job / "spec.json")["preferences"]["epochs"] == 2
 
 
-def test_active_training_cannot_change_epoch_target(workspace, tmp_path):
-    small_ready(workspace)
+@pytest.mark.parametrize("kind", ["static", "parametric"])
+def test_active_training_can_change_epoch_target_without_resetting_progress(
+    workspace, tmp_path, kind,
+):
+    small_ready(workspace, kind)
     queue = TrainingQueue(tmp_path / "queue")
     entry = queue.add(workspace)
+    job = Path(entry["job"])
     queue.update(entry["id"], state="running")
-    with pytest.raises(ValueError, match="Pause or stop"):
-        queue.set_total_epochs(entry["id"], 8)
+    atomic_write_json(
+        job / "progress.json",
+        {"status": "running", "epoch": 2, "completed_epoch": 1,
+         "completed_members": [], "global_step": 42, "epochs": 2},
+    )
+    with pytest.raises(ValueError, match="already reached or started"):
+        queue.set_total_epochs(entry["id"], 1)
+    queue.set_total_epochs(entry["id"], 8)
+    assert read_json(job / "spec.json")["preferences"]["epochs"] == 8
+    assert read_json(job / "spec.json")["learning"]["trainer"]["max_epochs"] == 8
+    assert read_json(job / "epoch-target.json") == {"epochs": 8}
+    # The active worker owns progress.json. Queue edits must not rewrite or
+    # reset its current epoch, optimizer global step, or completed-members data.
+    progress = read_json(job / "progress.json")
+    assert progress["completed_epoch"] == 1
+    assert progress["epoch"] == 2
+    assert progress["global_step"] == 42
+    assert progress["epochs"] == 2
+    assert queue.get(entry["id"])["state"] == "running"
+    assert len(queue.entries()) == 1
+    updated = Workspace(Path(read_json(job / "spec.json")["project"]))
+    assert updated.preferences["epochs"] == 8
+    assert updated.preferences[
+        "static_epochs" if kind == "static" else "parametric_epochs"
+    ] == 8
+    # Reducing an active target is also supported as long as the current
+    # epoch and all completed checkpoints remain within the target.
+    queue.set_total_epochs(entry["id"], 2)
+    assert read_json(job / "epoch-target.json") == {"epochs": 2}
 
 
 def test_queue_job_rename_changes_model_metadata_not_just_label(workspace, tmp_path):
