@@ -139,18 +139,27 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         build_progress_callback,
         read_json,
         annotate_validation_metadata,
+        requested_total_epochs,
     )
 
-    completed = shared.get("completed_members", [])
-    exports = shared.get("exports", [])
+    completed = list(shared.get("completed_members", []))
+    exports = list(shared.get("exports", []))
     metadata = dict(workspace.project.user_metadata)
     for key in ("input_level_dbu", "output_level_dbu"):
         value = getattr(workspace.project, key)
         if value is not None:
             metadata[key] = value
-    for member, capture in enumerate(spec["static_captures"]):
-        if member in completed:
+    member = 0
+    while member < len(spec["static_captures"]):
+        target = requested_total_epochs(job, spec)
+        saved = read_json(job / f"resume-{member}.json", {})
+        if member in completed and int(saved.get("completed_epoch") or 0) >= target:
+            member += 1
             continue
+        if member in completed:
+            completed.remove(member)
+            shared["completed_members"] = list(completed)
+        capture = spec["static_captures"][member]
         pl.seed_everything(938 + member, workers=True)
         paths = {
             e.y_path for e in workspace.project.entries if e.capture_id == capture["id"]
@@ -194,6 +203,12 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             job, spec, member, shared, evaluation_data=data
         )
         train(data, spec["model"], learning, output, callback)
+        # A changed limit may land after the old last epoch. Continue from
+        # this member's saved optimizer checkpoint before exporting.
+        target = requested_total_epochs(job, spec)
+        saved = read_json(job / f"resume-{member}.json", {})
+        if int(saved.get("completed_epoch") or 0) < target:
+            continue
         model = read_json(output / "model.nam")
         # A model rename may happen from the queue while this member trains.
         captures_now = read_json(job / "spec.json", {}).get("static_captures") or []
@@ -221,11 +236,17 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             else workspace.directory / "models" / job.name
         )
         target = export_root / f"{safe_name}.nam"
-        if str(target) in exports:
+        if str(target) in exports and (
+            member >= len(exports) or exports[member] != str(target)
+        ):
             target = export_root / capture["id"] / f"{safe_name}.nam"
         atomic_write_json(target, model)
-        exports.append(str(target))
-        completed.append(member)
+        if member < len(exports):
+            exports[member] = str(target)
+        else:
+            exports.append(str(target))
+        if member not in completed:
+            completed.append(member)
         shared.update(
             completed_members=list(completed),
             exports=list(exports),
@@ -234,10 +255,21 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             elapsed=elapsed_base + time.monotonic() - clock_start,
         )
         atomic_write_json(job / "progress.json", shared)
+        member += 1
+        if member == spec["members"]:
+            target_epochs = requested_total_epochs(job, spec)
+            pending = [
+                index for index in range(spec["members"])
+                if int(read_json(job / f"resume-{index}.json", {}).get(
+                    "completed_epoch"
+                ) or 0) < target_epochs
+            ]
+            if pending:
+                member = pending[0]
     shared.update(
         status="completed",
         member=max(0, spec["members"] - 1),
-        epoch=spec["preferences"]["epochs"],
+        epoch=requested_total_epochs(job, spec),
         eta=0,
         message=f"{len(exports)} static A2 models are ready",
         elapsed=elapsed_base + time.monotonic() - clock_start,
