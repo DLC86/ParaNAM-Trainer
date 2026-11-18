@@ -32,6 +32,12 @@ def _db(ratio: float) -> float:
     return 20.0 * math.log10(ratio)
 
 
+def _report_db(value: float) -> float:
+    # Exact digital silence/null gives -inf internally, but the capture
+    # project is interoperable JSON and must never persist Infinity tokens.
+    return round(value, 2) if math.isfinite(value) else -240.0
+
+
 def _aligned(reference: np.ndarray, measured: np.ndarray, rate: int):
     """Remove small integer/subsample capture offsets, never resample the target.
 
@@ -141,7 +147,7 @@ def classify_volume_capture(
         return dict(status="inconclusive", reason=str(exc))
     if repeat_reference is None:
         return dict(
-            status="inconclusive", residual_db=round(result.residual_db, 2),
+            status="inconclusive", residual_db=_report_db(result.residual_db),
             reason="No automatic repeat reference; recapture the maximum-volume setting",
         )
     floor_db = result.noise_db
@@ -160,8 +166,8 @@ def classify_volume_capture(
     report = dict(
         residual_db=round(result.residual_db, 2),
         gain=round(result.gain, 8),
-        repeat_db=round(repeat_db, 2) if repeat_db is not None else None,
-        noise_floor_db=round(floor_db, 2) if floor_db is not None else None,
+        repeat_db=_report_db(repeat_db) if repeat_db is not None else None,
+        noise_floor_db=_report_db(floor_db) if floor_db is not None else None,
     )
     if floor_db is None:
         return {**report, "status": "inconclusive",
