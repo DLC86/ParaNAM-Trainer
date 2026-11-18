@@ -44,6 +44,21 @@ def command(job, action):
     atomic_write_json(Path(job) / "command.json", {"action": action})
 
 
+def requested_total_epochs(job, spec):
+    """Read a durable live epoch target without changing training state.
+
+    Old instances have no target file. The spec remains the fallback and the
+    target is mirrored there by the queue for restart/resume compatibility.
+    """
+    request = read_json(Path(job) / "epoch-target.json", {})
+    target = request.get("epochs") if isinstance(request, dict) else None
+    if type(target) is not int or not 1 <= target <= 1000000:
+        target = int(spec["preferences"]["epochs"])
+    spec["preferences"]["epochs"] = target
+    spec["learning"]["trainer"]["max_epochs"] = target
+    return target
+
+
 _legacy_checkpoint_cache = {}
 
 
@@ -1037,7 +1052,29 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             atomic_write_json(job / f"resume-{member}.json", info)
             self.write(checkpoint=str(target), resume_available=True, **info)
 
+        def sync_total_epochs(self, trainer=None):
+            """Apply live queue changes to Lightning's actual FitLoop limit.
+
+            Updating spec.json alone would not affect a Trainer already inside
+            fit(); fit_loop.max_epochs is what controls its exit condition.
+            """
+            trainer = trainer or self.trainer
+            previous = int(spec["preferences"]["epochs"])
+            target = requested_total_epochs(job, spec)
+            if trainer is not None and trainer.fit_loop.max_epochs != target:
+                trainer.fit_loop.max_epochs = target
+            if target != previous:
+                shared["epochs"] = target
+                if trainer is not None:
+                    self.write(
+                        epochs=target,
+                        eta=self.batch_estimate(trainer),
+                        message=f"Total epochs changed to {target}; training {label}",
+                    )
+            return target
+
         def check_action(self):
+            self.sync_total_epochs()
             action = self.action()
             if action == "pause":
                 print(flush=True)
@@ -1159,6 +1196,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             from .checkpoints import install_durable_checkpoint_io
 
             install_durable_checkpoint_io(trainer)
+            self.sync_total_epochs(trainer)
 
         def on_train_start(self, trainer, module):
             import torch
