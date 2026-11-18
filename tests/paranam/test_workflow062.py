@@ -266,6 +266,45 @@ def test_capture_auto_advance_resets_progress_and_blinks_only_changes(
     assert window.scene.blink_names == changed
 
 
+def test_capture_transition_values_and_arc_alpha_reset_on_rig_confirmation(
+    window, workspace,
+):
+    from paranam.widgets import (
+        ARC_BLINK_MIN_OPACITY, ARC_BLINK_MAX_OPACITY, arc_blink_alpha,
+    )
+
+    assert ARC_BLINK_MIN_OPACITY == 0.20
+    assert ARC_BLINK_MAX_OPACITY == 0.70
+    assert arc_blink_alpha(0) == round(255 * 0.20)
+    assert arc_blink_alpha(1) == round(255 * 0.70)
+    assert arc_blink_alpha(0.5) == round(255 * 0.45)
+    window._attach(workspace)
+    control = workspace.project.control_specs()[0]
+    old = control.min
+    new = control.max
+    scene = window.scene
+    scene.set_controls([control], {control.name: new})
+    scene.start_blink([control.name], {control.name: old})
+    assert scene._previous_value_label(control, new) is not None
+    assert scene.blink_timer.isActive()
+    window.rig_ready.setChecked(True)
+    assert not scene.blink_timer.isActive()
+    assert scene._previous_value_label(control, new) is None
+    assert not scene.blink_names
+
+
+def test_switch_transition_displays_previous_option_until_confirmed(qapp):
+    from paranam.widgets import ControlScene
+
+    control = SwitchSpec("Channel", ("Clean", "Crunch", "Lead"))
+    scene = ControlScene()
+    scene.set_controls([control], {"Channel": "Lead"})
+    scene.start_blink({"Channel"}, {"Channel": "Clean"})
+    assert scene._previous_value_label(control, "Lead") == "Clean"
+    scene.stop_blink()
+    assert scene._previous_value_label(control, "Lead") is None
+
+
 def test_all_queue_states_can_be_reordered_without_changing_active_job(
     workspace, tmp_path
 ):
