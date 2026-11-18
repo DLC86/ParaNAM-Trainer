@@ -33,25 +33,19 @@ jobs:
             echo "::error::Main moved since this build request. Refusing stale release source."
             exit 1
           fi
-          # Reuse an existing draft only when it belongs to this exact
-          # main SHA. Never modify or publish a release from another source.
-          if gh api "repos/$GH_REPO/releases/tags/v0.8.3" > current.json 2>/dev/null; then
-            jq -e --arg sha "$GITHUB_SHA" \
-              '.draft == true and .target_commitish == $sha' current.json
-            release_id="$(jq -r .id current.json)"
-            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
-              -f body="$(cat docs/release-0.8.3.md)" \
-              -f name="ParaNAM Trainer 0.8.3" \
-              -F draft=true -F prerelease=true >/dev/null
-          else
-            gh api --method POST "repos/$GH_REPO/releases" \
-              -f tag_name="v0.8.3" \
-              -f target_commitish="$GITHUB_SHA" \
-              -f name="ParaNAM Trainer 0.8.3" \
-              -f body="$(cat docs/release-0.8.3.md)" \
-              -F draft=true -F prerelease=true > current.json
-            release_id="$(jq -r .id current.json)"
-          fi
+          # Refresh the exact EXISTING draft, never create a second release.
+          # Updating target_commitish is required because publish_native.py
+          # verifies every replacement installer against the build source SHA.
+          gh api "repos/$GH_REPO/releases/450665438" > current.json
+          jq -e '.id == 450665438 and .draft == true and .prerelease == true and .tag_name == "v0.8.3"' current.json
+          release_id="$(jq -r .id current.json)"
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f body="$(cat docs/release-0.8.3.md)" \
+            -f name="ParaNAM Trainer 0.8.3" \
+            -F draft=true -F prerelease=true > current.json
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.id == 450665438 and .draft == true and .target_commitish == $sha' current.json
           test "$release_id" != null
           echo "Draft: https://github.com/$GH_REPO/releases/tag/v0.8.3 (ID $release_id)"
           # Existing installer workflow tests the frozen binaries and uploads
