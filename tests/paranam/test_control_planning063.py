@@ -201,6 +201,14 @@ def record_pending(
         target = root / entry.y_path
         target.parent.mkdir(parents=True, exist_ok=True)
         sf.write(target, audio, 48000, subtype="FLOAT")
+        if entry.split == "gain" and value == 1.0:
+            # The live recorder stores this second take internally during the
+            # same capture, never as an extra entry in the capture plan.
+            repeat_path = "captures/test_reference_repeat.wav"
+            sf.write(root / repeat_path, audio, 48000, subtype="FLOAT")
+            entry.user_metadata.setdefault("output_gain", {})["repeat_y_path"] = repeat_path
+        if entry.split == "gain" and value == 0.0:
+            entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
         entry.status = "captured"
         entry.delay = 0
 
@@ -210,6 +218,10 @@ def test_volume_calibration_uses_knob_grid_and_survives_reload(tmp_path):
     initialize_calibration(project)
     assert len(project.entries) == 101
     assert all(e.params["Tone"] == 10 for e in project.entries)
+    assert all(
+        e.user_metadata.get("output_gain", {}).get("phase") != "reference_repeat"
+        for e in project.entries
+    )
     record_pending(project, tmp_path)
     assert advance_calibration(project, tmp_path) == 0
     project = CaptureProject.model_validate_json(project.model_dump_json())
@@ -238,7 +250,7 @@ def test_volume_peak_rms_warning_is_advisory_and_preserves_captures(tmp_path):
     record_pending(project, tmp_path, colored=True)
     advance_calibration(project, tmp_path)
     assert project.output_gain_state["screen_decision"] == "warning"
-    assert "0.20 dB" in project.output_gain_state["warning_message"]
+    assert "-40" in project.output_gain_state["warning_message"]
     assert all(e.status == "captured" for e in project.entries)
     project.output_gain_state["screen_decision"] = "accepted"
     advance_calibration(project, tmp_path)
@@ -258,8 +270,11 @@ def test_silent_volume_capture_does_not_trigger_nonlinearity_warning(tmp_path):
 
     # A verified noise-floor recording can have a very different crest factor
     # from the live amp signal while remaining much quieter than the reference.
+    # Clear the session's verified mute flag to exercise the warning path
+    # for a legacy/noisy minimum whose silence was not yet identified.
+    minimum.user_metadata["output_gain"].pop("silent_minimum", None)
     noise = np.random.default_rng(72).normal(0, 1e-5, 4096)
-    noise[0] = 3e-4  # Peak and RMS do not track the reference.
+    noise[0] = 3e-4
     sf.write(tmp_path / minimum.y_path, noise, 48000, subtype="FLOAT")
 
     advance_calibration(project, tmp_path)
