@@ -978,17 +978,23 @@ def _planned_from_params(
     can continue the train index space (unique ``index``) while numbering their own files
     from ``corner_000`` (see :func:`plan_corner_captures`).
     """
-    abbreviations = _abbreviate_param_names([spec.name for spec in specs])
+    # Sampling with fixed controls (notably Linear Volume and Complex Switches)
+    # can append those controls to a dict after the sampled dimensions. The
+    # capture filename and persisted settings must instead follow the project's
+    # declared control order, irrespective of the sampler's internal dict order.
+    names = [spec.name for spec in specs]
+    abbreviations = _abbreviate_param_names(names)
     planned = []
     for offset, params in enumerate(param_dicts):
+        ordered_params = {name: params[name] for name in names}
         filename = _make_capture_y_path(
-            f"{prefix}_{filename_start + offset:03d}_", params, abbreviations
+            f"{prefix}_{filename_start + offset:03d}_", ordered_params, abbreviations
         )
         planned.append(
             PlannedCapture(
                 index=index_offset + offset,
                 split=split,
-                params=params,
+                params=ordered_params,
                 y_path=f"{CAPTURES_DIRNAME}/{filename}",
             )
         )
