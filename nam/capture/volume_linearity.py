@@ -92,7 +92,8 @@ def compare_waveforms(reference: np.ndarray, measured: np.ndarray, rate: int) ->
     Everything is in amplitude dB relative to the fitted signal.
     """
     r, y = _aligned(reference, measured, rate)
-    block = min(4096, max(256, int(rate / 12)))
+    # Keep at least eight blocks even with short calibration fixtures.
+    block = max(256, min(4096, int(rate / 12), len(r) // 8))
     count = len(r) // block
     if count < 2:
         raise ValueError("Volume capture is too short for reliable analysis")
