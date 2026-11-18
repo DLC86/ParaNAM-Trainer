@@ -37,7 +37,7 @@ jobs:
           # Updating target_commitish is required because publish_native.py
           # verifies every replacement installer against the build source SHA.
           gh api "repos/$GH_REPO/releases/450665438" > current.json
-          jq -e '.id == 450665438 and .draft == true and .prerelease == true and .tag_name == "v0.8.3"' current.json
+          jq -e '.id == 450665438 and .draft == true and .prerelease == true and (.tag_name == "v0.8.3" or (.tag_name | startswith("untagged-")))' current.json
           release_id="$(jq -r .id current.json)"
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
             -f tag_name="v0.8.3" \
