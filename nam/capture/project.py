@@ -1036,7 +1036,8 @@ def clear_captures(project: CaptureProject, project_dir: _Path) -> list[str]:
                     auxiliary.unlink(missing_ok=True)
                 except OSError as exc:
                     notes.append(f"{repeat_path}: could not delete ({exc}).")
-            entry.user_metadata.get("output_gain", {}).pop("repeat_y_path", None)
+                else:
+                    entry.user_metadata.get("output_gain", {}).pop("repeat_y_path", None)
         entry.status = "pending"
         entry.delay = None
         entry.captured_at = None
