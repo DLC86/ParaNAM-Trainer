@@ -1581,6 +1581,13 @@ def run_job(job):
     elapsed_base = float(shared.get("elapsed", 0))
     clock_start = time.monotonic()
     with FileLock(str(workspace.directory / "training" / "worker.lock"), timeout=0):
+        # A queue epoch edit can arrive during the worker's startup window,
+        # between the first spec read and acquiring worker.lock. Re-read the
+        # atomic snapshot here so a legitimate live edit does not look like
+        # an incompatible project mutation.
+        spec = read_json(job / "spec.json")
+        workspace = Workspace(Path(spec["project"]))
+        requested_total_epochs(job, spec)
         if (
             workspace.fingerprint() != spec["fingerprint"]
             and not _matches_legacy_fingerprint(workspace, spec)
