@@ -1,8 +1,10 @@
 """Capture control order is independent of sampling and legacy WAV filenames."""
 
+from nam.capture.output_gain import initialize_calibration
 from nam.capture.params import KnobSpec
 from nam.capture.planner import plan_captures
 from nam.capture.plan_rules import PlanRule
+from nam.capture.project import add_corner_captures, new_project
 from paranam.workspace import Workspace
 
 
@@ -83,3 +85,25 @@ def test_old_recorded_volume_filename_survives_reopen_replan_and_ui(
         not (e.y_path != old_path and e.split == "train" and e.params == reused.params)
         for e in reopened.project.entries
     )
+
+
+def test_all_capture_types_follow_middle_volume_position():
+    controls = [
+        KnobSpec("Tone", 0, 10, step=1, default=5),
+        KnobSpec("Volume", 0, 10, step=1, default=5, clean_volume=True),
+        KnobSpec("Drive", 0, 10, step=1, default=5),
+    ]
+    rules = [PlanRule(controls=("Tone",), operator=">", value=9)]
+    project = new_project(
+        controls, n_train=5, n_validation=3, seed=13,
+        lhs_method="sobol", plan_rules=rules,
+        include_default_as_additional_capture=True,
+    )
+    add_corner_captures(project)
+    initialize_calibration(project)
+    assert {e.split for e in project.entries} == {"train", "validation", "gain"}
+    assert any(e.is_corner for e in project.entries)
+    for entry in project.entries:
+        assert list(entry.params) == ["Tone", "Volume", "Drive"]
+        name = entry.y_path.rsplit("/", 1)[-1]
+        assert name.index("_T") < name.index("_V") < name.index("_D")
