@@ -117,6 +117,29 @@ def initialize_calibration(project):
         )
     ]
     _append(project, positions, context, "grid")
+    # A second capture at maximum volume establishes the real repeatability
+    # floor for the normalized waveform null test. It is never a spline knot.
+    if not any(
+        e.split == "gain"
+        and e.user_metadata.get("output_gain", {}).get("phase") == "reference_repeat"
+        for e in project.entries
+    ):
+        reference = next(
+            e for e in project.entries
+            if e.split == "gain"
+            and e.params[control.name] == control.max
+        )
+        project.entries.insert(
+            next((i for i, e in enumerate(project.entries) if e.split != "gain"),
+                 len(project.entries)),
+            CaptureEntryModel(
+                index=max(e.index for e in project.entries) + 1,
+                split="gain",
+                params=dict(reference.params),
+                y_path="captures/gain_reference_repeat.wav",
+                user_metadata={"output_gain": {"phase": "reference_repeat", "context": "max"}},
+            ),
+        )
     gain_entries = sorted(
         (entry for entry in project.entries if entry.split == "gain"),
         key=lambda entry: float(entry.params[control.name]),
@@ -217,7 +240,7 @@ def _muted_minimum_from_raw(project, root, entry):
 
 
 def advance_calibration(project, root):
-    """Compare peak and RMS attenuation; warn only when they differ by >0.2 dB."""
+    """Verify scalar-only volume changes with a noise-aware waveform null test."""
     control = volume_control(project)
     if control is None:
         return 0
@@ -227,14 +250,23 @@ def advance_calibration(project, root):
         state = project.output_gain_state
     entries = [e for e in project.entries if e.split == "gain"]
     main = [
-        e
-        for e in entries
+        e for e in entries
         if e.user_metadata.get("output_gain", {}).get("context") == "max"
+        and e.user_metadata.get("output_gain", {}).get("phase") != "reference_repeat"
     ]
+    repeat_entry = next(
+        (e for e in entries
+         if e.user_metadata.get("output_gain", {}).get("phase") == "reference_repeat"),
+        None,
+    )
     reference_entry = next((e for e in main if e.params[control.name] == control.max), None)
     if reference_entry is None or len(main) < 2:
         raise ValueError("Linear Volume requires its maximum and at least one lower measurement")
     if reference_entry.status != "captured":
+        return 0
+    # In a newly generated plan both max-volume takes are recorded first.
+    # Do not judge any other take without its repeatability reference.
+    if repeat_entry is not None and repeat_entry.status != "captured":
         return 0
     reference = _signal(project, root, reference_entry)
     ref_peak, ref_rms = _dbfs(reference)
@@ -253,38 +285,73 @@ def advance_calibration(project, root):
         ):
             entry.user_metadata.setdefault("output_gain", {})["silent_minimum"] = True
     if state.get("screen_decision") != "accepted":
-        discrepancies = []
+        from .volume_linearity import classify_volume_capture, MAX_RESIDUAL_DB
+
+        repeat = _signal(project, root, repeat_entry) if repeat_entry is not None else None
+        reports = []
+        nonlinear = []
+        inconclusive = []
         for entry in main:
             if entry is reference_entry or entry.status != "captured":
                 continue
-            # CaptureSession explicitly identifies a verified silent minimum.
-            # A noise-floor recording does not have a meaningful crest factor
-            # and must not trigger a non-linearity warning.
+            position = entry.params[control.name]
             if entry.user_metadata.get("output_gain", {}).get("silent_minimum"):
+                reports.append({"volume": position, "status": "verified_silent"})
                 continue
-            peak, rms = _dbfs(_signal(project, root, entry))
-            # A hard mute carries only interface noise (or digital zero), so its
-            # measured crest factor cannot describe the pedal's attenuation curve.
+            measured = _signal(project, root, entry)
+            peak, rms = _dbfs(measured)
+            # All-zero recordings are not a meaningful null test. The real
+            # recording session can independently verify a muted endpoint.
             if peak < -100 or rms < -100:
+                reports.append({"volume": position, "status": "inconclusive",
+                                "reason": "Capture is below -100 dBFS"})
                 continue
-            discrepancy = abs((ref_peak - peak) - (ref_rms - rms))
-            if discrepancy > 0.2:
-                discrepancies.append((entry.params[control.name], discrepancy))
-        if discrepancies:
-            position, discrepancy = max(discrepancies, key=lambda pair: pair[1])
+            outcome = classify_volume_capture(
+                reference, measured, project.sample_rate, repeat_reference=repeat
+            )
+            outcome["volume"] = position
+            reports.append(outcome)
+            if outcome["status"] == "nonlinear":
+                nonlinear.append(outcome)
+            elif outcome["status"] == "inconclusive":
+                inconclusive.append(outcome)
+
+        state["linearity_report"] = reports
+        state["linearity_threshold_db"] = MAX_RESIDUAL_DB
+        if nonlinear:
+            worst = max(nonlinear, key=lambda item: item["residual_db"])
             state.update(
                 screen_decision="warning",
                 warning_message=(
-                    f"At volume {position:g}, peak and RMS attenuation differ by "
-                    f"{discrepancy:.2f} dB (limit: 0.20 dB). Check for distortion in "
-                    "the audio interface or reamp box, or go back to Plan and remove "
-                    "Clean volume. You can still dismiss this warning and continue."
+                    f"At volume {worst['volume']:g}, the level-matched waveform differs "
+                    f"from the maximum-volume reference by {worst['residual_db']:.1f} dB "
+                    f"(limit: {MAX_RESIDUAL_DB:g} dB). The residual is above the "
+                    "recording noise/repeatability floor. This volume control is not "
+                    "a pure attenuator: check routing or use a neural volume knob. "
+                    "You may dismiss the warning and continue."
                 ),
                 status="measuring",
             )
             return 0
-        # A previously flagged capture may have been re-recorded as silent.
-        # Do not preserve an obsolete warning after reevaluation.
+        if inconclusive:
+            # Warn rather than silently certify linearity: very quiet captures,
+            # background noise and unstable reference takes cannot establish
+            # a -40 dB upper bound on waveform changes.
+            worst = max(
+                inconclusive,
+                key=lambda item: item.get("residual_db", -math.inf),
+            )
+            state.update(
+                screen_decision="warning",
+                warning_message=(
+                    f"At volume {worst['volume']:g}, the normalized waveform comparison "
+                    f"is inconclusive: {worst.get('reason', 'insufficient SNR')}. "
+                    "Check the recording noise, capture alignment and volume setting; "
+                    "recapture if necessary, or dismiss to continue."
+                ),
+                status="measuring",
+            )
+            return 0
         if state.get("screen_decision") == "warning":
             state.update(screen_decision=None, warning_message="")
     if any(e.status != "captured" for e in entries):
@@ -328,7 +395,7 @@ def advance_calibration(project, root):
         status="ready",
         measurements=len(values),
         curve_points=len(points),
-        fit_method="peak/RMS attenuation + monotone PCHIP",
+        fit_method="RMS attenuation + monotone PCHIP; waveform linearity check",
     )
     return 0
 
