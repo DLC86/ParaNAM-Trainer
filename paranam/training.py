@@ -55,7 +55,11 @@ def requested_total_epochs(job, spec):
     if type(target) is not int or not 1 <= target <= 1000000:
         target = int(spec["preferences"]["epochs"])
     spec["preferences"]["epochs"] = target
-    spec["learning"]["trainer"]["max_epochs"] = target
+    # The progress callback is also used in lightweight diagnostic tests and
+    # legacy snapshots without a nested Lightning trainer configuration.
+    trainer_config = spec.get("learning", {}).get("trainer")
+    if isinstance(trainer_config, dict):
+        trainer_config["max_epochs"] = target
     return target
 
 
@@ -1645,7 +1649,11 @@ def run_job(job):
                 target = requested_total_epochs(job, spec)
                 saved = read_json(job / f"resume-{member}.json", {})
                 saved_epochs = int(saved.get("completed_epoch") or 0)
-                if member in completed and saved_epochs >= target:
+                if member in completed and (saved_epochs >= target or not saved):
+                    # Earlier completed snapshots may have an export and a
+                    # Lightning checkpoint but no resume-N.json metadata.
+                    # Preserve their recorded completion; explicit extension
+                    # clears completed_members before entering this loop.
                     member += 1
                     continue
                 if member in completed:
