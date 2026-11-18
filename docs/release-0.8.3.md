@@ -2,9 +2,10 @@
 
 ## Capture control transitions
 
-- The white guide segment on a changed knob's red arc now pulses between **20% and 70% opacity** instead of fully transparent and solid white. The red transition remains visible underneath.
-- While a control differs from the previous recorded capture, its tile shows the **previous value → new value**. The previous value and arrow are smaller and light grey; the current value retains the prominent red style. Works with knobs and switches.
+- The white guide segment on a changed knob's red arc now pulses between **50% and 75% opacity** instead of fully transparent and solid white. The red transition remains visible underneath.
+- While a control differs from the previous recorded capture, its tile shows the **previous value → new value**. The previous value and arrow are smaller, **bold** and a slightly darker light grey; the prominent red current value remains horizontally centered, with no overlap. Works with knobs and switches.
 - Both guidance elements appear only on controls that changed and disappear immediately after confirming **My rig matches the control positions shown above**; manually selecting another capture updates the comparison.
+- Tiny knob minimum/maximum labels are hidden in **Capture** to reduce visual clutter; they remain visible in **Plan**.
 
 ## Linear Volume calibration
 
