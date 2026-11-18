@@ -3734,10 +3734,6 @@ class WizardWindow(
                     "Select an available audio interface in Project & routing."
                 )
             audio = self.audio_settings()
-            if audio.monitor_return_enabled and audio.host_api != "ASIO":
-                raise ValueError(
-                    "Return monitoring during capture currently requires an ASIO interface."
-                )
             if audio.input_channel is None or audio.output_channel is None:
                 raise ValueError(
                     "Select a Send output and Return input in Settings before capturing."
