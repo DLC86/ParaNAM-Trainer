@@ -39,6 +39,14 @@ from .value_format import format_knob_value
 KNOB_START_DEGREES = 210.0
 KNOB_SWEEP_DEGREES = 300.0
 
+# Alpha of the white transition arc: red underneath stays visible throughout.
+ARC_BLINK_MIN_OPACITY = 0.20
+ARC_BLINK_MAX_OPACITY = 0.70
+
+
+def arc_blink_alpha(pulse):
+    return round(255 * (ARC_BLINK_MIN_OPACITY + (ARC_BLINK_MAX_OPACITY - ARC_BLINK_MIN_OPACITY) * pulse))
+
 _font_loaded = False
 
 
@@ -276,6 +284,78 @@ class ControlScene(QWidget):
         self.blink_timer.stop()
         self.update()
 
+    def _blink_pulse(self):
+        return (
+            1 - math.cos(
+                (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
+            )
+        ) / 2
+
+    def _previous_value_label(self, control, value):
+        """Only advertise actual changes while Capture is awaiting rig confirmation."""
+        if control.name not in self.blink_names:
+            return None
+        previous = self.blink_previous.get(control.name)
+        if previous is None or previous == value:
+            return None
+        if isinstance(control, SwitchSpec):
+            return str(previous)
+        try:
+            return format_knob_value(float(previous), control.min, control.max)
+        except (TypeError, ValueError):
+            return None
+
+    def _draw_control_value(self, painter, control, value, x, y, width):
+        """Draw 'previous → new' as one centered group when a control moved."""
+        old = self._previous_value_label(control, value)
+        current_font = QFont("Inter", 15, QFont.Weight.Bold)
+        current_metrics = painter.fontMetrics() if painter.font() == current_font else None
+        if current_metrics is None:
+            painter.setFont(current_font)
+            current_metrics = painter.fontMetrics()
+        current_color = QColor(ACCENT)
+        area = QRectF(x + 10, y + 134, width - 20, 29)
+        capacity = max(1, int(area.width()))
+        current = current_metrics.elidedText(
+            str(value), Qt.TextElideMode.ElideRight, capacity
+        )
+        if old is None:
+            painter.setPen(current_color)
+            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, current)
+            return
+
+        old_font = QFont("Inter", 10)
+        painter.setFont(old_font)
+        old_metrics = painter.fontMetrics()
+        gap = 6
+        # Prefer retaining the complete new value. Elide old labels if a
+        # particularly long switch option would otherwise overflow its tile.
+        available_old = capacity - current_metrics.horizontalAdvance(current) - gap
+        if available_old < 14:
+            current = current_metrics.elidedText(
+                str(value), Qt.TextElideMode.ElideRight, max(30, capacity // 2)
+            )
+            available_old = capacity - current_metrics.horizontalAdvance(current) - gap
+        old_text = old_metrics.elidedText(
+            f"{old} →", Qt.TextElideMode.ElideLeft, max(1, available_old)
+        )
+        old_width = old_metrics.horizontalAdvance(old_text)
+        current_width = current_metrics.horizontalAdvance(current)
+        group_left = area.center().x() - (old_width + gap + current_width) / 2
+        painter.setPen(QColor("#bcbcbc"))
+        painter.drawText(
+            QRectF(group_left, area.y(), old_width, area.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            old_text,
+        )
+        painter.setFont(current_font)
+        painter.setPen(current_color)
+        painter.drawText(
+            QRectF(group_left + old_width + gap, area.y(), current_width, area.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            current,
+        )
+
     def _columns(self):
         return max(1, self.width() // 185)
 
@@ -324,12 +404,7 @@ class ControlScene(QWidget):
             width = bounds.width() + 14
             shade = 35
             if control.name in self.blink_names:
-                pulse = (
-                    1
-                    - math.cos(
-                        (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
-                    )
-                ) / 2
+                pulse = self._blink_pulse()
                 shade += round(45 * pulse)
             painter.setBrush(QColor(shade, shade, shade))
             painter.setPen(QPen(self._card_border(index), 1))
@@ -368,15 +443,8 @@ class ControlScene(QWidget):
                     count,
                     16,
                 )
-                painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
-                painter.setPen(QColor(ACCENT))
-                text = painter.fontMetrics().elidedText(
-                    control.enum_names[selected], Qt.TextElideMode.ElideRight, int(width - 20)
-                )
-                painter.drawText(
-                    QRectF(x + 10, y + 134, width - 20, 29),
-                    Qt.AlignmentFlag.AlignCenter,
-                    text,
+                self._draw_control_value(
+                    painter, control, control.enum_names[selected], x, y, width
                 )
             else:
                 fraction = min(
@@ -406,7 +474,7 @@ class ControlScene(QWidget):
                     painter.setPen(QPen(QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
                     painter.drawArc(ring, round((90 - KNOB_START_DEGREES - origin * KNOB_SWEEP_DEGREES) * 16), round((origin - fraction) * KNOB_SWEEP_DEGREES * 16))
                 # Capture-only overlay. Pulse white over the existing red arc,
-                # fully transparent at the dimmest frame so only red remains.
+                # with 20–70% white opacity; the underlying red stays visible.
                 if control.name in self.blink_names and control.name in self.blink_previous:
                     previous = self.blink_previous[control.name]
                     if isinstance(previous, (float, int)):
@@ -414,9 +482,7 @@ class ControlScene(QWidget):
                             1, max(0, (float(previous) - control.min) / (control.max - control.min))
                         )
                         if previous_fraction != fraction:
-                            pulse = (1 - math.cos(
-                                (time.monotonic() - self.blink_started) * 2 * math.pi / 2.6
-                            )) / 2
+                            pulse = self._blink_pulse()
                             start_angle = round(
                                 (90 - KNOB_START_DEGREES - previous_fraction * KNOB_SWEEP_DEGREES) * 16
                             )
@@ -425,12 +491,12 @@ class ControlScene(QWidget):
                             )
                             # A backwards knob movement extends outside the current
                             # red level arc. Draw the transition in red first, so the
-                            # faint phase always reveals red rather than grey.
+                            # faint phase always blends with red rather than grey.
                             painter.setPen(QPen(
                                 QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
                             ))
                             painter.drawArc(ring, start_angle, span_angle)
-                            white = QColor(255, 255, 255, round(255 * pulse))
+                            white = QColor(255, 255, 255, arc_blink_alpha(pulse))
                             painter.setPen(QPen(
                                 white, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
                             ))
@@ -459,12 +525,10 @@ class ControlScene(QWidget):
                     center + QPointF(10 * math.sin(angle), -10 * math.cos(angle)),
                     center + QPointF(24 * math.sin(angle), -24 * math.cos(angle)),
                 )
-                painter.setPen(QColor(ACCENT))
-                painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
-                painter.drawText(
-                    QRectF(x + 10, y + 134, width - 20, 29),
-                    Qt.AlignmentFlag.AlignCenter,
+                self._draw_control_value(
+                    painter, control,
                     format_knob_value(float(value), control.min, control.max),
+                    x, y, width,
                 )
 
 
