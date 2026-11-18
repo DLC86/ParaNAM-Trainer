@@ -1069,7 +1069,12 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             # Batch callbacks can run many times per second. Avoid parsing
             # and validating a JSON document when no epoch edit occurred.
             if stamp == self.epoch_target_stamp:
-                return int(spec["preferences"]["epochs"])
+                target = int(spec["preferences"]["epochs"])
+                # A restored Lightning fit loop must not replace a previously
+                # acknowledged live target with a checkpoint's old limit.
+                if trainer is not None and trainer.fit_loop.max_epochs != target:
+                    trainer.fit_loop.max_epochs = target
+                return target
             self.epoch_target_stamp = stamp
             previous = int(spec["preferences"]["epochs"])
             target = requested_total_epochs(job, spec)
