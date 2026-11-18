@@ -7,7 +7,7 @@ from PySide6 import QtSvg  # Include SVG image support in frozen installers.
 from .numeric import DecimalSpinBox as QDoubleSpinBox
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer, QObject, QEvent
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QFont, QFontDatabase, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget,
     QDialog,
@@ -40,8 +40,8 @@ KNOB_START_DEGREES = 210.0
 KNOB_SWEEP_DEGREES = 300.0
 
 # Alpha of the white transition arc: red underneath stays visible throughout.
-ARC_BLINK_MIN_OPACITY = 0.20
-ARC_BLINK_MAX_OPACITY = 0.70
+ARC_BLINK_MIN_OPACITY = 0.50
+ARC_BLINK_MAX_OPACITY = 0.75
 
 
 def arc_blink_alpha(pulse):
@@ -305,55 +305,79 @@ class ControlScene(QWidget):
         except (TypeError, ValueError):
             return None
 
-    def _draw_control_value(self, painter, control, value, x, y, width):
-        """Draw 'previous → new' as one centered group when a control moved."""
-        old = self._previous_value_label(control, value)
-        current_font = QFont("Inter", 15, QFont.Weight.Bold)
-        current_metrics = painter.fontMetrics() if painter.font() == current_font else None
-        if current_metrics is None:
-            painter.setFont(current_font)
-            current_metrics = painter.fontMetrics()
-        current_color = QColor(ACCENT)
-        area = QRectF(x + 10, y + 134, width - 20, 29)
-        capacity = max(1, int(area.width()))
-        current = current_metrics.elidedText(
-            str(value), Qt.TextElideMode.ElideRight, capacity
-        )
-        if old is None:
-            painter.setPen(current_color)
-            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, current)
-            return
+    @staticmethod
+    def _control_value_layout(value, previous, x, y, width):
+        """Place the NEW value at the exact tile center, independent of the old one.
 
-        old_font = QFont("Inter", 10)
-        painter.setFont(old_font)
-        old_metrics = painter.fontMetrics()
+        Reserve space for a smaller 'previous →' on the left. The old label
+        is elided if necessary; it may never shift or overlap the new value.
+        This geometry is shared by knob and switch capture tiles.
+        """
+        area = QRectF(x + 10, y + 134, width - 20, 29)
+        current_font = QFont("Inter", 15, QFont.Weight.Bold)
+        previous_font = QFont("Inter", 10)
+        current_metrics = QFontMetrics(current_font)
+        previous_metrics = QFontMetrics(previous_font)
         gap = 6
-        # Prefer retaining the complete new value. Elide old labels if a
-        # particularly long switch option would otherwise overflow its tile.
-        available_old = capacity - current_metrics.horizontalAdvance(current) - gap
-        if available_old < 14:
-            current = current_metrics.elidedText(
-                str(value), Qt.TextElideMode.ElideRight, max(30, capacity // 2)
+        max_width = max(1, int(area.width()))
+
+        if previous is not None:
+            # The current value stays centered even when a very long switch
+            # option must be elided to leave room for an old value and arrow.
+            minimum_old = previous_metrics.horizontalAdvance("… →")
+            max_width = max(1, min(
+                max_width, int(area.width() - 2 * (gap + minimum_old))
+            ))
+
+        current_text = current_metrics.elidedText(
+            str(value), Qt.TextElideMode.ElideRight, max_width
+        )
+        current_width = current_metrics.horizontalAdvance(current_text)
+        current_left = area.center().x() - current_width / 2
+        current_rect = QRectF(
+            current_left, area.y(), current_width, area.height()
+        )
+        if previous is None:
+            return current_text, current_rect, None, None
+
+        available = max(0, int(current_rect.left() - gap - area.left()))
+        arrow = " →"
+        arrow_width = previous_metrics.horizontalAdvance(arrow)
+        if available >= arrow_width + 1:
+            previous_text = previous_metrics.elidedText(
+                str(previous),
+                Qt.TextElideMode.ElideLeft,
+                max(1, available - arrow_width),
+            ) + arrow
+        else:
+            previous_text = "→" if available >= previous_metrics.horizontalAdvance("→") else ""
+        old_width = previous_metrics.horizontalAdvance(previous_text)
+        previous_rect = QRectF(
+            current_rect.left() - gap - old_width,
+            area.y(), old_width, area.height(),
+        )
+        return current_text, current_rect, previous_text, previous_rect
+
+    def _draw_control_value(self, painter, control, value, x, y, width):
+        """Keep the new value centered; show the previous one only until rig confirmation."""
+        old = self._previous_value_label(control, value)
+        current_text, current_rect, previous_text, previous_rect = (
+            self._control_value_layout(value, old, x, y, width)
+        )
+        if previous_text:
+            painter.setFont(QFont("Inter", 10))
+            painter.setPen(QColor("#bcbcbc"))
+            painter.drawText(
+                previous_rect,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                previous_text,
             )
-            available_old = capacity - current_metrics.horizontalAdvance(current) - gap
-        old_text = old_metrics.elidedText(
-            f"{old} →", Qt.TextElideMode.ElideLeft, max(1, available_old)
-        )
-        old_width = old_metrics.horizontalAdvance(old_text)
-        current_width = current_metrics.horizontalAdvance(current)
-        group_left = area.center().x() - (old_width + gap + current_width) / 2
-        painter.setPen(QColor("#bcbcbc"))
+        painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
+        painter.setPen(QColor(ACCENT))
         painter.drawText(
-            QRectF(group_left, area.y(), old_width, area.height()),
+            current_rect,
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            old_text,
-        )
-        painter.setFont(current_font)
-        painter.setPen(current_color)
-        painter.drawText(
-            QRectF(group_left + old_width + gap, area.y(), current_width, area.height()),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            current,
+            current_text,
         )
 
     def _columns(self):
@@ -474,7 +498,7 @@ class ControlScene(QWidget):
                     painter.setPen(QPen(QColor(ACCENT), 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
                     painter.drawArc(ring, round((90 - KNOB_START_DEGREES - origin * KNOB_SWEEP_DEGREES) * 16), round((origin - fraction) * KNOB_SWEEP_DEGREES * 16))
                 # Capture-only overlay. Pulse white over the existing red arc,
-                # with 20–70% white opacity; the underlying red stays visible.
+                # with 50–75% white opacity; the underlying red stays visible.
                 if control.name in self.blink_names and control.name in self.blink_previous:
                     previous = self.blink_previous[control.name]
                     if isinstance(previous, (float, int)):
