@@ -1,0 +1,64 @@
+name: Prepare and build ParaNAM Trainer 0.8.3 draft
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prepare-v083-draft.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: paranam-draft-v0.8.3
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version and prepare the private 0.8.3 draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx '__version__ = "0.8.3"' paranam/__init__.py
+          grep -qx 'version = "0.8.3"' pyproject.toml
+          test -s docs/release-0.8.3.md
+          main_sha="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$main_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Main moved since this build request. Refusing stale release source."
+            exit 1
+          fi
+          # Reuse an existing draft only when it belongs to this exact
+          # main SHA. Never modify or publish a release from another source.
+          if gh api "repos/$GH_REPO/releases/tags/v0.8.3" > current.json 2>/dev/null; then
+            jq -e --arg sha "$GITHUB_SHA" \
+              '.draft == true and .target_commitish == $sha' current.json
+            release_id="$(jq -r .id current.json)"
+            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+              -f body="$(cat docs/release-0.8.3.md)" \
+              -f name="ParaNAM Trainer 0.8.3" \
+              -F draft=true -F prerelease=true >/dev/null
+          else
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="v0.8.3" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="ParaNAM Trainer 0.8.3" \
+              -f body="$(cat docs/release-0.8.3.md)" \
+              -F draft=true -F prerelease=true > current.json
+            release_id="$(jq -r .id current.json)"
+          fi
+          test "$release_id" != null
+          echo "Draft: https://github.com/$GH_REPO/releases/tag/v0.8.3 (ID $release_id)"
+          # Existing installer workflow tests the frozen binaries and uploads
+          # all five packages directly to this draft. keep_draft prevents
+          # publication even after the final asset verification succeeds.
+          gh workflow run paranam-installers.yml --ref main \
+            -f target=all \
+            -f keep_draft=true \
+            -f release_id="$release_id"
+          echo "Dispatched Windows, Linux and both macOS native installer jobs."
