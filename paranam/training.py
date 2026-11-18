@@ -1280,7 +1280,10 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
 
                 if self.train_evaluator is None:
                     self.train_evaluator = TrainEvaluator(
-                        data, spec["model"], module.net
+                        data, spec["model"], module.net,
+                        synthetic_indices=spec["learning"].get(
+                            "synthetic_mute_train_indices", ()
+                        ),
                     )
                 self.print_progress(trainer, 1, "Evaluating Train ESR")
                 train_scores = self.train_evaluator.compute(

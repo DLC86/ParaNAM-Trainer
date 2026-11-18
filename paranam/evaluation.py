@@ -26,11 +26,17 @@ def reserve_validation_audio(data):
 class TrainEvaluator:
     """Evaluate frozen end-of-epoch weights; average ESR equally over captures."""
 
-    def __init__(self, data, model_config, net):
+    def __init__(self, data, model_config, net, *, synthetic_indices=()):
         from nam.data import ConcatDataset, Split, init_dataset
 
         config = deepcopy(data)
-        config["validation"] = config.pop("train_evaluation")
+        # Held-out rows match training capture indices. Synthetic mute
+        # recordings train the network but have no meaningful ESR denominator.
+        excluded = set(synthetic_indices)
+        config["validation"] = [
+            row for index, row in enumerate(config.pop("train_evaluation"))
+            if index not in excluded
+        ]
         for capture in config["validation"]:
             capture["ny"] = None  # One complete validation clip, as in official NAM.
         config.setdefault("common", {})["nx"] = net.receptive_field

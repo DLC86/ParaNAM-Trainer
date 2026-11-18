@@ -618,7 +618,18 @@ class TrainingQueue:
                     # already marked complete in multi-model jobs.
                     progress["completed_members"] = []
                     progress["member"] = 0
-                    progress["epoch"] = 0
+                    # The next run starts from member 0 and its checkpoint.
+                    # Display its actual completed epoch instead of 0 / total.
+                    first = read_json(job / "resume-0.json", {})
+                    first_epoch = first.get("completed_epoch")
+                    if first_epoch is None:
+                        first_epoch = (
+                            max(int(progress.get("completed_epoch") or 0),
+                                int(progress.get("epoch") or 0))
+                            if int(spec["members"]) == 1 else 0
+                        )
+                    progress["epoch"] = int(first_epoch)
+                    progress["completed_epoch"] = int(first_epoch)
                     if entry["kind"] == "static":
                         progress["exports"] = []
                 progress["message"] = f"Total epochs changed to {epochs}"

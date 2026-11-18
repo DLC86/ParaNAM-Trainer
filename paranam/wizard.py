@@ -871,6 +871,7 @@ class WizardWindow(
         layout.addWidget(self.rules_card)
         self.signal_card, box = card("Input signal")
         signal_form = QFormLayout()
+        signal_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.signal_mode = QComboBox()
         self.signal_mode.addItem("Standard — bundled TONE3000 sweep", "standard")
         self.signal_mode.addItem("TTS input v11 — bundled", "tts")
@@ -879,17 +880,23 @@ class WizardWindow(
             "Custom — choose a training WAV from this computer", "custom"
         )
         signal_form.addRow("Training input", self.signal_mode)
-        self.custom_label = label("No custom file selected", "muted")
+        # A selectable single-line path avoids clipped word-wrapped labels
+        # in macOS QFormLayout rows.
+        self.custom_label = QLineEdit("No custom file selected")
+        self.custom_label.setReadOnly(True)
+        self.custom_label.setStyleSheet(
+            "QLineEdit { background: transparent; border: none; "
+            "color: #969696; padding: 0; }"
+        )
         signal_form.addRow("Custom file", self.custom_label)
         self.custom_button = button("Choose custom training WAV…", self.import_inputs)
         signal_form.addRow(self.custom_button)
-        signal_form.addRow(
-            "Validation input",
-            label(
-                "validation.wav · fixed original from the trainer repository · bundled in the installer",
-                "muted",
-            ),
+        validation_label = label("validation.wav · bundled fixed reference", "muted")
+        validation_label.setWordWrap(False)
+        validation_label.setToolTip(
+            "validation.wav · fixed original from the trainer repository · bundled in the installer"
         )
+        signal_form.addRow("Validation input", validation_label)
         box.addLayout(signal_form)
         box.addWidget(
             label(
@@ -908,6 +915,7 @@ class WizardWindow(
         layout.addWidget(self.metadata_card)
         self.plan_card, box = card("Capture plan")
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.mode = QComboBox()
         self.mode.addItem("Normal — capture the plan, then train", "normal")
         self.mode.addItem(
@@ -918,11 +926,13 @@ class WizardWindow(
         # The selector and active-learning implementation are retained for later.
         form.addRow("Training method", self.mode)
         form.setRowVisible(self.mode, False)
-        form.addRow(
-            "Model format",
-            self._model_format_label(),
-        )
+        # Give the model format the whole row, rather than squeezing its
+        # text into a narrow field column on macOS.
+        form.addRow(self._model_format_label())
         self.n_train, self.n_validation = QSpinBox(), QSpinBox()
+        for count_field in (self.n_train, self.n_validation):
+            count_field.setMinimumWidth(132)
+            count_field.setMinimumHeight(40)
         self.n_train.setRange(1, 1000000)
         self.n_validation.setRange(0, 1000000)
         self.seed = QSpinBox()
@@ -1012,7 +1022,7 @@ class WizardWindow(
         self.include_default_as_additional_capture.toggled.connect(
             self._default_capture_toggled
         )
-        self.lhs_method.currentIndexChanged.connect(self.save_preferences)
+        self.lhs_method.currentIndexChanged.connect(self._sampling_method_changed)
         self.validation_method.currentIndexChanged.connect(self.save_preferences)
         self.mode.currentIndexChanged.connect(self.save_preferences)
 
@@ -2816,6 +2826,12 @@ class WizardWindow(
             self.refresh_recommendation(True)
             self.workspace.save()
 
+    def _sampling_method_changed(self, *_):
+        if self._loading or not self.workspace or self.busy():
+            return
+        # Recalculate fields immediately when a sampling method is selected.
+        self.refresh_recommendation(True)
+
     def _training_capture_count_changed(self, *_):
         """Keep validation at a quarter of training when training is edited.
 
@@ -3134,9 +3150,9 @@ class WizardWindow(
         self.plan_card.setVisible(not static)
         self.rules_card.setVisible(not static)
         self.model_format.setText(
-            "A2 Full + Lite nested · one standard .nam per named capture"
+            "Model format: A2 Full + Lite nested · one standard .nam per named capture"
             if static
-            else "ParametricSlimmableContainer · Full + Lite in one .pnam file"
+            else "Model format: ParametricSlimmableContainer · Full + Lite in one .pnam file"
         )
         self.mode.setEnabled(not static)
         for widget in (
@@ -3223,8 +3239,9 @@ class WizardWindow(
 
     def _model_format_label(self):
         self.model_format = label(
-            "ParametricSlimmableContainer · Full + Lite in one .pnam file", "eyebrow"
+            "Model format: ParametricSlimmableContainer · Full + Lite in one .pnam file", "eyebrow"
         )
+        self.model_format.setMinimumHeight(26)
         return self.model_format
 
     def save_metadata(self, metadata):

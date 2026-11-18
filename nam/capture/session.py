@@ -1040,7 +1040,11 @@ class CaptureSession:
 
         # Pending WAVs can be restored with labels from data.json. Resolve that state
         # first instead of silently dropping their labels when rebuilding the dataset.
-        captured_paths = {entry.y_path for entry in self.project.captured_entries()}
+        # Synthetic Mute WAVs belong to data.json, but their zero-delay
+        # labels must not be shifted with the physical recordings.
+        captured_paths = {
+            entry.y_path for entry in self.project.captured_entries(include_synthetic=True)
+        }
         if any(
             entry.status != "captured" and (self.project_dir / entry.y_path).is_file()
             for entry in self.project.entries

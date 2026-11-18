@@ -1687,3 +1687,30 @@ def test_recovery_still_works_when_nothing_was_kept_to_re_measure(tmp_path):
     restored = project.captured_entries()[0]
     assert restored.delay == delay
     assert any("not re-measured" in n for n in notes)
+
+
+def test_fresh_plan_synthetic_mutes_do_not_block_timing_margin(tmp_path):
+    from nam.capture.export import update_data_json
+    from nam.data import np_to_wav
+
+    root = _make_project_dir(tmp_path)
+    project = _load_project(root)
+    _enable_loopback(project)
+    mute = project.entries_for_split("train")[0]
+    mute.status = "captured"
+    mute.synthetic_mute = True
+    mute.delay = 0
+    mute.y_path = "synthetic_mutes/train.wav"
+    target = root / mute.y_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    np_to_wav(_np.zeros(_RATE, dtype=_np.float32), target, rate=_RATE)
+    _save_project(project, root)
+    update_data_json(project, root, include_synthetic=True)
+
+    session = _CaptureSession(project, root, recorder=_WideImpulseRecorder())
+    session.capture_entry(project.pending_entries()[0])
+    assert project.alignment_lead_samples == 14
+    assert mute.delay == 0
+    saved = _json.loads((root / "data.json").read_text())
+    assert any(row["y_path"] == mute.y_path and row["delay"] == 0
+               for row in saved["train"])

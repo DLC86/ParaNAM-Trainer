@@ -100,6 +100,8 @@ def test_completed_job_epoch_extension_keeps_checkpoints_and_resumes(
     assert Workspace(Path(spec["project"])).preferences["epochs"] == 5
     updated = read_json(job / "progress.json")
     assert updated["epochs"] == 5
+    assert updated["epoch"] == 2
+    assert updated["completed_epoch"] == 2
     assert updated["completed_members"] == []
     assert updated["member"] == 0
     queue.prepare_resume(entry["id"])

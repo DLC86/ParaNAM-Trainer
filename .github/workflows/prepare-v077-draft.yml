@@ -1,52 +1,6 @@
 name: Prepare and build ParaNAM Trainer 0.8.0 draft
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/prepare-v077-draft.yml'
-      - '.github/workflows/paranam-installers.yml'
-      - '.github/workflows/paranam-tests.yml'
-      - 'packaging/pytest_windows_runner.py'
-      - 'packaging/validate_bundle.py'
-      - 'tests/paranam/test_release_080.py'
-      - 'tests/paranam/test_plan_rules.py'
-      - 'tests/capture/test_auto_recommendations.py'
-      - 'nam/capture/planner.py'
-      - 'nam/capture/project.py'
-      - 'paranam/wizard.py'
-      - 'paranam/widgets.py'
-      - 'nam/capture/session.py'
-      - 'tests/capture/test_lhs_methods.py'
-      - 'docs/release-0.8.0.md'
-      # Rebuild the draft when Plan/default sampling or frozen Retrain changes.
-      # Missing these paths previously left the newest passing main commit
-      # without a corresponding installer dispatch.
-      - 'nam/capture/params.py'
-      - 'paranam/workspace.py'
-      - 'paranam/training_queue.py'
-      - 'tests/paranam/test_workspace.py'
-      - 'tests/paranam/test_legacy_plan_migration.py'
-      - 'tests/paranam/test_queue.py'
-      - 'tests/paranam/test_wizard.py'
-      - 'tests/paranam/test_workflow052.py'
-      - 'tests/paranam/test_workflow056.py'
-      - 'tests/capture/test_planner.py'
-      - 'docs/capture_controls.md'
-      - 'docs/training-controls.md'
-      - 'paranam/recipes.py'
-      - 'paranam/plan_rules_ui.py'
-      - 'paranam/queue_ui.py'
-      - 'paranam/project_files.py'
-      - 'nam/capture/plan_rules.py'
-      - 'nam/capture/export.py'
-      - 'nam/train/parametric.py'
-      - 'tests/paranam/test_advanced_training.py'
-      - 'tests/paranam/test_hypera2_defaults059.py'
-      - 'tests/parametric/test_train.py'
-      - 'packaging/publish_native.py'
-      - 'pyproject.toml'
-      - 'paranam/__init__.py'
 permissions:
   contents: write
   actions: write

@@ -183,3 +183,36 @@ def test_held_out_tail_matches_official_nam_v3_dataset(input_name):
     assert official["train"]["stop_samples"] == -9 * 48000
     reference.teardown()
     evaluator.close()
+
+
+def test_train_esr_excludes_synthetic_mute_captures(tmp_path):
+    rate = 1000
+    signal = np.full(30 * rate, 0.1, dtype=np.float32)
+    np_to_wav(signal, tmp_path / "input.wav", rate=rate)
+    np_to_wav(signal * 2, tmp_path / "physical.wav", rate=rate)
+    np_to_wav(np.zeros_like(signal), tmp_path / "mute.wav", rate=rate)
+    captures = [
+        dict(x_path=str(tmp_path / "input.wav"), y_path=str(tmp_path / name),
+             delay=0, ny=100, params={"Gain": i})
+        for i, name in enumerate(("physical.wav", "mute.wav"))
+    ]
+    data = dict(type="parametric", common=dict(require_input_pre_silence=None),
+                train=captures, validation=[dict(captures[0])])
+    reserve_validation_audio(data)
+    model = {"net": {"config": {"params": [
+        dict(name="Gain", type="continuous", min=0, max=1, default=0)
+    ]}}}
+
+    class Net(torch.nn.Module):
+        receptive_field = 1
+
+        def forward_sizes(self, x, *args, **kwargs):
+            return torch.stack((x, x * 3), dim=1)
+
+    net = Net()
+    evaluator = TrainEvaluator(data, model, net, synthetic_indices=(1,))
+    assert len(evaluator.captures) == 1
+    scores = evaluator.compute(net, torch.device("cpu"))
+    assert scores["lite"] == pytest.approx(0.25, abs=0.002)
+    assert scores["full"] == pytest.approx(0.25, abs=0.002)
+    evaluator.close()
