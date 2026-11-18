@@ -273,11 +273,11 @@ def test_capture_transition_values_and_arc_alpha_reset_on_rig_confirmation(
         ARC_BLINK_MIN_OPACITY, ARC_BLINK_MAX_OPACITY, arc_blink_alpha,
     )
 
-    assert ARC_BLINK_MIN_OPACITY == 0.20
-    assert ARC_BLINK_MAX_OPACITY == 0.70
-    assert arc_blink_alpha(0) == round(255 * 0.20)
-    assert arc_blink_alpha(1) == round(255 * 0.70)
-    assert arc_blink_alpha(0.5) == round(255 * 0.45)
+    assert ARC_BLINK_MIN_OPACITY == 0.50
+    assert ARC_BLINK_MAX_OPACITY == 0.75
+    assert arc_blink_alpha(0) == round(255 * 0.50)
+    assert arc_blink_alpha(1) == round(255 * 0.75)
+    assert arc_blink_alpha(0.5) == round(255 * 0.625)
     window._attach(workspace)
     control = workspace.project.control_specs()[0]
     old = control.min
@@ -303,6 +303,39 @@ def test_switch_transition_displays_previous_option_until_confirmed(qapp):
     assert scene._previous_value_label(control, "Lead") == "Clean"
     scene.stop_blink()
     assert scene._previous_value_label(control, "Lead") is None
+
+
+def test_capture_labels_remain_centered_and_do_not_overlap_and_plan_keeps_minmax(qapp):
+    from PySide6.QtGui import QFont, QFontMetrics, QColor
+    from paranam.widgets import ControlScene, PlanControlScene
+
+    capture, plan = ControlScene(), PlanControlScene()
+    assert capture.show_knob_range_labels is False
+    assert plan.show_knob_range_labels is True
+    assert QColor("#b0b0b0").lightness() < QColor("#bcbcbc").lightness()
+    old_font = QFont("Inter", 10, QFont.Weight.Bold)
+    assert old_font.bold()
+
+    for current, previous in [
+        ("5", "2.25"),
+        ("10", "0"),
+        ("Bright", "Normal"),
+        ("Very long switch option", "Clean and warm"),
+    ]:
+        new_text, new_rect, prev_text, prev_rect = (
+            capture._control_value_layout(current, previous, 0, 0, 185)
+        )
+        assert new_text
+        assert abs(new_rect.center().x() - 92.5) < 0.01
+        if prev_text:
+            assert prev_rect.right() <= new_rect.left() - 5.9
+            assert prev_rect.left() >= 9.0
+        # With or without the old label, the main value's center is unchanged.
+        no_old, no_old_rect, _, _ = capture._control_value_layout(
+            current, None, 0, 0, 185
+        )
+        assert abs(no_old_rect.center().x() - new_rect.center().x()) < 0.01
+        assert not prev_text or QFontMetrics(old_font).horizontalAdvance(prev_text) <= prev_rect.width() + 0.01
 
 
 def test_all_queue_states_can_be_reordered_without_changing_active_job(
