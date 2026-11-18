@@ -302,6 +302,42 @@ def test_completed_parametric_member_exports_pnam_without_losing_metadata(
     assert read_json(original) == model
 
 
+@pytest.mark.parametrize("initial,target", [(2, 4), (4, 2)])
+def test_live_epoch_target_changes_lightning_fit_without_resetting_optimizer(
+    workspace, monkeypatch, initial, target,
+):
+    from nam.train.parametric import _ParametricLightningModule
+
+    workspace.preferences["epochs"] = initial
+    workspace.save()
+    job = tiny_job(workspace, monkeypatch)
+    original = _ParametricLightningModule.training_step
+    observed = []
+    updated = []
+
+    def step(module, batch, index):
+        observed.append(module.current_epoch)
+        if module.current_epoch == 1 and not updated:
+            # The running queue writes a durable target at the batch boundary.
+            atomic_write_json(job / "epoch-target.json", {"epochs": target})
+            updated.append(True)
+        return original(module, batch, index)
+
+    monkeypatch.setattr(_ParametricLightningModule, "training_step", step)
+    training.run_job(job)
+    assert updated
+    assert observed == list(range(target))
+    progress = training.job_progress(job)
+    assert progress["status"] == "completed"
+    assert progress["epochs"] == target
+    assert progress["completed_epoch"] == target
+    checkpoint = torch.load(
+        job / "resume-0.ckpt", map_location="cpu", weights_only=False
+    )
+    assert checkpoint["global_step"] == target
+    assert checkpoint["lr_schedulers"][0]["last_epoch"] == target
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_mid_epoch_pause_restarts_only_the_incomplete_epoch(
     workspace, monkeypatch, legacy
