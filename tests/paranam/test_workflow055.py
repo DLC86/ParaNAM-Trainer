@@ -190,14 +190,15 @@ def test_compare_reset_plain_values_alignment_and_original_defaults(
         QTest.mouseDClick(gain_dial, Qt.MouseButton.LeftButton)
     assert window.play_input.value() == window.play_output.value() == 0
     grid = window.play_gain_layout
-    assert (
-        len({grid.itemAtPosition(0, i).widget().geometry().y() for i in range(1, 5)})
-        == 1
-    )
-    centers = [
-        grid.itemAtPosition(1, i).widget().geometry().center().y() for i in range(1, 5)
-    ]
-    assert max(centers) - min(centers) <= 1
+    # Input and Output flank the same Play/Gear/Model action bar, instead
+    # of living in a separate row below the buttons.
+    assert grid.itemAtPosition(0, 1).widget() is window.play_action_bar
+    left = grid.itemAtPosition(1, 0).widget()
+    right = grid.itemAtPosition(1, 2).widget()
+    assert left.geometry().center().x() < window.play_action_bar.geometry().left()
+    assert right.geometry().center().x() > window.play_action_bar.geometry().right()
+    assert abs(left.geometry().center().y() - right.geometry().center().y()) <= 2
+    assert window.play_input.value() == window.play_output.value() == 0
 
 
 @pytest.mark.parametrize("state", ["paused", "stopped"])
