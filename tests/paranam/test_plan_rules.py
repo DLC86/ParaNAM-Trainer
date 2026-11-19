@@ -24,10 +24,11 @@ def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
     initialize_calibration(project)
     gain = [e for e in project.entries if e.split == "gain"]
     assert len(gain) == 3
-    # These captures intentionally bypass both the threshold and the rule.
-    assert all(e.params["Bass"] == 3 and e.params["Treble"] == 3 for e in gain)
+    # New plans use the centered Linear Volume context and still honor
+    # per-control Avoid limits and project-level Mute/Avoid rules.
+    assert all(e.params["Bass"] == 2 and e.params["Treble"] == 1 for e in gain)
     assert gain[0].params["Volume"] == 2
-    assert any(rule.excludes(e.params) for e in gain)
+    assert not any(rule.excludes(e.params) for e in gain)
 
     project.plan_rules.append(PlanRule(controls=("Volume",), operator="≤", value=0))
     initialize_calibration(project)
@@ -38,7 +39,7 @@ def test_plan_rules_filter_neural_captures_but_not_volume_calibration():
     assert {e.params["Volume"] for e in project.entries if e.split == "gain"} == {0, 1, 2}
 
 
-def test_volume_calibration_sets_other_knobs_to_10_even_when_avoided():
+def test_volume_calibration_uses_centered_context_and_respects_avoid_rules():
     knobs = [
         KnobSpec("Gain", 0, 10, 1, 5),
         KnobSpec("Bass", 0, 10, 1, 5),
@@ -51,10 +52,10 @@ def test_volume_calibration_sets_other_knobs_to_10_even_when_avoided():
     gain = project.entries_for_split("gain")
     assert len(gain) == 11
     assert all(
-        e.params["Gain"] == 10 and e.params["Bass"] == 10
-        and e.params["Treble"] == 10 for e in gain
+        e.params["Gain"] == 5 and e.params["Bass"] == 5
+        and e.params["Treble"] == 5 for e in gain
     )
-    assert any(rule.excludes(e.params) for e in gain)
+    assert not any(rule.excludes(e.params) for e in gain)
     assert {e.params["Volume"] for e in gain} == set(range(11))
 
 
@@ -109,7 +110,7 @@ def test_replan_keeps_matching_recordings_and_can_reuse_an_unused_take(workspace
 
 
 
-def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_end():
+def test_volume_calibration_uses_nearest_allowed_center_and_preserves_switch_end():
     controls = [
         KnobSpec("Gain", 0, 8, 1, 5, avoid_above=6),
         KnobSpec("Bias", -2, 2, 1, 0, avoid_above=1),
@@ -121,7 +122,7 @@ def test_volume_calibration_clamps_10_to_reachable_range_and_preserves_switch_en
     entries = project.entries_for_split("gain")
     assert len(entries) == 3
     assert all(
-        e.params["Gain"] == 8 and e.params["Bias"] == 2
+        e.params["Gain"] == 5 and e.params["Bias"] == 1
         and e.params["Channel"] == "C"
         for e in entries
     )
