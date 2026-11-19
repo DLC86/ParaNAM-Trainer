@@ -207,19 +207,26 @@ def apply_model_edits(model, metadata, controls=None):
         raise ValueError("Notes must be text")
     result["metadata"] = merged
 
-    # Keep independent static Full/Lite NAM submodels' user fields in sync,
-    # never touching their gain/loudness or other computed metadata.
+    # Propagate ONLY fields actually edited at the container level.
+    # A child can contain historically distinct metadata that is absent at
+    # the root; an unrelated edit must never clear those child-only values.
     if result.get("architecture") == "SlimmableContainer":
-        for submodel in result.get("config", {}).get("submodels", ()):
-            child = submodel.get("model")
-            if isinstance(child, dict):
-                cm = dict(child.get("metadata", {}))
-                for key in USER_FIELDS:
-                    if key in merged:
-                        cm[key] = merged[key]
-                    else:
-                        cm.pop(key, None)
-                child["metadata"] = cm
+        prior = model.get("metadata", {})
+        changed = [
+            key for key in USER_FIELDS
+            if prior.get(key) != merged.get(key)
+        ]
+        if changed:
+            for submodel in result.get("config", {}).get("submodels", ()):
+                child = submodel.get("model")
+                if isinstance(child, dict):
+                    cm = dict(child.get("metadata", {}))
+                    for key in changed:
+                        if key in merged:
+                            cm[key] = merged[key]
+                        else:
+                            cm.pop(key, None)
+                    child["metadata"] = cm
 
     if result["architecture"] in PARAMETRIC_ARCHITECTURES:
         edits = validate_control_edits(result, controls if controls is not None else editable_controls(result))
