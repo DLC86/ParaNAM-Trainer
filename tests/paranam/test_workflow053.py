@@ -56,7 +56,13 @@ def test_navigation_brand_recent_rows_and_responsive_queue(window, workspace, qa
         "Queue",
         "Compare",
         "Settings",
+        "Editor",
     ]
+    # Page IDs remain backwards-compatible, but the rail displays Editor
+    # immediately above Settings for quick access.
+    assert window.editor_button.y() + window.editor_button.height() <= window.settings_button.y()
+    assert window.steps[6] is window.settings_button
+    assert window.steps[7] is window.editor_button
     assert window.audio_card.parent() == window.page_contents[6]
     assert window.calibration_card.parent() == window.page_contents[6]
     assert window.settings_button.y() > window.steps[5].y() + window.steps[5].height()
