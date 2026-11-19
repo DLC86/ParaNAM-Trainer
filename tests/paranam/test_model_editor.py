@@ -189,6 +189,28 @@ def test_editor_static_nam_metadata_preserves_submodel_loudness_and_weights():
         assert model["weights"] == [weight]
 
 
+def test_editor_keeps_child_specific_metadata_that_is_not_at_container_root():
+    doc = {
+        "architecture": "SlimmableContainer",
+        "config": {"submodels": [
+            {"model": {"metadata": {"gear_model": "One", "loudness": -18}}},
+            {"model": {"metadata": {"gear_model": "Two", "loudness": -21}}},
+        ]},
+        "metadata": {"modeled_by": "Author"},
+        "weights": [],
+    }
+    changed = apply_model_edits(doc, {"modeled_by": "Different author"})
+    children = changed["config"]["submodels"]
+    assert children[0]["model"]["metadata"]["gear_model"] == "One"
+    assert children[1]["model"]["metadata"]["gear_model"] == "Two"
+    assert children[0]["model"]["metadata"]["loudness"] == -18
+    assert children[1]["model"]["metadata"]["loudness"] == -21
+    assert all(
+        item["model"]["metadata"]["modeled_by"] == "Different author"
+        for item in children
+    )
+
+
 def test_editor_rejects_bad_model_files_and_invalid_metadata(tmp_path):
     path = tmp_path / "broken.pnam"
     path.write_text('{"metadata":{}}', encoding="utf-8")
