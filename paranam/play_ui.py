@@ -367,27 +367,6 @@ class PlayActions:
         header_info.setSpacing(10)
         header_info.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
         header.addWidget(self.play_header_info, 1, Qt.AlignmentFlag.AlignTop)
-        # The meters occupy the whole right-hand side of the header.
-        self.play_input_meter = LevelMeter(1)
-        self.play_output_meter = LevelMeter(2)
-        self.play_input_peak = QLabel("−∞ dBFS")
-        self.play_output_peak = QLabel("−∞ dBFS")
-        for caption, meter, peak in (
-            ("Instrument", self.play_input_meter, self.play_input_peak),
-            ("Monitor L/R", self.play_output_meter, self.play_output_peak),
-        ):
-            meter_column = QWidget()
-            meter_layout = QVBoxLayout(meter_column)
-            meter_layout.setContentsMargins(0, 0, 0, 0)
-            meter_layout.setSpacing(3)
-            caption_widget = QLabel(caption)
-            caption_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            peak.setMinimumSize(108, 25)
-            peak.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            meter_layout.addWidget(caption_widget)
-            meter_layout.addWidget(meter, alignment=Qt.AlignmentFlag.AlignHCenter)
-            meter_layout.addWidget(peak)
-            header.addWidget(meter_column, alignment=Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
         note = QLabel(
             "Instrument → selected instrument input · Reamp send → gear → return · Monitor L/R → speakers or headphones. Disable interface direct monitoring on these channels."
@@ -444,22 +423,32 @@ class PlayActions:
         buffer_note.setObjectName("muted")
         buffer_row.addWidget(buffer_note, 1)
         header_info.addLayout(buffer_row)
-        # Separate rows directly beneath Playback buffer, rather than
-        # placing these selectors alongside the Input / Output gain knobs.
+        # Match all three selector controls in typography and dimensions.
+        combo_width = max(
+            self.play_buffer.sizeHint().width(),
+            self.play_size.sizeHint().width(),
+            self.play_output_mode.sizeHint().width(),
+        )
+        combo_height = max(
+            self.play_buffer.sizeHint().height(),
+            self.play_size.sizeHint().height(),
+            self.play_output_mode.sizeHint().height(),
+        )
+        for selector in (self.play_buffer, self.play_size, self.play_output_mode):
+            selector.setFont(self.play_buffer.font())
+            selector.setFixedSize(combo_width, combo_height)
+        # Model size and Output mode share one row beneath Playback buffer.
+        selector_row = QHBoxLayout()
         for caption, selector in (
             ("Model size", self.play_size),
             ("Output mode", self.play_output_mode),
         ):
-            selector_row = QHBoxLayout()
             caption_widget = QLabel(caption)
             caption_widget.setObjectName("compareControlLabel")
-            caption_widget.setMinimumWidth(115)
-            selector.setMinimumWidth(190)
-            selector.setMaximumWidth(260)
             selector_row.addWidget(caption_widget)
             selector_row.addWidget(selector)
-            selector_row.addStretch(1)
-            header_info.addLayout(selector_row)
+        selector_row.addStretch(1)
+        header_info.addLayout(selector_row)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
@@ -543,21 +532,37 @@ class PlayActions:
         controls = QGridLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setHorizontalSpacing(18)
-        controls.setColumnStretch(0, 1)
-        controls.setColumnStretch(1, 0)
-        controls.setColumnStretch(2, 1)
+        controls.setColumnStretch(0, 0)
+        controls.setColumnStretch(1, 1)
+        controls.setColumnStretch(2, 0)
+        controls.setColumnStretch(3, 1)
+        controls.setColumnStretch(4, 0)
         self.play_gain_layout = controls
+        self.play_input_meter = LevelMeter(1)
+        self.play_output_meter = LevelMeter(2)
+        self.play_input_peak = QLabel("−∞ dBFS")
+        self.play_output_peak = QLabel("−∞ dBFS")
+        controls.addWidget(
+            self._play_meter_column("Instrument", self.play_input_meter, self.play_input_peak),
+            0, 0, 3, 1,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
         self.play_input = self._play_gain(
-            "Input", -20, 20, 0, controls, 0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "Input", -20, 20, 0, controls, 1,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
         )
         controls.addWidget(
-            self.play_action_bar, 0, 1, 3, 1,
+            self.play_action_bar, 0, 2, 3, 1,
             alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
         )
         self.play_output = self._play_gain(
-            "Output", -20, 20, 0, controls, 2,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            "Output", -20, 20, 0, controls, 3,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        )
+        controls.addWidget(
+            self._play_meter_column("Monitor L/R", self.play_output_meter, self.play_output_peak),
+            0, 4, 3, 1,
+            alignment=Qt.AlignmentFlag.AlignCenter,
         )
         layout.addLayout(controls)
         self.play_calibration = QLabel("")
@@ -677,6 +682,21 @@ class PlayActions:
         field.valueChanged.connect(lambda v: dial.setValue(round(v * 10)))
         field.valueChanged.connect(self.update_play_settings)
         return field
+
+    @staticmethod
+    def _play_meter_column(caption, meter, peak):
+        column = QWidget()
+        meter_layout = QVBoxLayout(column)
+        meter_layout.setContentsMargins(0, 0, 0, 0)
+        meter_layout.setSpacing(3)
+        caption_widget = QLabel(caption)
+        caption_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        peak.setMinimumSize(108, 25)
+        peak.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        meter_layout.addWidget(caption_widget)
+        meter_layout.addWidget(meter, alignment=Qt.AlignmentFlag.AlignHCenter)
+        meter_layout.addWidget(peak)
+        return column
 
     def _selected_asset_paths(self, view):
         return {
