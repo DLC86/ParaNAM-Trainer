@@ -160,10 +160,12 @@ class EditorActions:
         self.editor_source_path = None
         self.editor_control_rows = []
         self._editor_loading_fields = False
+        self._editor_dirty = False
         layout.addStretch()
 
     def _editor_metadata_changed(self, *_):
         if self.editor_document is not None:
+            self._editor_dirty = True
             self.editor_status.setText("Unsaved metadata changes")
 
     def editor_open_file(self, checked=False, path=None):
@@ -174,6 +176,15 @@ class EditorActions:
             )
         if not path:
             return
+        if self._editor_dirty:
+            confirm = QMessageBox.question(
+                self, "Discard unsaved edits?",
+                "The current model has unsaved edits. Discard them and open another file?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
         try:
             model = load_model_file(path)
             controls = editable_controls(model) if Path(path).suffix.lower() == ".pnam" else []
@@ -181,6 +192,7 @@ class EditorActions:
             QMessageBox.warning(self, "Cannot open model", str(exc))
             return
         self.editor_document = model
+        self._editor_dirty = False
         self.editor_source_path = Path(path).resolve()
         self.editor_control_rows = controls
         self.editor_path_label.setText(str(self.editor_source_path))
@@ -278,6 +290,7 @@ class EditorActions:
             if control["name"] != new_name:
                 control["name"] = new_name
                 self._editor_refresh_controls(select_key=control["key"])
+                self._editor_dirty = True
                 self.editor_status.setText("Unsaved control changes")
 
     def _editor_control_index_changed(self, index):
@@ -296,6 +309,7 @@ class EditorActions:
                 other["index"] += 1
         control["index"] = index
         self._editor_refresh_controls(select_key=control["key"])
+        self._editor_dirty = True
         self.editor_status.setText("Unsaved control order changes")
 
     def _editor_refresh_options(self, selected_value=None):
@@ -354,6 +368,7 @@ class EditorActions:
             if option["name"] != new_name:
                 option["name"] = new_name
                 self._editor_refresh_options(selected_value=option["value"])
+                self._editor_dirty = True
                 self.editor_status.setText("Unsaved switch option changes")
 
     def _editor_option_index_changed(self, index):
@@ -373,6 +388,7 @@ class EditorActions:
                 other["index_sw"] += 1
         option["index_sw"] = index
         self._editor_refresh_options(selected_value=option["value"])
+        self._editor_dirty = True
         self.editor_status.setText("Unsaved switch order changes")
 
     def _editor_collect_metadata(self):
@@ -454,6 +470,7 @@ class EditorActions:
             QMessageBox.warning(self, "Cannot save model", str(exc))
             return
         self.editor_document = document
+        self._editor_dirty = False
         self.editor_source_path = destination
         self.editor_path_label.setText(str(destination))
         self.editor_status.setText(f"Saved {destination.name}")
