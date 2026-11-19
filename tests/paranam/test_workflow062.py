@@ -71,6 +71,88 @@ def test_compare_without_project_and_two_visible_asset_lists(window, qapp):
     assert not window.play_ir_list.isHidden()
 
 
+def test_compare_header_meters_selectors_and_ten_row_lists(window, qapp):
+    from PySide6.QtWidgets import QLabel
+
+    window.navigate(5)
+    window.show()
+    qapp.processEvents()
+    title = next(
+        x for x in window.page_contents[5].findChildren(QLabel)
+        if x.text() == "Play & Compare"
+    )
+    assert window.play_input_meter.parentWidget().y() == title.y()
+    assert window.play_output_meter.parentWidget().y() == title.y()
+    assert window.play_input_meter.x() >= 0
+    assert window.play_output_meter.x() >= 0
+    assert window.play_size.y() > window.play_buffer.y()
+    assert window.play_output_mode.y() > window.play_size.y()
+    for view in (window.play_model_list, window.play_ir_list):
+        assert view.minimumHeight() >= 320
+        assert view.minimumHeight() >= 10 * view.fontMetrics().lineSpacing()
+
+
+def test_compare_empty_parametric_panel_matches_single_control_height(
+    window, workspace, qapp,
+):
+    window._attach(workspace)
+    window.navigate(5)
+    window.show()
+    window.clear_play_controls()
+    for _ in range(3):
+        qapp.processEvents()
+    empty_height = window.play_controls.height()
+    assert empty_height >= 200
+    window._play_model_loaded(dict(
+        size_selection=True,
+        controls=[dict(name="Gain", min=0, max=10, default=5, positions=[])],
+    ))
+    for _ in range(3):
+        qapp.processEvents()
+    assert abs(window.play_controls.height() - empty_height) <= 2
+
+
+def test_compare_clear_list_hides_models_but_preserves_tone3000_irs(
+    window, qapp, tmp_path,
+):
+    from paranam.ir import BUNDLED
+
+    model = tmp_path / "custom.pnam"
+    ir = tmp_path / "custom.wav"
+    model.write_text("model", encoding="utf-8")
+    ir.write_bytes(b"saved custom impulse response")
+    window.settings.setValue("play_models", [str(model)])
+    window.settings.setValue("play_irs", [str(ir)])
+    window.refresh_play_models(force=True)
+    window.play_ir.addItem(ir.name, str(ir))
+    window.play_model_list.sync()
+    window.play_ir_list.sync()
+    window.update_asset_remove_buttons()
+    assert window.play_model_clear.isEnabled()
+    assert window.play_ir_clear.isEnabled()
+
+    window.play_model_clear.click()
+    window.play_ir_clear.click()
+    qapp.processEvents()
+    assert window.play_model.count() == 1
+    assert window.play_model_list.count() == 1  # Non-model placeholder
+    assert window.play_ir.count() == 7  # Off + six bundled Tone3000 IRs
+    assert window.play_ir_list.count() == 7
+    assert all(
+        Path(window.play_ir.itemData(i)).resolve().is_relative_to(BUNDLED.resolve())
+        for i in range(1, 7)
+    )
+    assert window.settings.value("play_irs", []) == []
+    assert str(model.resolve()) in window.settings.value("play_hidden_models", [])
+    assert model.is_file() and ir.is_file()
+
+    window.refresh_play_models(force=True)
+    qapp.processEvents()
+    assert window.play_model.count() == 1
+    assert not window.play_model_clear.isEnabled()
+    assert not window.play_ir_clear.isEnabled()
+
+
 def test_asset_list_keeps_selection_and_loads_once(qapp):
     selector = QComboBox()
     selector.addItem("One", "/one")
