@@ -48,6 +48,8 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
     assert spec["learning"]["train_dataloader"]["drop_last"] is True
     if kind == "static":
         assert "gradient_clip_val" not in spec["learning"]["trainer"]
+        assert workspace.training_options("static")["rms_loss_normalization"] is False
+        assert spec["preferences"]["advanced_training"]["rms_loss_normalization"] is False
     else:
         assert spec["learning"]["trainer"]["gradient_clip_val"] == 1.0
         assert spec["model"]["hypernet_lr_scale"] == 0.1
@@ -90,6 +92,25 @@ def test_custom_recipe_reaches_worker_and_prevents_incompatible_resume(
     assert training.job_can_resume(workspace, job)
     workspace.preferences["advanced_" + kind]["learning_rate"] *= 2
     assert not training.job_can_resume(workspace, job)
+
+
+def test_static_rms_default_can_be_explicitly_overridden_and_preserved(
+    window, workspace,
+):
+    assert workspace.training_options("static")["rms_loss_normalization"] is False
+    assert workspace.training_options("parametric")["rms_loss_normalization"] is True
+    window._attach(workspace)
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert not window.advanced_fields["rms_loss_normalization"].isChecked()
+    # User choice must take priority over defaults, including after reopening.
+    window.advanced_fields["rms_loss_normalization"].setChecked(True)
+    assert Workspace(workspace.directory).training_options("static")[
+        "rms_loss_normalization"
+    ] is True
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
+    assert window.advanced_fields["rms_loss_normalization"].isChecked()
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert window.advanced_fields["rms_loss_normalization"].isChecked()
 
 
 def test_collapsed_panel_preserves_independent_recipes(window, workspace):
