@@ -534,17 +534,6 @@ class PlayActions:
         self.play_quick_stop = QPushButton("Stop playing")
         self.play_quick_stop.clicked.connect(self.stop_playback)
         transport.addWidget(self.play_quick_stop)
-        self.play_calibration = QLabel("")
-        self.play_calibration.setWordWrap(True)
-        layout.addWidget(self.play_calibration)
-        self.play_controls = ControlPanel()
-        self.play_controls.setObjectName("ampPanel")
-        self.play_controls_layout = ControlFlowLayout(self.play_controls)
-        self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
-        self.play_controls_layout.setHorizontalSpacing(24)
-        self.play_controls.setMinimumHeight(248)
-        self.play_values = []
-        layout.addWidget(self.play_controls)
         controls = QGridLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setHorizontalSpacing(18)
@@ -565,6 +554,17 @@ class PlayActions:
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         layout.addLayout(controls)
+        self.play_calibration = QLabel("")
+        self.play_calibration.setWordWrap(True)
+        layout.addWidget(self.play_calibration)
+        self.play_controls = ControlPanel()
+        self.play_controls.setObjectName("ampPanel")
+        self.play_controls_layout = ControlFlowLayout(self.play_controls)
+        self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
+        self.play_controls_layout.setHorizontalSpacing(24)
+        self.play_controls.setMinimumHeight(248)
+        self.play_values = []
+        layout.addWidget(self.play_controls)
         row = QHBoxLayout()
         row.addWidget(QLabel("Monitor IR"))
         self.play_ir = QComboBox(self)
@@ -689,6 +689,19 @@ class PlayActions:
         )
         self.play_model_remove.setEnabled(bool(models))
         self.play_ir_remove.setEnabled(custom)
+        self.play_model_clear.setEnabled(
+            any(self.play_model.itemData(i) for i in range(self.play_model.count()))
+        )
+        self.play_ir_clear.setEnabled(
+            not getattr(self, "ir_loader", None)
+            and any(
+                self.play_ir.itemData(i)
+                and not Path(self.play_ir.itemData(i)).resolve().is_relative_to(
+                    BUNDLED.resolve()
+                )
+                for i in range(self.play_ir.count())
+            )
+        )
         self.play_model_remove.setToolTip(
             "Remove selected entries from this list; keep files on disk"
         )
@@ -721,6 +734,69 @@ class PlayActions:
         else:
             self.refresh_play_models(force=True)
             self.play_model_list.sync()
+        self.update_asset_remove_buttons()
+
+    def clear_play_models(self):
+        """Remove every listed model from Compare, without deleting its WAV/NAM file.
+
+        Models discovered from the project and the training queue need an
+        explicit hide entry, otherwise refreshing would immediately re-add
+        them after clearing the recent history.
+        """
+        removed = {
+            str(Path(path).resolve())
+            for i in range(self.play_model.count())
+            if (path := self.play_model.itemData(i))
+        }
+        if not removed:
+            return
+        hidden = self.settings.value("play_hidden_models", []) or []
+        if isinstance(hidden, str):
+            hidden = [hidden]
+        self.settings.setValue("play_hidden_models", sorted(
+            {str(Path(p).resolve()) for p in hidden} | removed
+        ))
+        self.settings.setValue("play_models", [])
+        if self.play_worker:
+            self.stop_playback()
+        blocked = self.play_model.blockSignals(True)
+        self.play_model.setCurrentIndex(0)
+        self.play_model.blockSignals(blocked)
+        self._play_ready = False
+        self.play_start.setEnabled(False)
+        self.clear_play_controls()
+        if self.play_loader:
+            self._refresh_models_after_loader = True
+        else:
+            self.refresh_play_models(force=True)
+            self.play_model_list.sync()
+        self.update_asset_remove_buttons()
+
+    def clear_play_irs(self):
+        """Keep the bundled Tone3000 IRs and Off; remove every imported IR."""
+        if self.ir_loader:
+            return
+        bundled = BUNDLED.resolve()
+        current = self.play_ir.currentData()
+        retained_current = (
+            current if current and Path(current).resolve().is_relative_to(bundled)
+            else None
+        )
+        blocked = self.play_ir.blockSignals(True)
+        for i in range(self.play_ir.count() - 1, -1, -1):
+            path = self.play_ir.itemData(i)
+            if path and not Path(path).resolve().is_relative_to(bundled):
+                self.play_ir.removeItem(i)
+        self.play_ir.setCurrentIndex(max(0, self.play_ir.findData(retained_current)))
+        self.play_ir.blockSignals(blocked)
+        self.settings.setValue("play_irs", [])
+        if retained_current is None:
+            # Explicitly clear both persisted selection and the active IR
+            # processor (which could otherwise keep a removed custom IR).
+            self.load_play_ir()
+        else:
+            self.settings.setValue("play_ir", retained_current)
+        self.play_ir_list.sync()
         self.update_asset_remove_buttons()
 
     def remove_play_irs(self):
