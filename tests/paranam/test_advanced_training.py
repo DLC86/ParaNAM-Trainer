@@ -119,6 +119,30 @@ def test_static_rms_default_off_and_preserves_existing_explicit_setting(
     assert window.advanced_fields["rms_loss_normalization"].isChecked()
 
 
+def test_checkpoint_rows_are_hidden_for_static_training(window, workspace):
+    window._attach(workspace)
+    form = window.advanced_panel.layout()
+    method = window.advanced_fields["checkpoint_method"]
+    alpha = window.advanced_fields["checkpoint_alpha"]
+
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert not form.isRowVisible(method)
+    assert not form.isRowVisible(alpha)
+
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
+    assert form.isRowVisible(method)
+    assert not form.isRowVisible(alpha)
+    method.setCurrentIndex(method.findData("combined"))
+    assert form.isRowVisible(method)
+    assert form.isRowVisible(alpha)
+    method.setCurrentIndex(method.findData("validation"))
+    assert not form.isRowVisible(alpha)
+
+    window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
+    assert not form.isRowVisible(method)
+    assert not form.isRowVisible(alpha)
+
+
 def test_collapsed_panel_preserves_independent_recipes(window, workspace):
     window._attach(workspace)
     assert not window.advanced_toggle.isChecked()
