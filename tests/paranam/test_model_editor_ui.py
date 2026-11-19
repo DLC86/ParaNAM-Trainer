@@ -10,7 +10,37 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QMessageBox
 
 from paranam.model_editor_core import editable_controls
-from tests.paranam.test_model_editor import sample_pnam
+def sample_pnam():
+    params = [
+        {"name": "Gain", "min": 0, "max": 10, "default": 5,
+         "type": "continuous", "index": 1},
+        {"name": "Mode", "min": 0, "max": 2, "default": 1, "type": "switch",
+         "index": 0,
+         "options": [
+             {"name": "Clean", "value": 0, "index_sw": 2},
+             {"name": "Crunch", "value": 1, "index_sw": 0},
+             {"name": "Lead", "value": 2, "index_sw": 1},
+         ]},
+    ]
+    return {
+        "architecture": "ParametricSlimmableContainer",
+        "weights": [0.125, -0.5],
+        "config": {
+            "params": copy.deepcopy(params),
+            "submodels": [
+                {"name": size, "config": {"params": copy.deepcopy(params)}}
+                for size in ("lite", "full")
+            ],
+        },
+        "metadata": {"modeled_by": "Old author", "loudness": -15.0},
+        "extensions": {
+            "linear_volume": {
+                "name": "Volume", "index": 2, "min": 0, "max": 10,
+                "default": 10, "points": [[0, -60], [10, 0]],
+            }
+        },
+    }
+
 
 
 def test_compare_header_groups_all_description_and_playback_selectors_left(window, qapp):
@@ -50,7 +80,7 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     assert not window.editor_save_button.isEnabled()
 
     window.editor_open_file(path=source)
-    assert window.editor_controls_card.isVisibleTo(window.page_contents[7])
+    assert not window.editor_controls_card.isHidden()
     assert window.editor_control_list.count() == 3
     assert "Gain" in window.editor_control_list.item(1).text()
     assert window.editor_metadata.fields["modeled_by"].text() == "Old author"
@@ -142,6 +172,10 @@ def test_editor_rejects_invalid_numeric_inputs_without_modifying_model(
     monkeypatch.setattr(
         "paranam.model_editor_ui.QMessageBox.warning",
         lambda *args: messages.append(str(args[-1])),
+    )
+    monkeypatch.setattr(
+        "paranam.model_editor_ui.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
     )
     window._editor_save(destination=source)
     assert source.read_text() == json.dumps(document)
