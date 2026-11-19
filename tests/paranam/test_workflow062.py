@@ -81,12 +81,19 @@ def test_compare_header_meters_selectors_and_ten_row_lists(window, qapp):
         x for x in window.page_contents[5].findChildren(QLabel)
         if x.text() == "Play & Compare"
     )
-    assert window.play_input_meter.parentWidget().y() == title.y()
-    assert window.play_output_meter.parentWidget().y() == title.y()
+    grid = window.play_gain_layout
+    input_meter_column = grid.itemAtPosition(0, 0).widget()
+    input_label = grid.itemAtPosition(0, 1).widget()
+    output_label = grid.itemAtPosition(0, 3).widget()
+    output_meter_column = grid.itemAtPosition(0, 4).widget()
+    assert input_meter_column.findChild(type(window.play_input_meter)) is window.play_input_meter
+    assert output_meter_column.findChild(type(window.play_output_meter)) is window.play_output_meter
+    assert input_meter_column.geometry().center().y() >= input_label.geometry().top()
+    assert output_meter_column.geometry().center().y() >= output_label.geometry().top()
     assert window.play_input_meter.x() >= 0
     assert window.play_output_meter.x() >= 0
     assert window.play_size.y() > window.play_buffer.y()
-    assert window.play_output_mode.y() > window.play_size.y()
+    assert window.play_output_mode.y() == window.play_size.y()
     for view in (window.play_model_list, window.play_ir_list):
         assert view.minimumHeight() >= 320
         assert view.minimumHeight() >= 10 * view.fontMetrics().lineSpacing()
