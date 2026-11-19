@@ -357,7 +357,32 @@ class PlayActions:
     def _play(self, layout):
         title = QLabel("Play & Compare")
         title.setObjectName("title")
-        layout.addWidget(title)
+        header = QHBoxLayout()
+        header.setSpacing(18)
+        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignTop)
+        header.addStretch(1)
+        # Meters share the title's top row, aligned to the right.
+        self.play_input_meter = LevelMeter(1)
+        self.play_output_meter = LevelMeter(2)
+        self.play_input_peak = QLabel("−∞ dBFS")
+        self.play_output_peak = QLabel("−∞ dBFS")
+        for caption, meter, peak in (
+            ("Instrument", self.play_input_meter, self.play_input_peak),
+            ("Monitor L/R", self.play_output_meter, self.play_output_peak),
+        ):
+            meter_column = QWidget()
+            meter_layout = QVBoxLayout(meter_column)
+            meter_layout.setContentsMargins(0, 0, 0, 0)
+            meter_layout.setSpacing(3)
+            caption_widget = QLabel(caption)
+            caption_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            peak.setMinimumSize(108, 25)
+            peak.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            meter_layout.addWidget(caption_widget)
+            meter_layout.addWidget(meter, alignment=Qt.AlignmentFlag.AlignHCenter)
+            meter_layout.addWidget(peak)
+            header.addWidget(meter_column, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
         note = QLabel(
             "Instrument → selected instrument input · Reamp send → gear → return · Monitor L/R → speakers or headphones. Disable interface direct monitoring on these channels."
         )
@@ -398,6 +423,9 @@ class PlayActions:
         self.play_model_remove = QPushButton("Remove")
         self.play_model_remove.clicked.connect(self.remove_play_models)
         model_buttons.addWidget(self.play_model_remove)
+        self.play_model_clear = QPushButton("Clear list")
+        self.play_model_clear.clicked.connect(self.clear_play_models)
+        model_buttons.addWidget(self.play_model_clear)
         buffer_row = QHBoxLayout()
         buffer_row.addWidget(QLabel("Playback buffer"))
         self.play_buffer = QComboBox()
@@ -410,6 +438,22 @@ class PlayActions:
         buffer_note.setObjectName("muted")
         buffer_row.addWidget(buffer_note, 1)
         layout.addLayout(buffer_row)
+        # Separate rows directly beneath Playback buffer, rather than
+        # placing these selectors alongside the Input / Output gain knobs.
+        for caption, selector in (
+            ("Model size", self.play_size),
+            ("Output mode", self.play_output_mode),
+        ):
+            selector_row = QHBoxLayout()
+            caption_widget = QLabel(caption)
+            caption_widget.setObjectName("compareControlLabel")
+            caption_widget.setMinimumWidth(115)
+            selector.setMinimumWidth(190)
+            selector.setMaximumWidth(260)
+            selector_row.addWidget(caption_widget)
+            selector_row.addWidget(selector)
+            selector_row.addStretch(1)
+            layout.addLayout(selector_row)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
@@ -480,7 +524,8 @@ class PlayActions:
         panel.addLayout(row)
         self.model_button.setChecked(True)
         self.play_sources.idClicked.connect(self.update_play_settings)
-        layout.addWidget(self.play_action_bar, alignment=Qt.AlignmentFlag.AlignHCenter)
+        # The action bar is placed between Input (left edge) and Output
+        # (right edge), in the same row instead of on a separate line.
         # Keep Stop reachable on other pages without moving the comparison buttons.
         self.play_transport_bar = QWidget()
         transport = QHBoxLayout(self.play_transport_bar)
@@ -497,42 +542,28 @@ class PlayActions:
         self.play_controls_layout = ControlFlowLayout(self.play_controls)
         self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
         self.play_controls_layout.setHorizontalSpacing(24)
-        self.play_controls.setMinimumHeight(108)
+        self.play_controls.setMinimumHeight(248)
         self.play_values = []
         layout.addWidget(self.play_controls)
         controls = QGridLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
         controls.setHorizontalSpacing(18)
+        controls.setColumnStretch(0, 1)
+        controls.setColumnStretch(1, 0)
+        controls.setColumnStretch(2, 1)
         self.play_gain_layout = controls
-        self.play_input_meter = LevelMeter(1)
-        self.play_output_meter = LevelMeter(2)
-        self.play_input_peak = QLabel("−∞ dBFS")
-        self.play_output_peak = QLabel("−∞ dBFS")
-        for column, title, meter, peak in (
-            (0, "Instrument", self.play_input_meter, self.play_input_peak),
-            (5, "Monitor L/R", self.play_output_meter, self.play_output_peak),
-        ):
-            peak.setMinimumSize(120, 30)
-            peak.setMargin(4)
-            peak.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            controls.addWidget(
-                QLabel(title), 0, column, alignment=Qt.AlignmentFlag.AlignCenter
-            )
-            controls.addWidget(meter, 1, column, alignment=Qt.AlignmentFlag.AlignCenter)
-            controls.addWidget(peak, 2, column, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.play_input = self._play_gain("Input", -20, 20, 0, controls, 1)
-        self.play_output = self._play_gain("Output", -20, 20, 0, controls, 4)
-        for column, (caption, selector) in enumerate(
-            (("Model size", self.play_size), ("Output mode", self.play_output_mode)), 2
-        ):
-            title = QLabel(caption)
-            title.setObjectName("compareControlLabel")
-            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            controls.addWidget(title, 0, column)
-            selector.setMinimumWidth(140)
-            selector.setAttribute(Qt.WidgetAttribute.WA_LayoutUsesWidgetRect, True)
-            controls.addWidget(
-                selector, 1, column, alignment=Qt.AlignmentFlag.AlignCenter
-            )
+        self.play_input = self._play_gain(
+            "Input", -20, 20, 0, controls, 0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        controls.addWidget(
+            self.play_action_bar, 0, 1, 3, 1,
+            alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.play_output = self._play_gain(
+            "Output", -20, 20, 0, controls, 2,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
         layout.addLayout(controls)
         row = QHBoxLayout()
         row.addWidget(QLabel("Monitor IR"))
@@ -550,6 +581,9 @@ class PlayActions:
         self.play_ir_remove = QPushButton("Remove")
         self.play_ir_remove.clicked.connect(self.remove_play_irs)
         ir_buttons.addWidget(self.play_ir_remove)
+        self.play_ir_clear = QPushButton("Clear list")
+        self.play_ir_clear.clicked.connect(self.clear_play_irs)
+        ir_buttons.addWidget(self.play_ir_clear)
         self.play_model_list = AssetList(self.play_model)
         self.play_ir_list = AssetList(self.play_ir)
         self.play_model_list.itemSelectionChanged.connect(
@@ -610,26 +644,29 @@ class PlayActions:
         self._play_ready = False
         self.update_asset_remove_buttons()
 
-    def _play_gain(self, name, minimum, maximum, default, layout, column=None):
+    def _play_gain(
+        self, name, minimum, maximum, default, layout, column=None,
+        alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+    ):
         if column is None:
             column = layout.count() // 3
         title = QLabel(name)
         title.setObjectName("compareControlLabel")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title, 0, column)
+        layout.addWidget(title, 0, column, alignment=alignment)
         dial = PlayDial()
         dial.setRange(int(minimum * 10), int(maximum * 10))
         dial.setValue(int(default * 10))
         dial.setDefaultValue(int(default * 10))
         dial.setFixedSize(92, 92)
-        layout.addWidget(dial, 1, column, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(dial, 1, column, alignment=alignment)
         field = ControlValue()
         field.setRange(minimum, maximum)
         field.setDecimals(1)
         field.setValue(default)
         field.setSuffix(" dB")
         field.setFixedWidth(120)
-        layout.addWidget(field, 2, column, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(field, 2, column, alignment=alignment)
         dial.valueChanged.connect(lambda v: field.setValue(v / 10))
         field.valueChanged.connect(lambda v: dial.setValue(round(v * 10)))
         field.valueChanged.connect(self.update_play_settings)
