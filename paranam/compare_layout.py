@@ -33,6 +33,8 @@ class ControlFlowLayout(QLayout):
         super().__init__(parent)
         self.items = []
         self.setSpacing(24)
+        # Keep an empty parametric panel exactly one knob-row tall.
+        self.empty_row_height = 204
 
     def setHorizontalSpacing(self, spacing):
         self.setSpacing(spacing)
@@ -118,6 +120,8 @@ class ControlFlowLayout(QLayout):
             y += row_height + gap
         if rows:
             y -= gap
+        else:
+            y += self.empty_row_height
         return y - rect.y() + margins.bottom()
 
 
@@ -128,7 +132,8 @@ class AssetList(QListWidget):
         super().__init__(parent)
         self.selector = selector
         self.pending = False
-        self.setMinimumHeight(180)
+        # At least ten standard model/IR items are visible before scrolling.
+        self.setMinimumHeight(max(320, 10 * (self.fontMetrics().lineSpacing() + 10)))
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         selector.installEventFilter(self)
         selector.currentIndexChanged.connect(self.sync)
