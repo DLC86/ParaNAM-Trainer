@@ -19,6 +19,63 @@ from tests.capture.test_session import _FakeRecorder
 RATE = 48000
 
 
+def test_new_linear_volume_context_uses_five_and_gain_zero_with_mute_step(tmp_path):
+    from nam.capture.output_gain import _context
+
+    project = CaptureProject(
+        name="Linear Volume",
+        knobs=[
+            KnobModel(name="Tone", min=0, max=10, step=1, default=5),
+            KnobModel(
+                name="Gain", min=0, max=10, step=1, default=5,
+                is_gain=True, mute_at_min=True,
+            ),
+            KnobModel(name="Volume", min=0, max=10, step=1, default=5, clean_volume=True),
+        ],
+        output_gain_state={"linear_volume_context_version": 2},
+    )
+    assert _context(project, centered=True) == {
+        "Tone": 5.0, "Gain": 1.0, "Volume": 10.0,
+    }
+
+
+def test_new_linear_volume_context_moves_away_from_rule_excluded_combination():
+    from nam.capture.output_gain import _context
+    from nam.capture.plan_rules import PlanRule
+
+    project = CaptureProject(
+        name="Linear Volume",
+        knobs=[
+            KnobModel(name="Tone", min=0, max=10, step=1, default=5),
+            KnobModel(name="Gain", min=0, max=10, step=1, default=5, is_gain=True),
+            KnobModel(name="Volume", min=0, max=10, step=1, default=5, clean_volume=True),
+        ],
+        plan_rules=[
+            PlanRule(controls=("Tone",), operator="=", value=5, kind="avoid"),
+        ],
+        output_gain_state={"linear_volume_context_version": 2},
+    )
+    context = _context(project, centered=True)
+    assert context["Tone"] == 4.0
+    assert context["Gain"] == 0.0
+
+
+def test_existing_linear_volume_plan_keeps_legacy_context():
+    from nam.capture.output_gain import _context
+
+    project = CaptureProject(
+        name="Legacy Linear Volume",
+        knobs=[
+            KnobModel(name="Tone", min=0, max=10, step=1, default=5),
+            KnobModel(name="Gain", min=0, max=10, step=1, default=5, is_gain=True),
+            KnobModel(name="Volume", min=0, max=10, step=1, default=5, clean_volume=True),
+        ],
+    )
+    assert _context(project) == {
+        "Tone": 10.0, "Gain": 10.0, "Volume": 10.0,
+    }
+
+
 def test_repeat_pass_is_automatic_and_hidden(tmp_path):
     project = CaptureProject(
         name="Linear Volume",
