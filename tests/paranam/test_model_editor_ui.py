@@ -57,16 +57,16 @@ def test_compare_header_groups_all_description_and_playback_selectors_left(windo
     assert window.play_buffer.parentWidget() is parent
     assert window.play_size.parentWidget() is parent
     assert window.play_output_mode.parentWidget() is parent
-    meters = [window.play_input_meter, window.play_output_meter]
-    for meter in meters:
-        # Meter columns belong to the header, not the left-hand info block.
-        assert meter.parentWidget() is not parent
-        meter_left = meter.mapTo(window.page_contents[5], QPoint(0, 0)).x()
-        left_end = parent.mapTo(
-            window.page_contents[5], QPoint(parent.width(), 0)
-        ).x()
-        assert meter_left >= left_end
-        assert meter.parentWidget().y() == parent.y()
+    # The VU meters flank the Input / Output controls in the gain grid.
+    grid = window.play_gain_layout
+    input_meter_column = grid.itemAtPosition(0, 0).widget()
+    input_label = grid.itemAtPosition(0, 1).widget()
+    output_label = grid.itemAtPosition(0, 3).widget()
+    output_meter_column = grid.itemAtPosition(0, 4).widget()
+    assert input_meter_column.findChild(type(window.play_input_meter)) is window.play_input_meter
+    assert output_meter_column.findChild(type(window.play_output_meter)) is window.play_output_meter
+    assert input_meter_column.mapTo(window.page_contents[5], QPoint(0, 0)).x() < input_label.mapTo(window.page_contents[5], QPoint(0, 0)).x()
+    assert output_meter_column.mapTo(window.page_contents[5], QPoint(0, 0)).x() > output_label.mapTo(window.page_contents[5], QPoint(output_label.width(), 0)).x()
 
 
 def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qapp, monkeypatch):
