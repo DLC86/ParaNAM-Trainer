@@ -274,14 +274,17 @@ def write_model_file(source, destination, model):
             output.write("\n")
             output.flush()
             os.fsync(output.fileno())
-        if source == destination:
+        if destination.is_file():
+            # Back up ANY existing destination, including a Save copy target
+            # the user explicitly chose to replace. Do not touch the source
+            # when Save copy creates a different filename.
             backup = destination.with_name(destination.name + ".bak")
             bfd, temporary_backup = tempfile.mkstemp(
                 prefix=f".{destination.name}.backup.", suffix=".tmp",
                 dir=destination.parent,
             )
             try:
-                with os.fdopen(bfd, "wb") as out, source.open("rb") as original:
+                with os.fdopen(bfd, "wb") as out, destination.open("rb") as original:
                     shutil.copyfileobj(original, out)
                     out.flush()
                     os.fsync(out.fileno())
