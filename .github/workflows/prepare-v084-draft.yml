@@ -33,26 +33,20 @@ jobs:
             echo "::error::Refusing to package a superseded main commit."
             exit 1
           fi
-          gh api "repos/$GH_REPO/releases?per_page=100" > releases.json
-          release_id="$(jq -r '[.[] | select(.draft == true and .name == "ParaNAM Trainer 0.8.4") | .id] | first // empty' releases.json)"
-          if [[ -n "$release_id" ]]; then
-            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
-              -f tag_name="v0.8.4" \
-              -f target_commitish="$GITHUB_SHA" \
-              -f name="ParaNAM Trainer 0.8.4" \
-              -f body="$(cat docs/release-0.8.4.md)" \
-              -F draft=true -F prerelease=true > current.json
-          else
-            gh api --method POST "repos/$GH_REPO/releases" \
-              -f tag_name="v0.8.4" \
-              -f target_commitish="$GITHUB_SHA" \
-              -f name="ParaNAM Trainer 0.8.4" \
-              -f body="$(cat docs/release-0.8.4.md)" \
-              -F draft=true -F prerelease=true > current.json
-            release_id="$(jq -r '.id' current.json)"
-          fi
+          # Reuse the exact existing draft and preserve its identity.
+          # Its older installers remain available until replaced by verified
+          # native packages built from this exact commit.
+          release_id=451221692
+          gh api "repos/$GH_REPO/releases/$release_id" > previous.json
+          jq -e '.id == 451221692 and .draft == true and .name == "ParaNAM Trainer 0.8.4"' previous.json
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="v0.8.4" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="ParaNAM Trainer 0.8.4" \
+            -f body="$(cat docs/release-0.8.4.md)" \
+            -F draft=true -F prerelease=true > current.json
           jq -e --arg sha "$GITHUB_SHA" \
-            '.draft == true and .prerelease == true and .tag_name == "v0.8.4" and .target_commitish == $sha' current.json
+            '.id == 451221692 and .draft == true and .prerelease == true and .tag_name == "v0.8.4" and .target_commitish == $sha' current.json
           echo "Draft 0.8.4 ID: $release_id"
           # Avoid obsolete installers replacing the freshly built packages.
           for previous in $(gh api "repos/$GH_REPO/actions/runs?per_page=100" \
