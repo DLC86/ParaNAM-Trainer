@@ -326,9 +326,15 @@ def test_compare_meter_readouts_and_layout(window, workspace, qapp):
     window.show()
     qapp.processEvents()
     grid = window.play_gain_layout
-    assert [
-        grid.itemAtPosition(0, column).widget().text() for column in range(1, 5)
-    ] == ["Input", "Model size", "Output mode", "Output"]
+    # Only Input and Output flank the action bar; Model size and Output mode
+    # are now separate rows under Playback buffer in the header info column.
+    assert grid.itemAtPosition(0, 0).widget().text() == "Input"
+    assert grid.itemAtPosition(0, 1).widget() is window.play_action_bar
+    assert grid.itemAtPosition(0, 2).widget().text() == "Output"
+    assert window.play_buffer.parentWidget() is window.play_header_info
+    assert window.play_size.parentWidget() is window.play_header_info
+    assert window.play_output_mode.parentWidget() is window.play_header_info
+    assert window.play_buffer.y() < window.play_size.y() < window.play_output_mode.y()
     window._play_metered(
         dict(
             input_peak=0.1,
