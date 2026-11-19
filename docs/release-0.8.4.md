@@ -28,6 +28,12 @@
 - **Knob min/max cannot be edited**: these values define network input normalization and modifying them would change the sound.
 - Expanded Qt and model-format regression tests, and updated the existing Compare/sidebar tests for the new layout.
 
+## Capture and training queue
+
+- Capture control transitions now display the preceding value and arrow at the same size as the current value.
+- The Queue columns are ordered **Name, Project, Type, Status, Epoch, ESR (Validation/Train), Created**.
+- **Type** now identifies the training family as **Parametric** or **A2 static**. **ESR (Validation/Train)** shows the Full-model validation and training ESR values side by side.
+
 ## Included changes
 
 Contains all fixes and features included in **0.8.3** and prior releases, including the Capture arc and control-transition refinements, Linear Volume waveform analysis, macOS Return monitoring, and live editing of the epoch budget.
