@@ -605,6 +605,11 @@ def new_project(
         lhs_method=lhs_method,
         validation_method=validation_method,
         created_with_version=_CAPTURE_APP_VERSION,
+        output_gain_state=(
+            {"linear_volume_context_version": 2}
+            if any(getattr(control, "clean_volume", False) for control in knobs)
+            else {}
+        ),
     )
 
 
