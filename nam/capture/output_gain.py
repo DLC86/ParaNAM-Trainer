@@ -47,10 +47,17 @@ def _context(project, *, centered=False):
             0.0 if centered and getattr(control, "is_gain", False)
             else 5.0 if centered else 10.0
         )
-        values = _capture_grid_values(control.to_param_spec(), control.step)
-        if getattr(control, "mute_at_min", False):
+        spec = control.to_param_spec()
+        if not centered:
+            # Exact legacy behavior: ignore every per-control capture restriction.
+            spec = replace(
+                spec, avoid_zero=False, avoid_max=False,
+                avoid_below=None, avoid_above=None,
+            )
+        values = _capture_grid_values(spec, control.step)
+        if centered and getattr(control, "mute_at_min", False):
             values = [v for v in values if round(v, 6) != round(control.min, 6)]
-        if getattr(control, "mute_at_max", False):
+        if centered and getattr(control, "mute_at_max", False):
             values = [v for v in values if round(v, 6) != round(control.max, 6)]
         if not values:
             raise ValueError(
@@ -64,7 +71,7 @@ def _context(project, *, centered=False):
     # Search nearest-first, pruning as soon as a complete Mute/Avoid rule
     # matches. This avoids enumerating the full Cartesian product for normal
     # projects and still handles rules spanning multiple controls.
-    rules = tuple(getattr(project, "plan_rules", ()) or ())
+    rules = tuple(getattr(project, "plan_rules", ()) or ()) if centered else ()
     assigned = dict(result)
 
     def search(axis):
