@@ -1,0 +1,64 @@
+name: Prepare and build ParaNAM Trainer 0.8.4 draft
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/prepare-v084-draft.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: paranam-draft-v0.8.4
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare private 0.8.4 draft and dispatch native builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx '__version__ = "0.8.4"' paranam/__init__.py
+          grep -qx 'version = "0.8.4"' pyproject.toml
+          test -s docs/release-0.8.4.md
+          main_sha="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$main_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Refusing to package a superseded main commit."
+            exit 1
+          fi
+          gh api "repos/$GH_REPO/releases?per_page=100" > releases.json
+          release_id="$(jq -r '[.[] | select(.draft == true and .name == "ParaNAM Trainer 0.8.4") | .id] | first // empty' releases.json)"
+          if [[ -n "$release_id" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+              -f tag_name="v0.8.4" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="ParaNAM Trainer 0.8.4" \
+              -f body="$(cat docs/release-0.8.4.md)" \
+              -F draft=true -F prerelease=true > current.json
+          else
+            gh api --method POST "repos/$GH_REPO/releases" \
+              -f tag_name="v0.8.4" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="ParaNAM Trainer 0.8.4" \
+              -f body="$(cat docs/release-0.8.4.md)" \
+              -F draft=true -F prerelease=true > current.json
+            release_id="$(jq -r '.id' current.json)"
+          fi
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.draft == true and .prerelease == true and .tag_name == "v0.8.4" and .target_commitish == $sha' current.json
+          echo "Draft 0.8.4 ID: $release_id"
+          # Avoid obsolete installers replacing the freshly built packages.
+          for previous in $(gh api "repos/$GH_REPO/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.name == "ParaNAM native installers" and (.status == "queued" or .status == "in_progress")) | .id'); do
+            gh api --method POST "repos/$GH_REPO/actions/runs/$previous/cancel" || true
+          done
+          gh workflow run paranam-installers.yml --ref main \
+            -f target=all -f keep_draft=true -f release_id="$release_id"
+          echo "Installer jobs dispatched. The release is retained as a draft."
