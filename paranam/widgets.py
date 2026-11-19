@@ -316,7 +316,9 @@ class ControlScene(QWidget):
         """
         area = QRectF(x + 10, y + 134, width - 20, 29)
         current_font = QFont("Inter", 15, QFont.Weight.Bold)
-        previous_font = QFont("Inter", 10, QFont.Weight.Bold)
+        # Keep the prior value and arrow at the same size and weight as the
+        # current value so the transition reads as one compact comparison.
+        previous_font = current_font
         current_metrics = QFontMetrics(current_font)
         previous_metrics = QFontMetrics(previous_font)
         gap = 6
@@ -366,7 +368,7 @@ class ControlScene(QWidget):
             self._control_value_layout(value, old, x, y, width)
         )
         if previous_text:
-            painter.setFont(QFont("Inter", 10, QFont.Weight.Bold))
+            painter.setFont(QFont("Inter", 15, QFont.Weight.Bold))
             painter.setPen(QColor("#b0b0b0"))
             painter.drawText(
                 previous_rect,

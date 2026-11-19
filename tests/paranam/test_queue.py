@@ -259,6 +259,54 @@ def test_queue_view_and_project_editing_are_independent(
         window.queue_controller.active_id = None
 
 
+def test_queue_columns_show_model_type_and_full_validation_train_esr(
+    window, workspace, tmp_path
+):
+    from PySide6.QtCore import Qt
+
+    small_ready(workspace)
+    entry = window.queue_controller.store.add(workspace)
+    window._attach(workspace)
+    window.selected_job_id = entry["id"]
+    window.navigate(4)
+    table = window.queue_table
+    assert [
+        table.horizontalHeaderItem(column).text()
+        for column in range(table.columnCount())
+    ] == [
+        "Name", "Project", "Type", "Status", "Epoch",
+        "ESR (Validation/Train)", "Created",
+    ]
+
+    progress_path = Path(entry["job"]) / "progress.json"
+    progress = read_json(progress_path)
+    progress.update(
+        epoch=3,
+        epochs=8,
+        best_esr=0.123456,
+        best_train_esr=0.234567,
+        best_validation={"full": 0.123456, "lite": 0.9, "train_full": 0.234567},
+    )
+    atomic_write_json(progress_path, progress)
+    window._queue_json_cache.clear()
+    window.refresh_queue()
+    assert table.item(0, 2).text() == "Parametric"
+    assert table.item(0, 4).text() == "3 / 8"
+    assert table.item(0, 5).text() == "0.12346 / 0.23457"
+
+    static_workspace = Workspace.create(tmp_path / "static", "Static project")
+    small_ready(static_workspace, kind="static")
+    static_entry = window.queue_controller.store.add(static_workspace)
+    window._queue_json_cache.clear()
+    window.refresh_queue()
+    static_row = next(
+        row
+        for row in range(table.rowCount())
+        if table.item(row, 0).data(Qt.ItemDataRole.UserRole) == static_entry["id"]
+    )
+    assert table.item(static_row, 2).text() == "A2 static"
+
+
 def test_interrupted_process_is_recoverable_without_opening_its_project(
     workspace, tmp_path, qapp
 ):

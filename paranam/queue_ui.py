@@ -224,7 +224,14 @@ class QueueActions:
             state = entry["state"]
             if state == "queued":
                 pending += 1
-            esr = progress.get("best_esr")
+            # Queue ESR always describes the full model. Newer jobs persist
+            # the validation and train metrics together; retain compatibility
+            # with older progress files that only recorded best_esr.
+            best_validation = progress.get("best_validation") or {}
+            validation_esr = best_validation.get("full", progress.get("best_esr"))
+            train_esr = best_validation.get(
+                "train_full", progress.get("best_train_esr")
+            )
             spec = self._cached_job_json(entry["job"], "spec.json")
             captures = spec.get("static_captures") or []
             model_name = (
@@ -235,11 +242,14 @@ class QueueActions:
             values = (
                 model_name or "—",
                 entry["name"],
-                time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
-                "Static A2" if entry["kind"] == "static" else "HyperA2",
+                "A2 static" if entry["kind"] == "static" else "Parametric",
                 state.replace("_", " ").title(),
                 f"{progress.get('epoch', 0)} / {progress.get('epochs', '—')}",
-                "—" if esr is None else f"{esr:.5f}",
+                " / ".join(
+                    "—" if metric is None else f"{metric:.5f}"
+                    for metric in (validation_esr, train_esr)
+                ),
+                time.strftime("%d/%m %H:%M", time.localtime(entry["created_at"])),
             )
             for column, value in enumerate(values):
                 item = table.item(row, column)

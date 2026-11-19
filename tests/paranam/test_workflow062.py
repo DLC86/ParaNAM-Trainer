@@ -402,7 +402,7 @@ def test_capture_labels_remain_centered_and_do_not_overlap_and_plan_keeps_minmax
     assert capture.show_knob_range_labels is False
     assert plan.show_knob_range_labels is True
     assert QColor("#b0b0b0").lightness() < QColor("#bcbcbc").lightness()
-    old_font = QFont("Inter", 10, QFont.Weight.Bold)
+    old_font = QFont("Inter", 15, QFont.Weight.Bold)
     assert old_font.bold()
 
     for current, previous in [

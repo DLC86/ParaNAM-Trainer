@@ -1486,11 +1486,11 @@ class WizardWindow(
             [
                 "Name",
                 "Project",
-                "Created",
-                "Model",
+                "Type",
                 "Status",
                 "Epoch",
-                "Val. ESR",
+                "ESR (Validation/Train)",
+                "Created",
             ]
         )
         self.queue_table.setSelectionBehavior(
@@ -1510,7 +1510,7 @@ class WizardWindow(
         self.queue_table.horizontalHeader().setStretchLastSection(False)
         self.queue_table.setMinimumHeight(100)
         self.queue_table.setMaximumHeight(16777215)
-        for column, width in enumerate((140, 120, 110, 90, 100, 65, 85)):
+        for column, width in enumerate((140, 120, 85, 100, 75, 190, 110)):
             self.queue_table.setColumnWidth(column, width)
         self.queue_table.itemSelectionChanged.connect(self.select_queue_job)
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
