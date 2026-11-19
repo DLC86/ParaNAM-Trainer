@@ -274,9 +274,11 @@ class EditorActions:
             return
         control = self._editor_current_control()
         if control is not None:
-            control["name"] = self.editor_control_name.text().strip()
-            self._editor_refresh_controls(select_key=control["key"])
-            self.editor_status.setText("Unsaved control changes")
+            new_name = self.editor_control_name.text().strip()
+            if control["name"] != new_name:
+                control["name"] = new_name
+                self._editor_refresh_controls(select_key=control["key"])
+                self.editor_status.setText("Unsaved control changes")
 
     def _editor_control_index_changed(self, index):
         if self._editor_loading_fields:
@@ -348,9 +350,11 @@ class EditorActions:
             return
         option = self._editor_current_option()
         if option is not None:
-            option["name"] = self.editor_option_name.text().strip()
-            self._editor_refresh_options(selected_value=option["value"])
-            self.editor_status.setText("Unsaved switch option changes")
+            new_name = self.editor_option_name.text().strip()
+            if option["name"] != new_name:
+                option["name"] = new_name
+                self._editor_refresh_options(selected_value=option["value"])
+                self.editor_status.setText("Unsaved switch option changes")
 
     def _editor_option_index_changed(self, index):
         if self._editor_loading_fields:
@@ -390,8 +394,10 @@ class EditorActions:
     def _editor_prepare_save(self):
         if self.editor_document is None:
             raise ValueError("Load a NAM or PNAM file first")
-        self._editor_commit_control_name()
+        # Commit the selected switch choice before refreshing its parent
+        # control selection; refreshing can otherwise reset the option row.
         self._editor_commit_option_name()
+        self._editor_commit_control_name()
         return apply_model_edits(
             self.editor_document,
             self._editor_collect_metadata(),
@@ -416,6 +422,12 @@ class EditorActions:
         path = Path(destination)
         if not path.suffix:
             path = path.with_suffix(source.suffix)
+        if path.resolve() == source:
+            QMessageBox.warning(
+                self, "Choose a copy name",
+                "Choose a different filename for the copy, or use Overwrite file.",
+            )
+            return
         self._editor_save(destination=path)
 
     def _editor_save(self, *, destination):
