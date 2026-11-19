@@ -92,6 +92,9 @@ class EditorActions:
         detail = QWidget()
         form = QFormLayout(detail)
         self.editor_control_name = QLineEdit()
+        self.editor_control_name.textEdited.connect(
+            self._editor_control_name_edited
+        )
         self.editor_control_name.editingFinished.connect(
             self._editor_commit_control_name
         )
@@ -133,6 +136,9 @@ class EditorActions:
         switch_layout.addWidget(self.editor_option_list)
         option_form = QFormLayout()
         self.editor_option_name = QLineEdit()
+        self.editor_option_name.textEdited.connect(
+            self._editor_option_name_edited
+        )
         self.editor_option_name.editingFinished.connect(
             self._editor_commit_option_name
         )
@@ -281,6 +287,25 @@ class EditorActions:
         finally:
             self._editor_loading_fields = False
 
+    def _editor_control_name_edited(self, value):
+        if self._editor_loading_fields:
+            return
+        control = self._editor_current_control()
+        if control is None:
+            return
+        # Persist keystrokes against the *old* selected row before a mouse
+        # click can move selection and deliver editingFinished late.
+        control["name"] = value.strip()
+        current = self.editor_control_list.currentItem()
+        if current is not None:
+            kind = (
+                "Linear Volume" if control["kind"] == "linear_volume"
+                else control["type"].title()
+            )
+            current.setText(f"{control['index']}: {control['name']}  ({kind})")
+        self._editor_dirty = True
+        self.editor_status.setText("Unsaved control changes")
+
     def _editor_commit_control_name(self):
         if self._editor_loading_fields:
             return
@@ -358,6 +383,21 @@ class EditorActions:
             self.editor_option_index.setValue(option["index_sw"])
         finally:
             self._editor_loading_fields = False
+
+    def _editor_option_name_edited(self, value):
+        if self._editor_loading_fields:
+            return
+        option = self._editor_current_option()
+        if option is None:
+            return
+        option["name"] = value.strip()
+        current = self.editor_option_list.currentItem()
+        if current is not None:
+            current.setText(
+                f"{option['index_sw']}: {option['name']}  (value {option['value']})"
+            )
+        self._editor_dirty = True
+        self.editor_status.setText("Unsaved switch option changes")
 
     def _editor_commit_option_name(self):
         if self._editor_loading_fields:
