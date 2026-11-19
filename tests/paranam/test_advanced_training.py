@@ -94,7 +94,7 @@ def test_custom_recipe_reaches_worker_and_prevents_incompatible_resume(
     assert not training.job_can_resume(workspace, job)
 
 
-def test_static_rms_default_can_be_explicitly_overridden_and_preserved(
+def test_static_rms_default_off_and_preserves_existing_explicit_setting(
     window, workspace,
 ):
     assert workspace.training_options("static")["rms_loss_normalization"] is False
@@ -102,11 +102,17 @@ def test_static_rms_default_can_be_explicitly_overridden_and_preserved(
     window._attach(workspace)
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert not window.advanced_fields["rms_loss_normalization"].isChecked()
-    # User choice must take priority over defaults, including after reopening.
-    window.advanced_fields["rms_loss_normalization"].setChecked(True)
-    assert Workspace(workspace.directory).training_options("static")[
-        "rms_loss_normalization"
-    ] is True
+    # The existing UI deliberately disables this parametric-only checkbox
+    # for static training; legacy explicit values remain untouched.
+    assert not window.advanced_fields["rms_loss_normalization"].isEnabled()
+    workspace.preferences["advanced_static"] = {
+        "rms_loss_normalization": True
+    }
+    workspace.save()
+    reopened = Workspace(workspace.directory)
+    assert reopened.training_options("static")["rms_loss_normalization"] is True
+    window._attach(reopened)
+    assert window.advanced_fields["rms_loss_normalization"].isChecked()
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
     assert window.advanced_fields["rms_loss_normalization"].isChecked()
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
