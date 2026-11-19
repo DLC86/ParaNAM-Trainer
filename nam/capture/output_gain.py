@@ -19,29 +19,83 @@ def volume_control(project):
     )
 
 
-def _context(project):
-    """Set every other knob to 10, ignoring capture avoids and plan rules.
+def _context(project, *, centered=False):
+    """Choose the fixed controls for the Linear Volume sweep.
 
-    If 10 is outside a knob's range or cannot be dialled on its capture grid,
-    use its nearest physically reachable value. Categorical switches retain
-    their highest position, as they have no numeric position 10.
+    Legacy plans retain their historical all-10 / highest-switch context.
+    Newly generated plans use 5 for tone controls and 0 for Gain/Drive,
+    moving to the nearest recordable combination when mute/avoid constraints
+    or project plan rules exclude the preferred one.
     """
+    from itertools import product
+
+    from .plan_rules import allows
+
+    controls = project.control_specs()
     result = {}
-    for control in project.control_specs():
+    axes = []
+    for control in controls:
         if isinstance(control, SwitchSpec):
-            result[control.name] = control.enum_names[-1]
-        elif getattr(control, "clean_volume", False):
+            if not getattr(control, "clean_volume", False):
+                axes.append((control.name, [control.enum_names[-1]]))
+            continue
+        if getattr(control, "clean_volume", False):
             # Only the volume is swept; its maximum is the reference.
             result[control.name] = control.max
-        else:
-            spec = replace(
-                control.to_param_spec(),
-                avoid_zero=False, avoid_max=False,
-                avoid_below=None, avoid_above=None,
+            continue
+        target = (
+            0.0 if centered and getattr(control, "is_gain", False)
+            else 5.0 if centered else 10.0
+        )
+        values = _capture_grid_values(control.to_param_spec(), control.step)
+        if getattr(control, "mute_at_min", False):
+            values = [v for v in values if round(v, 6) != round(control.min, 6)]
+        if getattr(control, "mute_at_max", False):
+            values = [v for v in values if round(v, 6) != round(control.max, 6)]
+        if not values:
+            raise ValueError(
+                f"Linear Volume has no recordable context setting for {control.name!r}"
             )
-            values = _capture_grid_values(spec, control.step)
-            result[control.name] = min(values, key=lambda value: (abs(value - 10), -value))
-    return result
+        axes.append((
+            control.name,
+            sorted(values, key=lambda value: (abs(value - target), value)),
+        ))
+
+    # Search nearest-first, pruning as soon as a complete Mute/Avoid rule
+    # matches. This avoids enumerating the full Cartesian product for normal
+    # projects and still handles rules spanning multiple controls.
+    rules = tuple(getattr(project, "plan_rules", ()) or ())
+    assigned = dict(result)
+
+    def search(axis):
+        if axis == len(axes):
+            return dict(assigned) if allows(rules, assigned) else None
+        name, candidates = axes[axis]
+        for value in candidates:
+            assigned[name] = value
+            excluded = False
+            for rule in rules:
+                if all(
+                    control_name in assigned
+                    and rule.matches_value(assigned[control_name], control_name)
+                    for control_name in rule.controls
+                ):
+                    excluded = True
+                    break
+            if not excluded:
+                found = search(axis + 1)
+                if found is not None:
+                    return found
+        assigned.pop(name, None)
+        return None
+
+    selected = search(0)
+    if selected is None:
+        raise ValueError(
+            "Linear Volume cannot find a control combination allowed by the "
+            "project's Mute/Avoid rules."
+        )
+    return selected
 
 def _append(project, positions, context, phase):
     volume = volume_control(project)
@@ -87,7 +141,12 @@ def _append(project, positions, context, phase):
 
 
 def initialize_calibration(project):
-    """Sweep clean volume with other controls at 10; bypass all plan restrictions."""
+    """Sweep clean volume using the context policy recorded at plan creation.
+
+    Legacy projects without the context marker deliberately keep their
+    original all-10 context; regenerating a plan opts into the centered policy.
+    """
+
     control = volume_control(project)
     if control is None:
         return
@@ -103,9 +162,12 @@ def initialize_calibration(project):
         {v for v in grid if round(control.min, 6) < v < round(control.max, 6)}
         | {control.min, control.max}
     )
-    context = _context(project)
-    # No plan rules apply to calibration, including rules on the volume knob
-    # or on other controls parked at 10.
+    centered_context = (
+        project.output_gain_state.get("linear_volume_context_version", 0) >= 2
+    )
+    context = _context(project, centered=centered_context)
+    # The volume sweep itself remains unrestricted; fixed controls are chosen
+    # from a context that already respects their Mute/Avoid constraints.
     project.entries = [
         entry for entry in project.entries
         if entry.split != "gain"
