@@ -359,9 +359,15 @@ class PlayActions:
         title.setObjectName("title")
         header = QHBoxLayout()
         header.setSpacing(18)
-        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignTop)
-        header.addStretch(1)
-        # Meters share the title's top row, aligned to the right.
+        # All text and playback configuration share one left-hand column.
+        # The VU panel starts only beyond this column, not below the title.
+        self.play_header_info = QWidget()
+        header_info = QVBoxLayout(self.play_header_info)
+        header_info.setContentsMargins(0, 0, 0, 0)
+        header_info.setSpacing(10)
+        header_info.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
+        header.addWidget(self.play_header_info, 1, Qt.AlignmentFlag.AlignTop)
+        # The meters occupy the whole right-hand side of the header.
         self.play_input_meter = LevelMeter(1)
         self.play_output_meter = LevelMeter(2)
         self.play_input_peak = QLabel("−∞ dBFS")
@@ -388,7 +394,7 @@ class PlayActions:
         )
         note.setWordWrap(True)
         note.setObjectName("muted")
-        layout.addWidget(note)
+        header_info.addWidget(note)
         row = QHBoxLayout()
         self.play_model = QComboBox(self)
         self.play_model.addItem("Choose a model…", None)
@@ -437,7 +443,7 @@ class PlayActions:
         buffer_note.setWordWrap(True)
         buffer_note.setObjectName("muted")
         buffer_row.addWidget(buffer_note, 1)
-        layout.addLayout(buffer_row)
+        header_info.addLayout(buffer_row)
         # Separate rows directly beneath Playback buffer, rather than
         # placing these selectors alongside the Input / Output gain knobs.
         for caption, selector in (
@@ -453,7 +459,7 @@ class PlayActions:
             selector_row.addWidget(caption_widget)
             selector_row.addWidget(selector)
             selector_row.addStretch(1)
-            layout.addLayout(selector_row)
+            header_info.addLayout(selector_row)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
