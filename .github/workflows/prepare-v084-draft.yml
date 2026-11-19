@@ -1,4 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
+# A source or release-note update is intentionally rebuilt from the exact main SHA.
 on:
   push:
     branches: [main]
