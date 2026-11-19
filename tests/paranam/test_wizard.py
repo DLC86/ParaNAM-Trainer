@@ -147,9 +147,21 @@ def test_loopback_stays_enabled_when_mono_device_is_discovered(window, monkeypat
     assert not window.loop_enabled.isChecked()
 
 
-def test_seven_pages_and_back_navigation_keep_drafts(window, workspace):
+def test_eight_pages_and_back_navigation_keep_drafts(window, workspace):
     window._attach(workspace)
-    assert window.pages.count() == 7
+    assert window.pages.count() == 8
+    # Editor is above Settings in the rail without changing Settings page 6.
+    assert window.steps[6] is window.settings_button
+    assert window.steps[7] is window.editor_button
+    window.navigate(7)
+    assert window.editor_button.isChecked()
+    assert not window.settings_button.isChecked()
+    window.back()
+    assert window.pages.currentIndex() == 0
+    window.navigate(6)
+    assert window.settings_button.isChecked()
+    window.back()
+    assert window.pages.currentIndex() == 0
     window.navigate(1)
     # Hidden legacy Active Learning cannot be selected or persisted.
     assert window.plan_form.isRowVisible(window.mode) is False
