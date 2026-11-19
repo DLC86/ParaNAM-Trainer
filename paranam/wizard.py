@@ -89,6 +89,7 @@ from .calibration import OutputLevelEdit, LevelCalibrationDialog, gain_from_dbfs
 from .signals import asset_path
 from .queue_ui import QueueActions
 from .play_ui import PlayActions, HorizontalLevelMeter
+from .model_editor_ui import EditorActions
 from .settings_audio import SettingsAudioActions, AudioDeviceEvents
 from .recovery_ui import RecoveryActions
 from .updates import UpdateActions
@@ -141,6 +142,7 @@ class WizardWindow(
     UIPreferences,
     QueueActions,
     PlayActions,
+    EditorActions,
     SettingsAudioActions,
     RecoveryActions,
     UpdateActions,
@@ -313,13 +315,22 @@ class WizardWindow(
             rail.addWidget(step)
             self.steps.append(step)
         rail.addStretch()
+        self.editor_button = button(" Editor", lambda: self.navigate(7))
+        self.editor_button.setObjectName("step")
+        self.editor_button.setIcon(navigation_icon(8))
+        self.editor_button.setIconSize(QSize(24, 24))
+        self.editor_button.setCheckable(True)
+        rail.addWidget(self.editor_button)
         self.settings_button = button(" Settings", lambda: self.navigate(6))
         self.settings_button.setObjectName("step")
         self.settings_button.setIcon(navigation_icon(6))
         self.settings_button.setIconSize(QSize(24, 24))
         self.settings_button.setCheckable(True)
         rail.addWidget(self.settings_button)
+        # Preserve Settings at page 6 for existing workflows; Editor is page
+        # 7 despite appearing immediately above Settings in the sidebar.
         self.steps.append(self.settings_button)
+        self.steps.append(self.editor_button)
         root.addWidget(sidebar)
         right = QWidget()
         content = QVBoxLayout(right)
@@ -358,6 +369,7 @@ class WizardWindow(
                 self._queue,
                 self._play,
                 self._settings,
+                self._editor,
             )
         ):
             page = QWidget()
@@ -1860,6 +1872,8 @@ class WizardWindow(
                 return
         if index == 6 and self.pages.currentIndex() != 6:
             self._settings_return_page = self.pages.currentIndex()
+        if index == 7 and self.pages.currentIndex() != 7:
+            self._editor_return_page = self.pages.currentIndex()
         if index != 6:
             self._stop_settings_audio()
         if index != 2 and self.session and self.worker is None:
@@ -1874,7 +1888,7 @@ class WizardWindow(
             self.queue_table.resizeColumnsToContents()
         if index == 6:
             self._sync_settings_audio(retry=True)
-        self.project_label.setVisible(index != 6)
+        self.project_label.setVisible(index not in (6, 7))
         listening = getattr(self, "play_worker", None) is not None
         self.play_transport_bar.setVisible(index != 5 and listening)
         self.footer_note.setVisible(index != 5 and not listening)
@@ -1896,6 +1910,9 @@ class WizardWindow(
     def back(self):
         if self.pages.currentIndex() == 6:
             self.navigate(getattr(self, "_settings_return_page", 0))
+            return
+        if self.pages.currentIndex() == 7:
+            self.navigate(getattr(self, "_editor_return_page", 0))
             return
         self.navigate(max(0, self.pages.currentIndex() - 1) if self.workspace else 0)
 
