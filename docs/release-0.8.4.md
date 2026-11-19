@@ -3,7 +3,7 @@
 ## Play & Compare layout
 
 - The parametric control panel reserves the full height of a **single row of knobs/switches**, even when the selected model has no editable controls or no model is loaded.
-- The **Instrument** and **Monitor L/R** VU meters have moved to the **upper-right corner**, aligned vertically with the **Play & Compare** title.
+- The **Play & Compare** title, explanatory copy, **Playback buffer**, **Model size** and **Output mode** form one complete left-hand header block. The **Instrument** and **Monitor L/R** VU meters occupy a separate column to the right of that entire block.
 - **Input** and **Output** level knobs sit at the same height as the **Play / Gear / Model** action block, with Input anchored to the left and Output to the right.
 - **Model size** and **Output mode** each occupy a dedicated row immediately **below Playback buffer**, rather than sharing a row with the gain controls.
 - Both the **Models** and **Impulse responses** lists reserve enough height to display at least **ten rows** before scrolling.
@@ -18,6 +18,15 @@
 
 - **RMS loss normalization** is **OFF by default** for new static training configurations. Parametric training keeps its existing ON default. Explicit values saved in existing projects and training snapshots remain unchanged.
 - **Checkpoint selection** and **Checkpoint alpha** are completely hidden in Static training's Advanced options, since those controls apply to the parametric checkpoint-selection workflow. Parametric Checkpoint selection remains visible; the alpha field is shown only for Combined ESR mode.
+
+## Model Editor
+
+- Added a standalone **Editor** page immediately above Settings in the left navigation, accessible even without an open capture project.
+- Load **.nam** and **.pnam** files and edit **Author, Manufacturer, Gear model, Gear type, Tone type, Input level (dBu), Output level (dBu), Input impedance and Notes**, with the same options used in Train's metadata form.
+- Save by **overwriting the existing model** or **creating a named copy**. Replacing an existing file creates a `.bak` copy; writes are atomic and preserve neural weights, computed loudness and gain, and unexposed metadata.
+- Parametric models additionally support changing the **display order** of controls (index), **switch option display order** (index_sw), and renaming controls and switch options without changing neural parameter positions or option numeric values. Changes propagate to Full/Lite control descriptions.
+- **Knob min/max cannot be edited**: these values define network input normalization and modifying them would change the sound.
+- Expanded Qt and model-format regression tests, and updated the existing Compare/sidebar tests for the new layout.
 
 ## Included changes
 
