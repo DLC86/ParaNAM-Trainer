@@ -1665,6 +1665,12 @@ class WizardWindow(
         # still switching away from the previous workspace capture type.
         parametric = self.capture_kind.currentData() == "parametric"
         method = self.advanced_fields["checkpoint_method"].currentData()
+        form = self.advanced_panel.layout()
+        form.setRowVisible(self.advanced_fields["checkpoint_method"], parametric)
+        form.setRowVisible(
+            self.advanced_fields["checkpoint_alpha"],
+            parametric and method == "combined",
+        )
         self.advanced_fields["checkpoint_method"].setEnabled(parametric)
         self.advanced_fields["checkpoint_alpha"].setEnabled(
             parametric and method == "combined"
