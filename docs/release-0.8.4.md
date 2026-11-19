@@ -14,6 +14,11 @@
 - Added **Clear list** for Impulse responses: removes only imported/custom IRs. The **six bundled Tone3000 IRs** and the **Off** selection always remain. Actual IR files are never deleted.
 - Existing single-item and multiselection **Remove** actions retain their previous behavior.
 
+## Static training defaults and options
+
+- **RMS loss normalization** is **OFF by default** for new static training configurations. Parametric training keeps its existing ON default. Explicit values saved in existing projects and training snapshots remain unchanged.
+- **Checkpoint selection** and **Checkpoint alpha** are completely hidden in Static training's Advanced options, since those controls apply to the parametric checkpoint-selection workflow. Parametric Checkpoint selection remains visible; the alpha field is shown only for Combined ESR mode.
+
 ## Included changes
 
 Contains all fixes and features included in **0.8.3** and prior releases, including the Capture arc and control-transition refinements, Linear Volume waveform analysis, macOS Return monitoring, and live editing of the epoch budget.
