@@ -34,8 +34,15 @@
 - The Queue columns are ordered **Name, Project, Type, Status, Epoch, ESR (Validation/Train), Created**.
 - **Type** now identifies the training family as **Parametric** or **A2 static**. **ESR (Validation/Train)** shows the Full-model validation and training ESR values side by side.
 
-## Included changes
+## Linear Volume capture planning
 
-Contains all fixes and features included in **0.8.3** and prior releases, including the Capture arc and control-transition refinements, Linear Volume waveform analysis, macOS Return monitoring, and live editing of the epoch budget.
+- Newly regenerated Linear Volume plans use a centered fixed rig context: ordinary controls are set to **5**, while controls marked **Gain/Drive** are set to **0**.
+- If a preferred value is a mute point or is prohibited by a Mute or Avoid rule, the planner uses the nearest permitted step instead.
+- Existing plans preserve their recorded context unchanged. The new behavior applies only when a plan is regenerated.
+
+## Regression and release verification
+
+- Added and updated regression coverage for capture planning, Capture value transitions, Queue metrics, static-training defaults, Editor metadata preservation and the revised Play & Compare layout.
+- The draft is rebuilt from one exact source commit across Windows, Linux, macOS Intel and macOS Apple Silicon; each native package is smoke-tested before it replaces its previous draft asset.
 
 *Draft release for verification; not automatically published.*
