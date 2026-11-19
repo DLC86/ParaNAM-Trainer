@@ -1012,9 +1012,10 @@ class Workspace:
             lr_decay=0.994,
             ny=self.project.train_window.ny or 8192,
             fit_mrstft=True,
-            # New training defaults to level-normalized, noise-aware losses.
-            # Existing saved advanced options continue to override this default.
-            rms_loss_normalization=True,
+            # Parametric models benefit from capture-level RMS normalization;
+            # static models default to ordinary unnormalized training loss.
+            # Explicit saved settings always override the type-specific default.
+            rms_loss_normalization=(kind == "parametric"),
             rms_loss_normalization_exponent=2.0,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
