@@ -192,12 +192,16 @@ def test_compare_reset_plain_values_alignment_and_original_defaults(
     grid = window.play_gain_layout
     # Input and Output flank the same Play/Gear/Model action bar, instead
     # of living in a separate row below the buttons.
-    assert grid.itemAtPosition(0, 1).widget() is window.play_action_bar
-    left = grid.itemAtPosition(1, 0).widget()
-    right = grid.itemAtPosition(1, 2).widget()
-    assert left.geometry().center().x() < window.play_action_bar.geometry().left()
-    assert right.geometry().center().x() > window.play_action_bar.geometry().right()
-    assert abs(left.geometry().center().y() - right.geometry().center().y()) <= 2
+    assert grid.itemAtPosition(0, 2).widget() is window.play_action_bar
+    left = grid.itemAtPosition(0, 0).widget()
+    right = grid.itemAtPosition(0, 4).widget()
+    input_dial = grid.itemAtPosition(1, 1).widget()
+    output_dial = grid.itemAtPosition(1, 3).widget()
+    assert grid.itemAtPosition(0, 1).widget().text() == "Input"
+    assert grid.itemAtPosition(0, 3).widget().text() == "Output"
+    assert left.geometry().center().x() < input_dial.geometry().center().x()
+    assert right.geometry().center().x() > output_dial.geometry().center().x()
+    assert abs(input_dial.geometry().center().y() - output_dial.geometry().center().y()) <= 2
     assert window.play_input.value() == window.play_output.value() == 0
 
 
