@@ -135,12 +135,8 @@ class EditorActions:
         self.editor_switch_panel = QWidget()
         switch_layout = QVBoxLayout(self.editor_switch_panel)
         switch_layout.setContentsMargins(0, 0, 0, 0)
-        switch_info = QLabel(
-            "Switch choices are displayed in index_sw order; the saved "
-            "neural value of each option remains unchanged."
-        )
-        switch_info.setWordWrap(True)
-        switch_info.setObjectName("muted")
+        switch_info = QLabel("Options")
+        switch_info.setObjectName("sectionTitle")
         switch_layout.addWidget(switch_info)
         self.editor_option_list = QListWidget()
         self.editor_option_list.setMinimumHeight(100)
@@ -399,13 +395,16 @@ class EditorActions:
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, option["value"])
                 row_widget = QWidget()
+                row_widget.setFixedHeight(30)
                 row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(6, 0, 6, 0)
+                row_layout.setContentsMargins(8, 0, 8, 0)
                 row_layout.setSpacing(8)
                 description = QLabel(
                     f'{option["index_sw"]}: {option["name"]}  '
                     f'(value {option["value"]})'
                 )
+                description.setObjectName("editorOptionDescription")
+                description.setMinimumHeight(26)
                 marker = QLabel(
                     "Default" if option["value"] == control["default"] else ""
                 )
@@ -413,10 +412,12 @@ class EditorActions:
                 marker.setAlignment(
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
-                marker.setMinimumWidth(54)
+                marker.setMinimumWidth(64)
+                marker.setMinimumHeight(26)
                 row_layout.addWidget(description, 1)
                 row_layout.addWidget(marker)
-                item.setSizeHint(row_widget.sizeHint())
+                row_layout.activate()
+                item.setSizeHint(QSize(0, 30))
                 self.editor_option_list.addItem(item)
                 self.editor_option_list.setItemWidget(item, row_widget)
                 if option["value"] == selected_value:
@@ -481,11 +482,13 @@ class EditorActions:
         option["name"] = value.strip()
         current = self.editor_option_list.currentItem()
         if current is not None:
-            control = self._editor_current_control()
-            prefix = "Default  |  " if control and option["value"] == control["default"] else ""
-            current.setText(
-                f"{prefix}{option['index_sw']}: {option['name']}  (value {option['value']})"
+            description = self.editor_option_list.itemWidget(current).findChild(
+                QLabel, "editorOptionDescription"
             )
+            if description is not None:
+                description.setText(
+                    f"{option['index_sw']}: {option['name']}  (value {option['value']})"
+                )
         self._editor_dirty = True
         self.editor_status.setText("Unsaved switch option changes")
 
