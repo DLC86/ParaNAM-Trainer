@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QSpinBox, QVBoxLayout, QWidget,
+    QSpinBox, QVBoxLayout, QWidget, QSizePolicy,
 )
 
 from .widgets import MetadataEditor
@@ -72,8 +72,7 @@ class EditorActions:
         self.editor_controls_card = QFrame()
         self.editor_controls_card.setObjectName("card")
         self.editor_controls_card.setSizePolicy(
-            self.editor_controls_card.sizePolicy().Policy.Expanding,
-            self.editor_controls_card.sizePolicy().Policy.Expanding,
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         control_layout = QVBoxLayout(self.editor_controls_card)
         control_heading = QLabel("PARAMETRIC CONTROLS")
