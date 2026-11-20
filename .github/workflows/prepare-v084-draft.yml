@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Rebuild 0.8.4 with refined Editor switch defaults and Compare layout fixes from exact main SHA.
+# Rebuild 0.8.4: panel-only drag highlight, visible Editor options, compact Compare header.
 on:
   push:
     branches: [main]
