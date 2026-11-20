@@ -234,10 +234,9 @@ class FileDropTarget(QObject):
             return
         self._highlighted = active
         if active:
+            # Subtle hover feedback: lighten only the drop target panel.
             self.widget.setStyleSheet(
-                self._base_style
-                + "\nQWidget { border: 2px solid #bf0000; "
-                  "background-color: rgba(191, 0, 0, 24); }"
+                self._base_style + "\nbackground-color: #e8e8e8;"
             )
         else:
             self.widget.setStyleSheet(self._base_style)
