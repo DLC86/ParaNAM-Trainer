@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QSpinBox, QVBoxLayout, QWidget, QSizePolicy, QDoubleSpinBox,
+    QSpinBox, QVBoxLayout, QWidget, QSizePolicy, QDoubleSpinBox, QCheckBox,
 )
 
 from .widgets import MetadataEditor
@@ -117,7 +117,7 @@ class EditorActions:
         form.addRow("index", self.editor_control_index)
         default_layout = QHBoxLayout()
         self.editor_control_default = QDoubleSpinBox()
-        self.editor_control_default.setDecimals(6)
+        self.editor_control_default.setDecimals(3)
         self.editor_control_default.setKeyboardTracking(False)
         self.editor_control_default.valueChanged.connect(
             self._editor_control_default_changed
@@ -147,9 +147,6 @@ class EditorActions:
         self.editor_option_list.currentRowChanged.connect(
             self._editor_selected_option
         )
-        self.editor_option_list.itemChanged.connect(
-            self._editor_option_default_changed
-        )
         switch_layout.addWidget(self.editor_option_list)
         option_form = QFormLayout()
         self.editor_option_name = QLineEdit()
@@ -168,6 +165,11 @@ class EditorActions:
             self._editor_option_index_changed
         )
         option_form.addRow("index_sw", self.editor_option_index)
+        self.editor_option_default = QCheckBox("Default")
+        self.editor_option_default.toggled.connect(
+            self._editor_option_default_toggled
+        )
+        option_form.addRow("Default", self.editor_option_default)
         switch_layout.addLayout(option_form)
         form.addRow(self.editor_switch_panel)
         container.addWidget(detail, 2)
@@ -394,21 +396,29 @@ class EditorActions:
             for i, option in enumerate(sorted(
                 control["options"], key=lambda o: o["index_sw"]
             )):
-                prefix = "Default  |  " if option["value"] == control["default"] else ""
-                item = QListWidgetItem(
-                    f"{prefix}{option['index_sw']}: {option['name']}  "
-                    f"(value {option['value']})"
-                )
+                item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, option["value"])
-                item.setFlags(
-                    item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(6, 0, 6, 0)
+                row_layout.setSpacing(8)
+                description = QLabel(
+                    f'{option["index_sw"]}: {option["name"]}  '
+                    f'(value {option["value"]})'
                 )
-                item.setCheckState(
-                    Qt.CheckState.Checked if option["value"] == control["default"]
-                    else Qt.CheckState.Unchecked
+                marker = QLabel(
+                    "Default" if option["value"] == control["default"] else ""
                 )
-                item.setToolTip("Check to make this switch option the default")
+                marker.setObjectName("editorDefaultMarker")
+                marker.setAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                marker.setMinimumWidth(54)
+                row_layout.addWidget(description, 1)
+                row_layout.addWidget(marker)
+                item.setSizeHint(row_widget.sizeHint())
                 self.editor_option_list.addItem(item)
+                self.editor_option_list.setItemWidget(item, row_widget)
                 if option["value"] == selected_value:
                     wanted = i
             self.editor_option_list.setCurrentRow(wanted)
@@ -417,29 +427,23 @@ class EditorActions:
             self._editor_loading_fields = False
         self._editor_selected_option()
 
-    def _editor_option_default_changed(self, item):
-        if self._editor_loading_fields or item.checkState() != Qt.CheckState.Checked:
+    def _editor_option_default_toggled(self, checked):
+        if self._editor_loading_fields:
             return
         control = self._editor_current_control()
-        if control is None or control["type"] != "switch":
+        option = self._editor_current_option()
+        if control is None or option is None or control["type"] != "switch":
             return
-        value = item.data(Qt.ItemDataRole.UserRole)
-        if value is None or control["default"] == value:
+        if not checked:
+            # A switch must always retain exactly one default option.
+            self.editor_option_default.blockSignals(True)
+            self.editor_option_default.setChecked(True)
+            self.editor_option_default.blockSignals(False)
             return
-        control["default"] = value
-        self._editor_loading_fields = True
-        self.editor_option_list.blockSignals(True)
-        try:
-            for row in range(self.editor_option_list.count()):
-                option_item = self.editor_option_list.item(row)
-                option_item.setCheckState(
-                    Qt.CheckState.Checked
-                    if option_item.data(Qt.ItemDataRole.UserRole) == value
-                    else Qt.CheckState.Unchecked
-                )
-        finally:
-            self.editor_option_list.blockSignals(False)
-            self._editor_loading_fields = False
+        if control["default"] == option["value"]:
+            return
+        control["default"] = option["value"]
+        self._editor_refresh_options(selected_value=option["value"])
         self._editor_dirty = True
         self.editor_status.setText("Unsaved control default changes")
 
@@ -453,6 +457,12 @@ class EditorActions:
             active = option is not None
             self.editor_option_name.setEnabled(active)
             self.editor_option_index.setEnabled(active)
+            self.editor_option_default.setEnabled(active)
+            self.editor_option_default.blockSignals(True)
+            self.editor_option_default.setChecked(
+                active and option["value"] == control["default"]
+            )
+            self.editor_option_default.blockSignals(False)
             if not active:
                 self.editor_option_name.clear()
                 return
