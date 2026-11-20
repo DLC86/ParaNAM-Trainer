@@ -579,6 +579,7 @@ class PlayActions:
         self.play_controls_layout.setContentsMargins(24, 22, 24, 22)
         self.play_controls_layout.setHorizontalSpacing(24)
         self.play_controls.setMinimumHeight(248)
+        self.play_controls.setEmptyMessage("No model loaded")
         self.play_values = []
         layout.addWidget(self.play_controls)
         row = QHBoxLayout()
@@ -1134,7 +1135,7 @@ class PlayActions:
     def _play_model_loaded(self, info):
         values = getattr(self, "_preserved_play_values", None)
         self._play_ready, self._play_info = True, info
-        self.clear_play_controls()
+        self.clear_play_controls(show_empty=False)
         grid = self.play_controls_layout
         self.play_values = [p["default"] for p in info["controls"]]
         if values is not None and len(values) == len(info["controls"]):
@@ -1220,11 +1221,12 @@ class PlayActions:
                 max(132, slider.width() + 18) if control["positions"] else 132
             )
             grid.addWidget(frame)
+        self.play_controls.setEmptyMessage("")
         self.play_status.setText(
             "Ready. Gear and Model switch the monitored source; the real gear and model stay warm in parallel."
         )
 
-    def clear_play_controls(self):
+    def clear_play_controls(self, *, show_empty=True):
         # The Compare control panel stays visible even when it is empty.
         grid = self.play_controls_layout
         while grid.count():
@@ -1232,6 +1234,9 @@ class PlayActions:
             if item.widget():
                 item.widget().deleteLater()
         self.play_values = []
+        self.play_controls.setEmptyMessage(
+            "No model loaded" if show_empty else ""
+        )
 
     def _play_parameter(self, index, value):
         self.play_values[index] = value
