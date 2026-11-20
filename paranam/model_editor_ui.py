@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from .widgets import MetadataEditor
 from .impedance import parse_impedance
+from .compare_layout import FileDropTarget
 from .model_editor_core import (
     USER_FIELDS, apply_model_edits, editable_controls,
     load_model_file, write_model_file,
@@ -63,9 +64,17 @@ class EditorActions:
         self.editor_metadata.changed.connect(self._editor_metadata_changed)
         metadata_layout.addWidget(self.editor_metadata)
         layout.addWidget(metadata_card)
+        self._editor_metadata_drop_target = FileDropTarget(
+            metadata_card, lambda path: self.editor_open_file(path=path),
+            {".nam", ".pnam"},
+        )
 
         self.editor_controls_card = QFrame()
         self.editor_controls_card.setObjectName("card")
+        self.editor_controls_card.setSizePolicy(
+            self.editor_controls_card.sizePolicy().Policy.Expanding,
+            self.editor_controls_card.sizePolicy().Policy.Expanding,
+        )
         control_layout = QVBoxLayout(self.editor_controls_card)
         control_heading = QLabel("PARAMETRIC CONTROLS")
         control_heading.setObjectName("eyebrow")
@@ -154,9 +163,9 @@ class EditorActions:
         switch_layout.addLayout(option_form)
         form.addRow(self.editor_switch_panel)
         container.addWidget(detail, 2)
-        control_layout.addLayout(container)
+        control_layout.addLayout(container, 1)
         self.editor_controls_card.hide()
-        layout.addWidget(self.editor_controls_card)
+        layout.addWidget(self.editor_controls_card, 1)
 
         self.editor_status = QLabel("")
         self.editor_status.setWordWrap(True)
