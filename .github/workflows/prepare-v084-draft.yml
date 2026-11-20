@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Final 0.8.4 rebuild after rendering switch options in native clickable rows.
+# Final 0.8.4 rebuild after fixing duplicate option text and Compare selector clipping.
 on:
   push:
     branches: [main]

@@ -457,7 +457,11 @@ class PlayActions:
         # Let the nested layout determine its exact height. In particular, do
         # not add artificial vertical reserve that can push selectors outside it.
         header_info.activate()
-        self.play_header_info.setMinimumHeight(header_info.sizeHint().height())
+        # Reserve the native combo-box frame's bottom inset as well as the
+        # nested layout's size hint; Qt style metrics otherwise clip 6 px.
+        self.play_header_info.setMinimumHeight(
+            header_info.sizeHint().height() + 10
+        )
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()

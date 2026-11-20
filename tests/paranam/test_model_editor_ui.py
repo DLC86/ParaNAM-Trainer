@@ -73,6 +73,7 @@ def test_compare_header_groups_all_description_and_playback_selectors_left(windo
             assert caption.font().pointSizeF() == window.play_buffer_label.font().pointSizeF()
     assert window.play_size.geometry().bottom() <= parent.height()
     assert window.play_output_mode.geometry().bottom() <= parent.height()
+    assert parent.minimumHeight() >= parent.layout().sizeHint().height() + 10
     assert parent.layout().spacing() == 0
     assert parent.layout().itemAt(2).layout().contentsMargins().top() == 0
     assert parent.layout().itemAt(3).layout().contentsMargins().bottom() == 0
@@ -137,7 +138,8 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     default_item = window.editor_option_list.item(default_row)
     assert window.editor_control_default_label.isHidden()
     assert window.editor_option_list.itemWidget(default_item) is None
-    assert default_item.text().startswith("1: Lead")
+    assert default_item.text() == ""
+    assert default_item.data(Qt.ItemDataRole.UserRole + 2).startswith("1: Lead")
     assert default_item.data(Qt.ItemDataRole.UserRole + 1) is True
     assert default_item.sizeHint().height() >= 30
     assert type(window.editor_option_list.itemDelegate()).__name__ == "SwitchOptionDelegate"

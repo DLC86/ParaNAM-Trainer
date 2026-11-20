@@ -29,7 +29,9 @@ class SwitchOptionDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         styled = QStyleOptionViewItem(option)
         self.initStyleOption(styled, index)
-        label = styled.text
+        label = index.data(Qt.ItemDataRole.UserRole + 2) or ""
+        # The DisplayRole is deliberately empty; otherwise Qt paints the
+        # model text as well as this delegate's in-row text.
         styled.text = ""
         # Keep the QListWidget's native row background, selection and focus.
         super().paint(painter, styled, index)
@@ -455,8 +457,10 @@ class EditorActions:
                     f'{option["index_sw"]}: {option["name"]}  '
                     f'(value {option["value"]})'
                 )
-                item = QListWidgetItem(description)
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.DisplayRole, "")
                 item.setData(Qt.ItemDataRole.UserRole, option["value"])
+                item.setData(Qt.ItemDataRole.UserRole + 2, description)
                 item.setData(
                     Qt.ItemDataRole.UserRole + 1,
                     option["value"] == control["default"],
@@ -525,9 +529,11 @@ class EditorActions:
         option["name"] = value.strip()
         current = self.editor_option_list.currentItem()
         if current is not None:
-            current.setText(
-                f"{option['index_sw']}: {option['name']}  (value {option['value']})"
+            current.setData(
+                Qt.ItemDataRole.UserRole + 2,
+                f"{option['index_sw']}: {option['name']}  (value {option['value']})",
             )
+            self.editor_option_list.viewport().update()
         self._editor_dirty = True
         self.editor_status.setText("Unsaved switch option changes")
 
