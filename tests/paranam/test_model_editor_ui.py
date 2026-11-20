@@ -246,3 +246,11 @@ def test_compare_model_and_ir_panels_accept_drag_and_drop(
     window.play_ir.blockSignals(False)
     assert window.play_ir.findData(str(ir)) >= 0
     assert str(ir) in (window.settings.value("play_irs", []) or [])
+
+
+
+def test_compare_controls_show_empty_model_message(window, qapp):
+    window.navigate(5)
+    qapp.processEvents()
+    assert window.play_controls.empty_label.text() == "No model loaded"
+    assert window.play_controls.empty_label.isVisible()
