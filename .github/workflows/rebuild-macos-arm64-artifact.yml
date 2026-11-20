@@ -1,6 +1,10 @@
 name: ParaNAM macOS ARM64 installer rebuild (artifact only)
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rebuild-macos-arm64-artifact.yml'
 permissions:
   contents: read
 jobs:
