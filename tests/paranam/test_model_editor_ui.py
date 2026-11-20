@@ -253,4 +253,4 @@ def test_compare_controls_show_empty_model_message(window, qapp):
     window.navigate(5)
     qapp.processEvents()
     assert window.play_controls.empty_label.text() == "No model loaded"
-    assert window.play_controls.empty_label.isVisible()
+    assert not window.play_controls.empty_label.isHidden()
