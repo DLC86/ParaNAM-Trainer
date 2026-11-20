@@ -394,8 +394,9 @@ class EditorActions:
             for i, option in enumerate(sorted(
                 control["options"], key=lambda o: o["index_sw"]
             )):
+                prefix = "Default  |  " if option["value"] == control["default"] else ""
                 item = QListWidgetItem(
-                    f"Default  |  {option['index_sw']}: {option['name']}  "
+                    f"{prefix}{option['index_sw']}: {option['name']}  "
                     f"(value {option['value']})"
                 )
                 item.setData(Qt.ItemDataRole.UserRole, option["value"])
@@ -470,9 +471,10 @@ class EditorActions:
         option["name"] = value.strip()
         current = self.editor_option_list.currentItem()
         if current is not None:
+            control = self._editor_current_control()
+            prefix = "Default  |  " if control and option["value"] == control["default"] else ""
             current.setText(
-                f"{'Default  |  ' if option['value'] == self._editor_current_control()['default'] else ''}"
-                f"{option['index_sw']}: {option['name']}  (value {option['value']})"
+                f"{prefix}{option['index_sw']}: {option['name']}  (value {option['value']})"
             )
         self._editor_dirty = True
         self.editor_status.setText("Unsaved switch option changes")
