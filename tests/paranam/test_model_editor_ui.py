@@ -105,8 +105,10 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     window.editor_control_list.setCurrentRow(1)  # Gain
     assert window.editor_control_min.isHidden()
     assert window.editor_control_max.isHidden()
+    assert window.editor_control_default.decimals() == 3
     window.editor_control_default.setValue(7.5)
-    assert window.editor_control_rows[0]["default"] == 7.5
+    gain_control = next(c for c in window.editor_control_rows if c["name"] == "Gain")
+    assert gain_control["default"] == 7.5
     window.editor_control_index.setValue(0)
     assert [c["name"] for c in sorted(
         window.editor_control_rows, key=lambda c: c["index"]
@@ -124,13 +126,16 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
         i for i in range(window.editor_option_list.count())
         if window.editor_option_list.item(i).data(Qt.ItemDataRole.UserRole) == 2
     )
-    window.editor_option_list.item(default_row).setCheckState(Qt.CheckState.Checked)
+    window.editor_option_list.setCurrentRow(default_row)
+    window.editor_option_default.setChecked(True)
     assert switch["default"] == 2
-    assert sum(
-        window.editor_option_list.item(i).checkState() == Qt.CheckState.Checked
-        for i in range(window.editor_option_list.count())
-    ) == 1
-    assert "Default" in window.editor_option_list.item(default_row).text()
+    assert window.editor_option_default.isChecked()
+    default_widget = window.editor_option_list.itemWidget(
+        window.editor_option_list.item(default_row)
+    )
+    marker = default_widget.findChild(type(window.editor_path_label), "editorDefaultMarker")
+    assert marker.text() == "Default"
+    assert default_widget.layout().itemAt(0).widget().text().startswith("1: Lead")
     before = copy.deepcopy(switch["options"])
     window.editor_option_index.setValue(2)
     assert sorted(o["value"] for o in switch["options"]) == [0, 1, 2]
