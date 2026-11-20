@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer, QItemSelectionModel
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QFrame, QLayout, QListWidget, QAbstractItemView, QLabel
 
 
@@ -225,7 +226,9 @@ class FileDropTarget(QObject):
         self.callback = callback
         self.suffixes = {suffix.lower() for suffix in suffixes}
         self.widget = widget
-        self._base_style = widget.styleSheet()
+        self._base_palette = widget.palette()
+        self._base_background_role = widget.backgroundRole()
+        self._base_auto_fill = widget.autoFillBackground()
         self._highlighted = False
         self._install(widget)
 
@@ -234,12 +237,18 @@ class FileDropTarget(QObject):
             return
         self._highlighted = active
         if active:
-            # Subtle hover feedback: lighten only the drop target panel.
-            self.widget.setStyleSheet(
-                self._base_style + "\nbackground-color: #e8e8e8;"
-            )
+            # Change only the panel's own painted background, not its children.
+            palette = QPalette(self._base_palette)
+            role = self._base_background_role
+            base = self._base_palette.color(role)
+            palette.setColor(role, base.lighter(108))
+            self.widget.setBackgroundRole(role)
+            self.widget.setPalette(palette)
+            self.widget.setAutoFillBackground(True)
         else:
-            self.widget.setStyleSheet(self._base_style)
+            self.widget.setPalette(self._base_palette)
+            self.widget.setBackgroundRole(self._base_background_role)
+            self.widget.setAutoFillBackground(self._base_auto_fill)
         self.widget.update()
 
     def _install(self, widget):
