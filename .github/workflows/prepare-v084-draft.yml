@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Compare selector clipping and static-model empty-state fixes are rebuilt from the exact main SHA.
+# Rebuild 0.8.4 with Editor default controls and drag-hover feedback from exact main SHA.
 on:
   push:
     branches: [main]
