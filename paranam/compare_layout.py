@@ -224,7 +224,24 @@ class FileDropTarget(QObject):
         super().__init__(parent or widget)
         self.callback = callback
         self.suffixes = {suffix.lower() for suffix in suffixes}
+        self.widget = widget
+        self._base_style = widget.styleSheet()
+        self._highlighted = False
         self._install(widget)
+
+    def _set_highlight(self, active):
+        if self._highlighted == active:
+            return
+        self._highlighted = active
+        if active:
+            self.widget.setStyleSheet(
+                self._base_style
+                + "\nQWidget { border: 2px solid #bf0000; "
+                  "background-color: rgba(191, 0, 0, 24); }"
+            )
+        else:
+            self.widget.setStyleSheet(self._base_style)
+        self.widget.update()
 
     def _install(self, widget):
         widget.setAcceptDrops(True)
@@ -247,12 +264,18 @@ class FileDropTarget(QObject):
         if event.type() in (
             QEvent.Type.DragEnter,
             QEvent.Type.DragMove,
+            QEvent.Type.DragLeave,
             QEvent.Type.Drop,
         ):
+            if event.type() == QEvent.Type.DragLeave:
+                self._set_highlight(False)
+                return False
             path = self._path_from_event(event)
             if path:
+                self._set_highlight(event.type() != QEvent.Type.Drop)
                 event.acceptProposedAction()
                 if event.type() == QEvent.Type.Drop:
                     self.callback(path)
                 return True
+            self._set_highlight(False)
         return super().eventFilter(watched, event)
