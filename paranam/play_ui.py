@@ -364,7 +364,7 @@ class PlayActions:
         self.play_header_info = QWidget()
         header_info = QVBoxLayout(self.play_header_info)
         header_info.setContentsMargins(0, 0, 0, 0)
-        header_info.setSpacing(10)
+        header_info.setSpacing(3)
         header_info.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
         header.addWidget(self.play_header_info, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
@@ -412,6 +412,8 @@ class PlayActions:
         self.play_model_clear.clicked.connect(self.clear_play_models)
         model_buttons.addWidget(self.play_model_clear)
         buffer_row = QHBoxLayout()
+        buffer_row.setContentsMargins(0, 0, 0, 0)
+        buffer_row.setSpacing(6)
         self.play_buffer_label = QLabel("Playback buffer")
         buffer_row.addWidget(self.play_buffer_label)
         self.play_buffer = QComboBox()
@@ -440,6 +442,8 @@ class PlayActions:
             selector.setFixedSize(combo_width, combo_height)
         # Model size and Output mode share one row beneath Playback buffer.
         selector_row = QHBoxLayout()
+        selector_row.setContentsMargins(0, 0, 0, 0)
+        selector_row.setSpacing(6)
         for caption, selector in (
             ("Model size", self.play_size),
             ("Output mode", self.play_output_mode),
@@ -450,10 +454,10 @@ class PlayActions:
             selector_row.addWidget(selector)
         selector_row.addStretch(1)
         header_info.addLayout(selector_row)
-        # Reserve the complete nested layout height so the selector row is not
-        # clipped when the Compare page is laid out at the available viewport height.
+        # Let the nested layout determine its exact height. In particular, do
+        # not add artificial vertical reserve that can push selectors outside it.
         header_info.activate()
-        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 32)
+        self.play_header_info.setMinimumHeight(header_info.sizeHint().height())
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
