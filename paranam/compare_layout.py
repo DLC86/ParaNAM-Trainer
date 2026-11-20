@@ -12,6 +12,7 @@ class ControlPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._empty_label = QLabel(self)
+        self._empty_label.setObjectName("emptyMessage")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setStyleSheet(
             "background: transparent; color: #888888; "
