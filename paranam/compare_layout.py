@@ -9,6 +9,29 @@ from PySide6.QtWidgets import QFrame, QLayout, QListWidget, QAbstractItemView, Q
 class ControlPanel(QFrame):
     """Give the surrounding scroll area the height of every wrapped control row."""
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._empty_label = QLabel(self)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setStyleSheet(
+            "background: transparent; color: #888888; "
+            "font-size: 22px; font-weight: 600;"
+        )
+        self._empty_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self._empty_label.hide()
+
+    def setEmptyMessage(self, message):
+        self._empty_label.setText(str(message))
+        self._empty_label.setVisible(bool(message))
+        self._position_empty_label()
+
+    def _position_empty_label(self):
+        self._empty_label.setGeometry(self.contentsRect())
+        if self._empty_label.isVisible():
+            self._empty_label.raise_()
+
     def fit_rows(self):
         if self.layout() is not None:
             height = (
@@ -22,6 +45,7 @@ class ControlPanel(QFrame):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.fit_rows()
+        self._position_empty_label()
 
     def event(self, event):
         result = super().event(event)
