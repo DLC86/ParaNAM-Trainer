@@ -10,6 +10,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = runpy.run_path(str(ROOT / "paranam" / "__init__.py"))["__version__"]
@@ -170,18 +171,36 @@ def main():
             raise RuntimeError("DMG staging folder exists; use a clean build directory")
         shutil.copytree(ROOT / "dist" / "ParaNAM Trainer.app", app, symlinks=True)
         (stage / "Applications").symlink_to("/Applications")
-        run(
-            "hdiutil",
-            "create",
-            "-volname",
-            "ParaNAM Trainer",
-            "-srcfolder",
-            stage,
-            "-ov",
-            "-format",
-            "UDZO",
-            installers / f"ParaNAM-Trainer-{VERSION}-macOS-{arch}.dmg",
-        )
+        dmg = installers / f"ParaNAM-Trainer-{VERSION}-macOS-{arch}.dmg"
+        # macOS runners occasionally report a transient "Resource busy" while
+        # hdiutil is finalizing its disk-image device. Retry from a clean output
+        # path instead of failing an otherwise successful application build.
+        for attempt in range(3):
+            dmg.unlink(missing_ok=True)
+            try:
+                run(
+                    "hdiutil",
+                    "create",
+                    "-volname",
+                    "ParaNAM Trainer",
+                    "-srcfolder",
+                    stage,
+                    "-ov",
+                    "-format",
+                    "UDZO",
+                    dmg,
+                )
+                break
+            except subprocess.CalledProcessError:
+                if attempt == 2:
+                    raise
+                delay = 5 * (attempt + 1)
+                print(
+                    f"hdiutil DMG creation failed; retrying in {delay}s "
+                    f"(attempt {attempt + 2}/3)",
+                    flush=True,
+                )
+                time.sleep(delay)
     else:
         package = ROOT / "build" / ("deb-" + args.flavor.lower())
         target = package / "opt" / "paranam-trainer"
