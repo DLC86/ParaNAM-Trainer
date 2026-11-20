@@ -364,7 +364,7 @@ class PlayActions:
         self.play_header_info = QWidget()
         header_info = QVBoxLayout(self.play_header_info)
         header_info.setContentsMargins(0, 0, 0, 0)
-        header_info.setSpacing(3)
+        header_info.setSpacing(0)
         header_info.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
         header.addWidget(self.play_header_info, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
