@@ -363,8 +363,13 @@ class PlayActions:
         # The VU panel starts only beyond this column, not below the title.
         self.play_header_info = QWidget()
         header_info = QVBoxLayout(self.play_header_info)
-        header_info.setContentsMargins(0, 0, 0, 0)
+        # A fixed vertical size prevents the parent header row from
+        # compressing the controls below their native combo-box frame.
+        header_info.setContentsMargins(0, 0, 0, 12)
         header_info.setSpacing(0)
+        self.play_header_info.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         header_info.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
         header.addWidget(self.play_header_info, 1, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
@@ -459,9 +464,7 @@ class PlayActions:
         header_info.activate()
         # Reserve the native combo-box frame's bottom inset as well as the
         # nested layout's size hint; Qt style metrics otherwise clip 6 px.
-        self.play_header_info.setMinimumHeight(
-            header_info.sizeHint().height() + 10
-        )
+        self.play_header_info.setFixedHeight(header_info.sizeHint().height())
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()

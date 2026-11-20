@@ -73,7 +73,8 @@ def test_compare_header_groups_all_description_and_playback_selectors_left(windo
             assert caption.font().pointSizeF() == window.play_buffer_label.font().pointSizeF()
     assert window.play_size.geometry().bottom() <= parent.height()
     assert window.play_output_mode.geometry().bottom() <= parent.height()
-    assert parent.minimumHeight() >= parent.layout().sizeHint().height() + 10
+    assert parent.minimumHeight() == parent.layout().sizeHint().height()
+    assert parent.height() >= parent.layout().sizeHint().height()
     assert parent.layout().spacing() == 0
     assert parent.layout().itemAt(2).layout().contentsMargins().top() == 0
     assert parent.layout().itemAt(3).layout().contentsMargins().bottom() == 0

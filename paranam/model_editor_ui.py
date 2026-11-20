@@ -33,7 +33,9 @@ class SwitchOptionDelegate(QStyledItemDelegate):
         # The DisplayRole is deliberately empty; otherwise Qt paints the
         # model text as well as this delegate's in-row text.
         styled.text = ""
-        # Keep the QListWidget's native row background, selection and focus.
+        # Keep the native selection background but suppress the dotted focus
+        # rectangle around the selected option.
+        styled.state &= ~QStyle.StateFlag.State_HasFocus
         super().paint(painter, styled, index)
 
         painter.save()
