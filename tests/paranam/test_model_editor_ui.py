@@ -103,6 +103,10 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
 
     # Change display index without changing the neural parameter order.
     window.editor_control_list.setCurrentRow(1)  # Gain
+    assert window.editor_control_min.isHidden()
+    assert window.editor_control_max.isHidden()
+    window.editor_control_default.setValue(7.5)
+    assert window.editor_control_rows[0]["default"] == 7.5
     window.editor_control_index.setValue(0)
     assert [c["name"] for c in sorted(
         window.editor_control_rows, key=lambda c: c["index"]
@@ -116,6 +120,17 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
                          Qt.ItemDataRole.UserRole) == switch["key"])
     window.editor_control_list.setCurrentRow(row_index)
     window.editor_option_list.setCurrentRow(0)
+    default_row = next(
+        i for i in range(window.editor_option_list.count())
+        if window.editor_option_list.item(i).data(Qt.ItemDataRole.UserRole) == 2
+    )
+    window.editor_option_list.item(default_row).setCheckState(Qt.CheckState.Checked)
+    assert switch["default"] == 2
+    assert sum(
+        window.editor_option_list.item(i).checkState() == Qt.CheckState.Checked
+        for i in range(window.editor_option_list.count())
+    ) == 1
+    assert "Default" in window.editor_option_list.item(default_row).text()
     before = copy.deepcopy(switch["options"])
     window.editor_option_index.setValue(2)
     assert sorted(o["value"] for o in switch["options"]) == [0, 1, 2]
@@ -139,6 +154,8 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     assert exported["metadata"]["input_level_dbu"] == 12.25
     assert exported["config"]["params"][0]["name"] == "Drive"
     assert exported["config"]["params"][0]["index"] == 0
+    assert exported["config"]["params"][0]["default"] == 7.5
+    assert exported["config"]["params"][1]["default"] == 2
     assert window.editor_source_path == destination
     assert editable_controls(exported)
 
