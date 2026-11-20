@@ -73,6 +73,9 @@ def test_compare_header_groups_all_description_and_playback_selectors_left(windo
             assert caption.font().pointSizeF() == window.play_buffer_label.font().pointSizeF()
     assert window.play_size.geometry().bottom() <= parent.height()
     assert window.play_output_mode.geometry().bottom() <= parent.height()
+    assert parent.layout().spacing() == 3
+    assert parent.layout().itemAt(2).layout().contentsMargins().top() == 0
+    assert parent.layout().itemAt(3).layout().contentsMargins().bottom() == 0
 
 
 def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qapp, monkeypatch):
@@ -135,7 +138,11 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     )
     marker = default_widget.findChild(type(window.editor_path_label), "editorDefaultMarker")
     assert marker.text() == "Default"
-    assert default_widget.layout().itemAt(0).widget().text().startswith("1: Lead")
+    description = default_widget.findChild(type(window.editor_path_label), "editorOptionDescription")
+    assert description.text().startswith("1: Lead")
+    assert default_widget.height() >= 30
+    assert marker.alignment() & Qt.AlignmentFlag.AlignRight
+    assert window.editor_option_list.item(default_row).text() == ""
     before = copy.deepcopy(switch["options"])
     window.editor_option_index.setValue(2)
     assert sorted(o["value"] for o in switch["options"]) == [0, 1, 2]
