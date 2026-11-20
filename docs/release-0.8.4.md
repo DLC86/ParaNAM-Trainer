@@ -7,6 +7,8 @@
 - **Input** and **Output** level knobs sit at the same height as the **Play / Gear / Model** action block, with Input anchored to the left and Output to the right.
 - **Model size** and **Output mode** each occupy a dedicated row immediately **below Playback buffer**, rather than sharing a row with the gain controls.
 - Both the **Models** and **Impulse responses** lists reserve enough height to display at least **ten rows** before scrolling.
+- The **Parametric controls** panel displays a prominent **No model loaded** message whenever no model is selected.
+- Model files can be loaded by dragging **.nam / .pnam** files into the Models panel; **.wav** files can be dropped into Impulse responses.
 
 ## Clear list buttons
 
@@ -25,7 +27,9 @@
 - Load **.nam** and **.pnam** files and edit **Author, Manufacturer, Gear model, Gear type, Tone type, Input level (dBu), Output level (dBu), Input impedance and Notes**, with the same options used in Train's metadata form.
 - Save by **overwriting the existing model** or **creating a named copy**. Replacing an existing file creates a `.bak` copy; writes are atomic and preserve neural weights, computed loudness and gain, and unexposed metadata.
 - Parametric models additionally support changing the **display order** of controls (index), **switch option display order** (index_sw), and renaming controls and switch options without changing neural parameter positions or option numeric values. Changes propagate to Full/Lite control descriptions.
+- The Parametric controls panel expands to use the available window height. Model files can also be loaded by dragging **.nam / .pnam** files onto Model metadata.
 - **Knob min/max cannot be edited**: these values define network input normalization and modifying them would change the sound.
+- Compare selector labels now match the **Playback buffer** label size, and the **Model size / Output mode** row is fully visible.
 - Expanded Qt and model-format regression tests, and updated the existing Compare/sidebar tests for the new layout.
 
 ## Capture and training queue
