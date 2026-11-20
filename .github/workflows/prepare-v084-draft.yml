@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Compare empty-state label implementation and regression test are rebuilt from the exact main SHA.
+# Compare selector clipping and static-model empty-state fixes are rebuilt from the exact main SHA.
 on:
   push:
     branches: [main]
