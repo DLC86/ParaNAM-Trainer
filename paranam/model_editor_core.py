@@ -154,15 +154,24 @@ def validate_control_edits(model, edits):
         indices.append(index)
         # Ranges define the normalizing map into network weights; changing
         # them without weight conversion would change the modeled tone.
-        for key in ("min", "max", "default", "type", "kind"):
+        for key in ("min", "max", "type", "kind"):
             if edit.get(key) != original[key]:
                 raise ValueError(f"Changing {key} is unsafe without retraining")
+        default = edit.get("default")
+        if (isinstance(default, bool) or not isinstance(default, (int, float))
+                or not math.isfinite(float(default))
+                or not original["min"] <= default <= original["max"]):
+            raise ValueError("Default value must be finite and within the control range")
         if original["type"] == "switch":
+            if type(default) is not int:
+                raise ValueError("Switch default must be one of its available options")
             opts = edit.get("options")
             old_by_value = {o["value"]: o for o in original["options"]}
             if (not isinstance(opts, list) or len(opts) != len(old_by_value)
                     or {o.get("value") for o in opts} != set(old_by_value)):
                 raise ValueError("Switch neural values must remain unchanged")
+            if default not in old_by_value:
+                raise ValueError("Switch default must match an available option")
             seen = []
             option_names = []
             for opt in opts:
@@ -238,6 +247,7 @@ def apply_model_edits(model, metadata, controls=None):
                 param = params[pos]
                 param["name"] = edit["name"].strip()
                 param["index"] = edit["index"]
+                param["default"] = edit["default"]
                 if edit["type"] == "switch":
                     ordered = sorted(edit["options"], key=lambda opt: opt["value"])
                     param["options"] = [
@@ -252,6 +262,7 @@ def apply_model_edits(model, metadata, controls=None):
             volume = _linear_volume(result)
             volume["name"] = by_key["linear_volume"]["name"].strip()
             volume["index"] = by_key["linear_volume"]["index"]
+            volume["default"] = by_key["linear_volume"]["default"]
         _parameter_arrays(result)  # Validate every modified branch.
     elif controls:
         raise ValueError("Static model has no parametric controls")
