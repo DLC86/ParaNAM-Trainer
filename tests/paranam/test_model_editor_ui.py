@@ -106,6 +106,7 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
 
     # Change display index without changing the neural parameter order.
     window.editor_control_list.setCurrentRow(1)  # Gain
+    assert not window.editor_control_default_label.isHidden()
     assert window.editor_control_min.isHidden()
     assert window.editor_control_max.isHidden()
     assert window.editor_control_default.decimals() == 3
@@ -133,16 +134,13 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     window.editor_option_default.setChecked(True)
     assert switch["default"] == 2
     assert window.editor_option_default.isChecked()
-    default_widget = window.editor_option_list.itemWidget(
-        window.editor_option_list.item(default_row)
-    )
-    marker = default_widget.findChild(type(window.editor_path_label), "editorDefaultMarker")
-    assert marker.text() == "Default"
-    description = default_widget.findChild(type(window.editor_path_label), "editorOptionDescription")
-    assert description.text().startswith("1: Lead")
-    assert default_widget.height() >= 30
-    assert marker.alignment() & Qt.AlignmentFlag.AlignRight
-    assert window.editor_option_list.item(default_row).text() == ""
+    default_item = window.editor_option_list.item(default_row)
+    assert window.editor_control_default_label.isHidden()
+    assert window.editor_option_list.itemWidget(default_item) is None
+    assert default_item.text().startswith("1: Lead")
+    assert default_item.data(Qt.ItemDataRole.UserRole + 1) is True
+    assert default_item.sizeHint().height() >= 30
+    assert type(window.editor_option_list.itemDelegate()).__name__ == "SwitchOptionDelegate"
     before = copy.deepcopy(switch["options"])
     window.editor_option_index.setValue(2)
     assert sorted(o["value"] for o in switch["options"]) == [0, 1, 2]

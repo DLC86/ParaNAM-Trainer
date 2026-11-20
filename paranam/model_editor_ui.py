@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 import math
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QSpinBox, QVBoxLayout, QWidget, QSizePolicy, QDoubleSpinBox, QCheckBox,
+    QStyle, QStyleOptionViewItem, QStyledItemDelegate,
 )
 
 from .widgets import MetadataEditor
@@ -19,6 +21,56 @@ from .model_editor_core import (
     USER_FIELDS, apply_model_edits, editable_controls,
     load_model_file, write_model_file,
 )
+
+
+class SwitchOptionDelegate(QStyledItemDelegate):
+    """Paint option text and its Default marker inside the native list row."""
+
+    def paint(self, painter, option, index):
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        label = styled.text
+        styled.text = ""
+        # Keep the QListWidget's native row background, selection and focus.
+        super().paint(painter, styled, index)
+
+        painter.save()
+        painter.setFont(option.font)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        role = (
+            QPalette.ColorRole.HighlightedText
+            if selected else QPalette.ColorRole.Text
+        )
+        painter.setPen(option.palette.color(role))
+        text_rect = option.rect.adjusted(8, 0, -8, 0)
+        if index.data(Qt.ItemDataRole.UserRole + 1):
+            marker_width = 76
+            label_rect = text_rect.adjusted(0, 0, -marker_width, 0)
+            marker_rect = text_rect.adjusted(
+                text_rect.width() - marker_width, 0, 0, 0
+            )
+            painter.drawText(
+                label_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
+            painter.drawText(
+                marker_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                "Default",
+            )
+        else:
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(max(30, size.height()))
+        return size
 
 
 class EditorActions:
@@ -123,7 +175,8 @@ class EditorActions:
             self._editor_control_default_changed
         )
         default_layout.addWidget(self.editor_control_default)
-        form.addRow("Default value", default_layout)
+        self.editor_control_default_label = QLabel("Default value")
+        form.addRow(self.editor_control_default_label, default_layout)
         self.editor_control_min = QLineEdit()
         self.editor_control_max = QLineEdit()
         for widget in (self.editor_control_min, self.editor_control_max):
@@ -139,6 +192,9 @@ class EditorActions:
         switch_info.setObjectName("sectionTitle")
         switch_layout.addWidget(switch_info)
         self.editor_option_list = QListWidget()
+        self.editor_option_list.setItemDelegate(
+            SwitchOptionDelegate(self.editor_option_list)
+        )
         self.editor_option_list.setMinimumHeight(100)
         self.editor_option_list.currentRowChanged.connect(
             self._editor_selected_option
@@ -289,6 +345,7 @@ class EditorActions:
                 self.editor_control_min.clear()
                 self.editor_control_max.clear()
                 self.editor_control_default.setValue(0.0)
+                self.editor_control_default_label.hide()
                 self.editor_switch_panel.hide()
                 return
             self.editor_control_name.setText(control["name"])
@@ -300,9 +357,11 @@ class EditorActions:
             self.editor_control_max.setText(str(control["max"]))
             if control["type"] == "switch":
                 self.editor_control_default.setVisible(False)
+                self.editor_control_default_label.setVisible(False)
                 self._editor_refresh_options()
             else:
                 self.editor_control_default.setVisible(True)
+                self.editor_control_default_label.setVisible(True)
                 self.editor_control_default.blockSignals(True)
                 self.editor_control_default.setRange(
                     float(control["min"]), float(control["max"])
@@ -392,34 +451,18 @@ class EditorActions:
             for i, option in enumerate(sorted(
                 control["options"], key=lambda o: o["index_sw"]
             )):
-                item = QListWidgetItem()
-                item.setData(Qt.ItemDataRole.UserRole, option["value"])
-                row_widget = QWidget()
-                row_widget.setFixedHeight(30)
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(8, 0, 8, 0)
-                row_layout.setSpacing(8)
-                description = QLabel(
+                description = (
                     f'{option["index_sw"]}: {option["name"]}  '
                     f'(value {option["value"]})'
                 )
-                description.setObjectName("editorOptionDescription")
-                description.setMinimumHeight(26)
-                marker = QLabel(
-                    "Default" if option["value"] == control["default"] else ""
+                item = QListWidgetItem(description)
+                item.setData(Qt.ItemDataRole.UserRole, option["value"])
+                item.setData(
+                    Qt.ItemDataRole.UserRole + 1,
+                    option["value"] == control["default"],
                 )
-                marker.setObjectName("editorDefaultMarker")
-                marker.setAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                )
-                marker.setMinimumWidth(64)
-                marker.setMinimumHeight(26)
-                row_layout.addWidget(description, 1)
-                row_layout.addWidget(marker)
-                row_layout.activate()
-                item.setSizeHint(row_widget.sizeHint())
+                item.setSizeHint(QSize(0, 30))
                 self.editor_option_list.addItem(item)
-                self.editor_option_list.setItemWidget(item, row_widget)
                 if option["value"] == selected_value:
                     wanted = i
             self.editor_option_list.setCurrentRow(wanted)
@@ -482,13 +525,9 @@ class EditorActions:
         option["name"] = value.strip()
         current = self.editor_option_list.currentItem()
         if current is not None:
-            description = self.editor_option_list.itemWidget(current).findChild(
-                QLabel, "editorOptionDescription"
+            current.setText(
+                f"{option['index_sw']}: {option['name']}  (value {option['value']})"
             )
-            if description is not None:
-                description.setText(
-                    f"{option['index_sw']}: {option['name']}  (value {option['value']})"
-                )
         self._editor_dirty = True
         self.editor_status.setText("Unsaved switch option changes")
 
