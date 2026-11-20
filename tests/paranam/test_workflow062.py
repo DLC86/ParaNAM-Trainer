@@ -110,12 +110,15 @@ def test_compare_empty_parametric_panel_matches_single_control_height(
         qapp.processEvents()
     empty_height = window.play_controls.height()
     assert empty_height >= 200
+    assert window.play_controls._empty_label.text() == "No model loaded"
+    assert window.play_controls._empty_label.isVisible()
     window._play_model_loaded(dict(
         size_selection=True,
         controls=[dict(name="Gain", min=0, max=10, default=5, positions=[])],
     ))
     for _ in range(3):
         qapp.processEvents()
+    assert not window.play_controls._empty_label.isVisible()
     assert abs(window.play_controls.height() - empty_height) <= 2
 
 
