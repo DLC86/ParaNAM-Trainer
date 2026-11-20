@@ -453,7 +453,7 @@ class PlayActions:
         # Reserve the complete nested layout height so the selector row is not
         # clipped when the Compare page is laid out at the available viewport height.
         header_info.activate()
-        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 6)
+        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 18)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
@@ -1221,7 +1221,10 @@ class PlayActions:
                 max(132, slider.width() + 18) if control["positions"] else 132
             )
             grid.addWidget(frame)
-        self.play_controls.setEmptyMessage("")
+        if not info["controls"]:
+            self.play_controls.setEmptyMessage("Static model - no controls to show")
+        else:
+            self.play_controls.setEmptyMessage("")
         self.play_status.setText(
             "Ready. Gear and Model switch the monitored source; the real gear and model stay warm in parallel."
         )
