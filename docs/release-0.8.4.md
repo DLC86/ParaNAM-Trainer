@@ -51,3 +51,6 @@
 - The draft is rebuilt from one exact source commit across Windows, Linux, macOS Intel and macOS Apple Silicon; each native package is smoke-tested before it replaces its previous draft asset.
 
 *Draft release for verification; not automatically published.*
+
+- Editor: knob defaults are displayed to three decimal places; switch defaults use a dedicated checkbox below `index_sw`, with a right-aligned default marker in the options list.
+- Compare: drag-and-drop hover feedback uses a subtle light-grey panel background, and playback selectors have additional layout clearance to prevent clipping.
