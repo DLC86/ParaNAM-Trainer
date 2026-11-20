@@ -31,7 +31,7 @@ from .busy_overlay import run_calculation
 from .ir import BUNDLED, prepare_ir, IRProcessor
 from .preview import preview_files
 from .ui_widgets import navigation_icon
-from .compare_layout import ControlFlowLayout, ControlPanel, AssetList
+from .compare_layout import ControlFlowLayout, ControlPanel, AssetList, FileDropTarget
 from .control_paint import paint_slide_switch
 from .value_format import format_knob_value
 
@@ -412,7 +412,8 @@ class PlayActions:
         self.play_model_clear.clicked.connect(self.clear_play_models)
         model_buttons.addWidget(self.play_model_clear)
         buffer_row = QHBoxLayout()
-        buffer_row.addWidget(QLabel("Playback buffer"))
+        self.play_buffer_label = QLabel("Playback buffer")
+        buffer_row.addWidget(self.play_buffer_label)
         self.play_buffer = QComboBox()
         self.play_buffer.addItem("Driver managed", 0)
         buffer_row.addWidget(self.play_buffer)
@@ -444,11 +445,15 @@ class PlayActions:
             ("Output mode", self.play_output_mode),
         ):
             caption_widget = QLabel(caption)
-            caption_widget.setObjectName("compareControlLabel")
+            caption_widget.setFont(self.play_buffer_label.font())
             selector_row.addWidget(caption_widget)
             selector_row.addWidget(selector)
         selector_row.addStretch(1)
         header_info.addLayout(selector_row)
+        # Reserve the complete nested layout height so the selector row is not
+        # clipped when the Compare page is laid out at the available viewport height.
+        header_info.activate()
+        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 6)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
@@ -618,6 +623,15 @@ class PlayActions:
             )
             contents.addLayout(buttons)
             assets.addWidget(pane, 1)
+            if view is self.play_model_list:
+                self._play_model_drop_target = FileDropTarget(
+                    pane, lambda path: self.open_play_model(path=path),
+                    {".nam", ".pnam"},
+                )
+            else:
+                self._play_ir_drop_target = FileDropTarget(
+                    pane, lambda path: self.open_play_ir(path=path), {".wav"}
+                )
         self.play_ir_status = QLabel(
             "IR affects the monitor signal; reamp send is independent."
         )
@@ -858,8 +872,9 @@ class PlayActions:
         self.play_ir_list.sync()
         self.update_asset_remove_buttons()
 
-    def open_play_ir(self):
-        path, _ = self.choose_open_file("Load impulse response", "IR WAV (*.wav)")
+    def open_play_ir(self, checked=False, path=None):
+        if path is None:
+            path, _ = self.choose_open_file("Load impulse response", "IR WAV (*.wav)")
         if path:
             imported = self.settings.value("play_irs", []) or []
             if isinstance(imported, str):
@@ -914,10 +929,11 @@ class PlayActions:
         self.play_ir.setEnabled(True)
         self.play_ir_open.setEnabled(True)
 
-    def open_play_model(self):
-        path, _ = self.choose_open_file(
-            "Load model", "NAM / PNAM models (*.nam *.pnam)"
-        )
+    def open_play_model(self, checked=False, path=None):
+        if path is None:
+            path, _ = self.choose_open_file(
+                "Load model", "NAM / PNAM models (*.nam *.pnam)"
+            )
         if path:
             hidden = self.settings.value("play_hidden_models", []) or []
             if isinstance(hidden, str):
