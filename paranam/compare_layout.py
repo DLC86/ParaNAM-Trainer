@@ -186,3 +186,45 @@ class AssetList(QListWidget):
             self.setEnabled(self.selector.isEnabled())
         return False
 
+
+
+
+class FileDropTarget(QObject):
+    """Forward a supported local file dropped anywhere in a panel to its loader."""
+
+    def __init__(self, widget, callback, suffixes, parent=None):
+        super().__init__(parent or widget)
+        self.callback = callback
+        self.suffixes = {suffix.lower() for suffix in suffixes}
+        self._install(widget)
+
+    def _install(self, widget):
+        widget.setAcceptDrops(True)
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QObject):
+            if hasattr(child, "setAcceptDrops"):
+                child.setAcceptDrops(True)
+            child.installEventFilter(self)
+
+    def _path_from_event(self, event):
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.is_file() and path.suffix.lower() in self.suffixes:
+                return str(path)
+        return None
+
+    def eventFilter(self, watched, event):
+        if event.type() in (
+            QEvent.Type.DragEnter,
+            QEvent.Type.DragMove,
+            QEvent.Type.Drop,
+        ):
+            path = self._path_from_event(event)
+            if path:
+                event.acceptProposedAction()
+                if event.type() == QEvent.Type.Drop:
+                    self.callback(path)
+                return True
+        return super().eventFilter(watched, event)
