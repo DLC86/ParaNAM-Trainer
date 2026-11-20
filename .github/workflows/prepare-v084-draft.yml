@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Rebuild 0.8.4: panel-only drag highlight, visible Editor options, compact Compare header.
+# Final 0.8.4 rebuild after correcting panel-only drag feedback, Editor option rows, and Compare header spacing.
 on:
   push:
     branches: [main]
