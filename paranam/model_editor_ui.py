@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QSpinBox, QVBoxLayout, QWidget, QSizePolicy, QDoubleSpinBox, QComboBox,
+    QSpinBox, QVBoxLayout, QWidget, QSizePolicy, QDoubleSpinBox,
 )
 
 from .widgets import MetadataEditor
@@ -122,12 +122,7 @@ class EditorActions:
         self.editor_control_default.valueChanged.connect(
             self._editor_control_default_changed
         )
-        self.editor_control_default_switch = QComboBox()
-        self.editor_control_default_switch.currentIndexChanged.connect(
-            self._editor_control_default_switch_changed
-        )
         default_layout.addWidget(self.editor_control_default)
-        default_layout.addWidget(self.editor_control_default_switch)
         form.addRow("Default value", default_layout)
         self.editor_control_min = QLineEdit()
         self.editor_control_max = QLineEdit()
@@ -137,9 +132,6 @@ class EditorActions:
                 "This range is part of the neural normalization; modifying it "
                 "would change the modeled sound."
             )
-        form.addRow("Knob min (locked)", self.editor_control_min)
-        form.addRow("Knob max (locked)", self.editor_control_max)
-
         self.editor_switch_panel = QWidget()
         switch_layout = QVBoxLayout(self.editor_switch_panel)
         switch_layout.setContentsMargins(0, 0, 0, 0)
@@ -154,6 +146,9 @@ class EditorActions:
         self.editor_option_list.setMinimumHeight(100)
         self.editor_option_list.currentRowChanged.connect(
             self._editor_selected_option
+        )
+        self.editor_option_list.itemChanged.connect(
+            self._editor_option_default_changed
         )
         switch_layout.addWidget(self.editor_option_list)
         option_form = QFormLayout()
@@ -291,13 +286,11 @@ class EditorActions:
             self.editor_control_name.setEnabled(active)
             self.editor_control_index.setEnabled(active)
             self.editor_control_default.setEnabled(active)
-            self.editor_control_default_switch.setEnabled(active)
             if not active:
                 self.editor_control_name.clear()
                 self.editor_control_min.clear()
                 self.editor_control_max.clear()
                 self.editor_control_default.setValue(0.0)
-                self.editor_control_default_switch.clear()
                 self.editor_switch_panel.hide()
                 return
             self.editor_control_name.setText(control["name"])
@@ -309,23 +302,8 @@ class EditorActions:
             self.editor_control_max.setText(str(control["max"]))
             if control["type"] == "switch":
                 self.editor_control_default.setVisible(False)
-                self.editor_control_default_switch.setVisible(True)
-                self.editor_control_default_switch.blockSignals(True)
-                self.editor_control_default_switch.clear()
-                for option in sorted(
-                    control["options"], key=lambda item: item["index_sw"]
-                ):
-                    self.editor_control_default_switch.addItem(
-                        option["name"], option["value"]
-                    )
-                selected = self.editor_control_default_switch.findData(
-                    control["default"]
-                )
-                self.editor_control_default_switch.setCurrentIndex(selected)
-                self.editor_control_default_switch.blockSignals(False)
                 self._editor_refresh_options()
             else:
-                self.editor_control_default_switch.setVisible(False)
                 self.editor_control_default.setVisible(True)
                 self.editor_control_default.blockSignals(True)
                 self.editor_control_default.setRange(
@@ -348,18 +326,6 @@ class EditorActions:
             return
         if control["default"] != value:
             control["default"] = float(value)
-            self._editor_dirty = True
-            self.editor_status.setText("Unsaved control default changes")
-
-    def _editor_control_default_switch_changed(self, *_):
-        if self._editor_loading_fields:
-            return
-        control = self._editor_current_control()
-        if control is None or control["type"] != "switch":
-            return
-        value = self.editor_control_default_switch.currentData()
-        if value is not None and control["default"] != value:
-            control["default"] = value
             self._editor_dirty = True
             self.editor_status.setText("Unsaved control default changes")
 
@@ -429,9 +395,18 @@ class EditorActions:
                 control["options"], key=lambda o: o["index_sw"]
             )):
                 item = QListWidgetItem(
-                    f"{option['index_sw']}: {option['name']}  (value {option['value']})"
+                    f"Default  |  {option['index_sw']}: {option['name']}  "
+                    f"(value {option['value']})"
                 )
                 item.setData(Qt.ItemDataRole.UserRole, option["value"])
+                item.setFlags(
+                    item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                item.setCheckState(
+                    Qt.CheckState.Checked if option["value"] == control["default"]
+                    else Qt.CheckState.Unchecked
+                )
+                item.setToolTip("Check to make this switch option the default")
                 self.editor_option_list.addItem(item)
                 if option["value"] == selected_value:
                     wanted = i
@@ -440,6 +415,32 @@ class EditorActions:
             self.editor_option_list.blockSignals(False)
             self._editor_loading_fields = False
         self._editor_selected_option()
+
+    def _editor_option_default_changed(self, item):
+        if self._editor_loading_fields or item.checkState() != Qt.CheckState.Checked:
+            return
+        control = self._editor_current_control()
+        if control is None or control["type"] != "switch":
+            return
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if value is None or control["default"] == value:
+            return
+        control["default"] = value
+        self._editor_loading_fields = True
+        self.editor_option_list.blockSignals(True)
+        try:
+            for row in range(self.editor_option_list.count()):
+                option_item = self.editor_option_list.item(row)
+                option_item.setCheckState(
+                    Qt.CheckState.Checked
+                    if option_item.data(Qt.ItemDataRole.UserRole) == value
+                    else Qt.CheckState.Unchecked
+                )
+        finally:
+            self.editor_option_list.blockSignals(False)
+            self._editor_loading_fields = False
+        self._editor_dirty = True
+        self.editor_status.setText("Unsaved control default changes")
 
     def _editor_selected_option(self, *_):
         if self._editor_loading_fields:
@@ -470,6 +471,7 @@ class EditorActions:
         current = self.editor_option_list.currentItem()
         if current is not None:
             current.setText(
+                f"{'Default  |  ' if option['value'] == self._editor_current_control()['default'] else ''}"
                 f"{option['index_sw']}: {option['name']}  (value {option['value']})"
             )
         self._editor_dirty = True
