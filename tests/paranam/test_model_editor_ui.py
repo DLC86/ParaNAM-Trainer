@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, QMimeData, QUrl, Qt
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMessageBox
 
 from paranam.model_editor_core import editable_controls
@@ -67,6 +68,11 @@ def test_compare_header_groups_all_description_and_playback_selectors_left(windo
     assert output_meter_column.findChild(type(window.play_output_meter)) is window.play_output_meter
     assert input_meter_column.mapTo(window.page_contents[5], QPoint(0, 0)).x() < input_label.mapTo(window.page_contents[5], QPoint(0, 0)).x()
     assert output_meter_column.mapTo(window.page_contents[5], QPoint(0, 0)).x() > output_label.mapTo(window.page_contents[5], QPoint(output_label.width(), 0)).x()
+    for caption in parent.findChildren(type(window.play_buffer_label)):
+        if caption.text() in ("Model size", "Output mode"):
+            assert caption.font().pointSizeF() == window.play_buffer_label.font().pointSizeF()
+    assert window.play_size.geometry().bottom() <= parent.height()
+    assert window.play_output_mode.geometry().bottom() <= parent.height()
 
 
 def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qapp, monkeypatch):
@@ -79,8 +85,12 @@ def test_editor_sidebar_metadata_and_parametric_index_edits(window, tmp_path, qa
     assert window.settings_button.isChecked() is False
     assert not window.editor_save_button.isEnabled()
 
+    window.resize(1260, 840)
+    window.show()
     window.editor_open_file(path=source)
+    qapp.processEvents()
     assert not window.editor_controls_card.isHidden()
+    assert window.editor_controls_card.height() > 190
     assert window.editor_control_list.count() == 3
     assert "Gain" in window.editor_control_list.item(1).text()
     assert window.editor_metadata.fields["modeled_by"].text() == "Old author"
@@ -180,3 +190,59 @@ def test_editor_rejects_invalid_numeric_inputs_without_modifying_model(
     window._editor_save(destination=source)
     assert source.read_text() == json.dumps(document)
     assert any("finite" in item for item in messages)
+
+
+
+def _drop_local_file(qapp, widget, path):
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    enter = QDragEnterEvent(
+        QPoint(2, 2), Qt.DropAction.CopyAction, mime,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    qapp.sendEvent(widget, enter)
+    assert enter.isAccepted()
+    drop = QDropEvent(
+        QPointF(2, 2), Qt.DropAction.CopyAction, mime,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    )
+    qapp.sendEvent(widget, drop)
+    assert drop.isAccepted()
+
+
+def test_editor_metadata_card_accepts_model_drag_and_drop(
+    window, tmp_path, qapp,
+):
+    source = tmp_path / "dragged.nam"
+    source.write_text(json.dumps({
+        "architecture": "WaveNet", "config": {},
+        "weights": [0.25], "metadata": {"modeled_by": "Dropped"},
+    }), encoding="utf-8")
+    window.navigate(7)
+    _drop_local_file(qapp, window.editor_metadata, source)
+    assert window.editor_source_path == source.resolve()
+    assert window.editor_metadata.fields["modeled_by"].text() == "Dropped"
+
+
+def test_compare_model_and_ir_panels_accept_drag_and_drop(
+    window, tmp_path, qapp, monkeypatch,
+):
+    model = tmp_path / "dragged.pnam"
+    model.write_text("{}", encoding="utf-8")
+    ir = tmp_path / "dragged.wav"
+    ir.write_bytes(b"RIFF")
+    window.navigate(5)
+    refreshed = []
+    monkeypatch.setattr(
+        window, "refresh_play_models",
+        lambda selected=None, **kwargs: refreshed.append(selected),
+    )
+    _drop_local_file(qapp, window.play_model_list, model)
+    assert refreshed == [str(model)]
+    assert str(model) in (window.settings.value("play_models", []) or [])
+
+    window.play_ir.blockSignals(True)
+    _drop_local_file(qapp, window.play_ir_list, ir)
+    window.play_ir.blockSignals(False)
+    assert window.play_ir.findData(str(ir)) >= 0
+    assert str(ir) in (window.settings.value("play_irs", []) or [])
