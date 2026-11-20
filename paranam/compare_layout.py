@@ -1,6 +1,8 @@
 """Compact controls and visible asset lists for Compare."""
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, QItemSelectionModel
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer, QItemSelectionModel
 from PySide6.QtWidgets import QFrame, QLayout, QListWidget, QAbstractItemView, QLabel
 
 
