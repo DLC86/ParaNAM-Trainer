@@ -1,4 +1,4 @@
-"""Upload tested native packages directly to a release draft, avoiding CI storage."""
+"""Upload tested native packages directly to the existing 0.8.4 release."""
 
 import json
 import os
@@ -18,7 +18,7 @@ def main():
     repo = json.loads(gh("api", f"repos/{repository}"))
     release = json.loads(gh("api", f"repos/{repository}/releases/{release_id}"))
     assert repo["full_name"].casefold() == repository.casefold(), "Repository mismatch"
-    assert release["draft"] and release["prerelease"], "Expected a draft preview"
+    assert release["tag_name"] == "v0.8.4", "Unexpected release tag"
     target = release["target_commitish"]
     if target != os.environ["GITHUB_SHA"]:
         resolved = json.loads(gh("api", f"repos/{repository}/commits/{target}"))["sha"]
@@ -70,7 +70,7 @@ def main():
                 )
             print(
                 f"All native packages verified; removed {len(obsolete)} old "
-                "installer asset(s); release remains in draft."
+                "installer asset(s); existing release publication state preserved."
             )
         else:
             assert expected == assets.keys(), "Unexpected release assets"
