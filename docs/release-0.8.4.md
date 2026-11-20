@@ -54,3 +54,7 @@
 
 - Editor: knob defaults are displayed to three decimal places; switch defaults use a dedicated checkbox below `index_sw`, with a right-aligned default marker in the options list.
 - Compare: drag-and-drop hover feedback uses a subtle light-grey panel background, and playback selectors have additional layout clearance to prevent clipping.
+
+- Compare drag hover now changes only the target panel background by a subtle 8% lightening; child widgets retain their normal appearance.
+- Editor switch options use a compact `Options` heading and visible rows with a right-aligned default marker.
+- Compare header spacing and nested row margins are compacted so Model size and Output mode remain within the header.
