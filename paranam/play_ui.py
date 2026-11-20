@@ -453,7 +453,7 @@ class PlayActions:
         # Reserve the complete nested layout height so the selector row is not
         # clipped when the Compare page is laid out at the available viewport height.
         header_info.activate()
-        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 18)
+        self.play_header_info.setMinimumHeight(header_info.sizeHint().height() + 32)
         self.play_model.currentIndexChanged.connect(self.load_play_model)
         self.play_size.currentIndexChanged.connect(self.load_play_model)
         self.play_action_bar = QWidget()
