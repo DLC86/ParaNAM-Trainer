@@ -417,7 +417,7 @@ class EditorActions:
                 row_layout.addWidget(description, 1)
                 row_layout.addWidget(marker)
                 row_layout.activate()
-                item.setSizeHint(QSize(0, 30))
+                item.setSizeHint(row_widget.sizeHint())
                 self.editor_option_list.addItem(item)
                 self.editor_option_list.setItemWidget(item, row_widget)
                 if option["value"] == selected_value:
