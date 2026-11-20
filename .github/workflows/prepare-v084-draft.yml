@@ -1,5 +1,5 @@
 name: Prepare and build ParaNAM Trainer 0.8.4 draft
-# Source, UI updates and release-note changes are rebuilt from the exact main SHA.
+# Final Compare drag-and-drop import fix and release-note updates are rebuilt from the exact main SHA.
 on:
   push:
     branches: [main]
