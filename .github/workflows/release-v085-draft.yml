@@ -1,0 +1,111 @@
+name: ParaNAM 0.8.5 draft release
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-v085-draft.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  targets:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: select
+        run: |
+          python3 - <<'PY'
+          import json, os
+          targets = json.load(open('packaging/targets.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(targets) + '\\n')
+          PY
+  build:
+    needs: targets
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Free space for Linux bundle
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h .
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libportaudio2 libasound2 libpulse0 libegl1 libopengl0 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libfontconfig1 libdbus-1-3
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+      - name: Install PyTorch
+        run: python -m pip install --no-cache-dir "torch==${{ matrix.torch }}" --index-url "${{ matrix.index }}"
+      - name: Install application and build dependencies
+        run: python -m pip install --no-cache-dir -c packaging/constraints-${{ matrix.os }}.txt "${{ matrix.numpy }}" "pytorch-lightning==2.6.1" "PySide6==6.8.3" "pyinstaller>=6.13,<7" pytest pytest-mock Pillow -e .
+      - name: Build native playback engine
+        run: python packaging/native_engine.py
+      - name: Verify custom-input validation behavior
+        if: runner.os != 'Windows'
+        run: python -m pytest tests/paranam/test_training.py -k custom_input -q -o addopts= --basetemp .test-temp
+      - name: Targeted capture and HyperA2 regression checks
+        if: runner.os != 'Windows'
+        run: python -m pytest tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Targeted capture and HyperA2 regression checks (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Freeze application and package installer
+        run: python packaging/build.py --flavor ${{ matrix.flavor }}
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ParaNAM-${{ matrix.id }}
+          path: installers/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+  draft-release:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ParaNAM-*
+          path: installers
+          merge-multiple: true
+      - name: Create 0.8.5 as a draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.8.5
+          target_commitish: main
+          name: ParaNAM Trainer 0.8.5
+          draft: true
+          prerelease: false
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            ## Changes
+            - Custom input WAVs no longer undergo NAM's preceding-silence validation. The validation remains enabled for bundled input signals.
+            - All other NAM dataset validation checks remain unchanged.
+          files: installers/*
+          fail_on_unmatched_files: true
