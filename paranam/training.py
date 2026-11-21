@@ -442,8 +442,10 @@ def make_job(workspace, resume=False, job_directory=None):
             # saved input_mode preference is missing or stale. Detect the
             # actual project input too, so NAM's pre-roll check is disabled
             # for the custom training signal regardless of project version.
-            for row in data["train"]:
-                row["require_input_pre_silence"] = None
+            for split in ("train", "validation"):
+                for row in data[split]:
+                    if Path(row["x_path"]).name == train_input_name:
+                        row["require_input_pre_silence"] = None
         if not data["validation"]:
             raise ValueError(
                 "At least one validation capture is required to report a meaningful ESR."
