@@ -147,8 +147,8 @@ def test_editor_json_export_is_indented_and_keeps_final_newline(tmp_path):
     document = load_model_file(source)
     write_model_file(source, destination, document)
     payload = destination.read_text(encoding="utf-8")
-    assert "\\n  \"architecture\"" in payload
-    assert payload.endswith("\\n")
+    assert "\n  \"architecture\"" in payload
+    assert payload.endswith("\n")
     assert json.loads(payload) == document
 
 
