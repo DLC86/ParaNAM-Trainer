@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-v085-draft.yml
+      - paranam/model_editor_core.py
+      - paranam/model_editor_ui.py
+      - paranam/widgets.py
+      - tests/paranam/test_model_editor.py
+      - tests/paranam/test_model_editor_ui.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -75,6 +80,8 @@ jobs:
       - name: Targeted capture and HyperA2 regression checks (Windows)
         if: runner.os == 'Windows'
         run: python -m pytest tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Model Editor migration and UI regression tests
+        run: python -m pytest tests/paranam/test_model_editor.py tests/paranam/test_model_editor_ui.py -q -o addopts= --basetemp .test-temp
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Upload installer
