@@ -10,6 +10,7 @@ on:
       - paranam/training.py
       - tests/paranam/test_model_editor.py
       - tests/paranam/test_model_editor_ui.py
+      - tests/paranam/conftest.py
       - tests/paranam/test_training.py
   workflow_dispatch:
 permissions:
