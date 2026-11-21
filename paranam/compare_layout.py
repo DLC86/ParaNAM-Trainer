@@ -161,6 +161,10 @@ class AssetList(QListWidget):
         super().__init__(parent)
         self.selector = selector
         self.pending = False
+        # Own the deferred sync timer so it cannot outlive this widget.
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setSingleShot(True)
+        self._sync_timer.timeout.connect(self.sync)
         # At least ten standard model/IR items are visible before scrolling.
         self.setMinimumHeight(max(320, 10 * (self.fontMetrics().lineSpacing() + 10)))
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -179,7 +183,7 @@ class AssetList(QListWidget):
     def schedule_sync(self, *_):
         if not self.pending:
             self.pending = True
-            QTimer.singleShot(0, self.sync)
+            self._sync_timer.start(0)
 
     def sync(self, *_):
         self.pending = False
