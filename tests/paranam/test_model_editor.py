@@ -104,6 +104,54 @@ def test_editor_updates_only_display_metadata_and_all_hypera2_branches():
         assert [o["value"] for o in params[1]["options"]] == [0, 1, 2]
 
 
+def test_legacy_hypera2_migrates_only_when_saved_and_preserves_network_data(tmp_path):
+    source = tmp_path / "legacy.pnam"
+    legacy = sample_pnam()
+    legacy["architecture"] = "HyperA2"
+    original = copy.deepcopy(legacy)
+    source.write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = load_model_file(source)
+    assert loaded["architecture"] == "HyperA2"
+    assert json.loads(source.read_text(encoding="utf-8"))["architecture"] == "HyperA2"
+
+    migrated = apply_model_edits(loaded, loaded["metadata"], editable_controls(loaded))
+    assert migrated["architecture"] == "ParametricSlimmableContainer"
+    assert migrated["weights"] == original["weights"]
+    assert migrated["config"] == original["config"]
+    assert migrated["extensions"] == original["extensions"]
+    assert loaded == original
+
+    write_model_file(source, source, migrated)
+    saved = json.loads(source.read_text(encoding="utf-8"))
+    assert saved["architecture"] == "ParametricSlimmableContainer"
+    assert saved["weights"] == original["weights"]
+    assert saved["config"] == original["config"]
+
+
+def test_hyperwavenet_architecture_is_not_migrated_by_editor():
+    legacy = sample_pnam()
+    legacy["architecture"] = "HyperWaveNet"
+    edited = apply_model_edits(
+        legacy, legacy["metadata"], editable_controls(legacy)
+    )
+    assert edited["architecture"] == "HyperWaveNet"
+    assert edited["weights"] == legacy["weights"]
+    assert edited["config"] == legacy["config"]
+
+
+def test_editor_json_export_is_indented_and_keeps_final_newline(tmp_path):
+    source = tmp_path / "source.nam"
+    source.write_text('{"architecture":"WaveNet","config":{},"weights":[1],"metadata":{}}')
+    destination = tmp_path / "pretty.nam"
+    document = load_model_file(source)
+    write_model_file(source, destination, document)
+    payload = destination.read_text(encoding="utf-8")
+    assert "\\n  \"architecture\"" in payload
+    assert payload.endswith("\\n")
+    assert json.loads(payload) == document
+
+
 def test_editor_refuses_normalization_changes_duplicate_names_and_neural_index_sw():
     doc = sample_pnam()
     original = editable_controls(doc)
