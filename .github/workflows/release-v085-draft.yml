@@ -6,6 +6,7 @@ on:
       - .github/workflows/release-v085-draft.yml
       - paranam/model_editor_core.py
       - paranam/model_editor_ui.py
+      - paranam/compare_layout.py
       - paranam/widgets.py
       - paranam/training.py
       - tests/paranam/test_model_editor.py
