@@ -20,7 +20,7 @@ jobs:
           import json, os
           targets = json.load(open('packaging/targets.json'))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('matrix=' + json.dumps(targets) + '\\n')
+              output.write('matrix=' + json.dumps(targets) + '\n')
           PY
   build:
     needs: targets
