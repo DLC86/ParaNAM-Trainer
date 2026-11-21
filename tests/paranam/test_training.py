@@ -67,6 +67,19 @@ def test_training_retains_capture_safety_margin_once(workspace, capture_type, lo
     assert all(entry.delay == label for entry in workspace.project.entries)
 
 
+@pytest.mark.parametrize("input_mode,expected", [("custom", None), ("trunc", "missing")])
+def test_custom_input_disables_only_nam_pre_silence_check(workspace, input_mode, expected):
+    ready(workspace)
+    workspace.preferences["input_mode"] = input_mode
+    workspace.save()
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    common = spec["data"]["common"]
+    if expected is None:
+        assert common["require_input_pre_silence"] is None
+    else:
+        assert "require_input_pre_silence" not in common
+
+
 def tiny_job(workspace, monkeypatch):
     ready(workspace)
     workspace.project.input_level_dbu, workspace.project.output_level_dbu = 18, 12
