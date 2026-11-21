@@ -33,22 +33,14 @@ def workspace(tmp_path):
 
 @pytest.fixture(scope="session")
 def qapp():
-    from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QApplication
 
-    app = QApplication.instance() or QApplication([])
-    yield app
-    app.closeAllWindows()
-    app.processEvents()
-    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    app.processEvents()
-    app.quit()
-    app.processEvents()
+    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture
 def window(qapp, monkeypatch, tmp_path):
-    from PySide6.QtCore import QEvent, QSettings, QObject, Signal
+    from PySide6.QtCore import QSettings, QObject, Signal
     from paranam import wizard
     from paranam import settings_audio
 
@@ -85,9 +77,6 @@ def window(qapp, monkeypatch, tmp_path):
     instance = wizard.WizardWindow()
     yield instance
     instance.close()
-    instance.deleteLater()
-    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    qapp.processEvents()
 
 
 @pytest.fixture(autouse=True)
