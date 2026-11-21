@@ -428,7 +428,10 @@ def make_job(workspace, resume=False, job_directory=None):
         # alignment. A user-supplied input WAV has no such guaranteed pre-roll,
         # so explicitly disable only that check for custom-input projects.
         if workspace.preferences.get("input_mode") == "custom":
-            data.setdefault("common", {})["require_input_pre_silence"] = None
+            # Only the custom training signal lacks the bundled signal's
+            # guaranteed pre-roll. Keep NAM's validation-input check enabled.
+            for row in data["train"]:
+                row["require_input_pre_silence"] = None
         if not data["validation"]:
             raise ValueError(
                 "At least one validation capture is required to report a meaningful ESR."
