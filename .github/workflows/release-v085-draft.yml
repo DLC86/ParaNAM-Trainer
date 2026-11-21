@@ -7,8 +7,10 @@ on:
       - paranam/model_editor_core.py
       - paranam/model_editor_ui.py
       - paranam/widgets.py
+      - paranam/training.py
       - tests/paranam/test_model_editor.py
       - tests/paranam/test_model_editor_ui.py
+      - tests/paranam/test_training.py
   workflow_dispatch:
 permissions:
   contents: read
