@@ -1,7 +1,8 @@
-"""Safe metadata-only editing of exported NAM and ParaNAM JSON models.
+"""Safe metadata editing of exported NAM and ParaNAM JSON models.
 
-The network's neural parameter order, encoding ranges, defaults, switch numeric
-values, weights and calibration curve are never changed by this editor.
+The network's neural parameter order, encoding ranges, switch numeric values,
+weights and calibration curve are preserved. Legacy HyperA2 files are migrated
+to the equivalent ParametricSlimmableContainer discriminator only on save.
 """
 
 from __future__ import annotations
@@ -199,6 +200,11 @@ def validate_control_edits(model, edits):
 def apply_model_edits(model, metadata, controls=None):
     """Build a new document. Do not mutate the file opened in the editor."""
     result = deepcopy(model)
+    # HyperA2's exported config already has the Full/Lite submodel layout
+    # required by ParametricSlimmableContainer. The migration is deliberately
+    # deferred until a save, so merely opening a legacy file never changes it.
+    if result.get("architecture") == "HyperA2":
+        result["architecture"] = "ParametricSlimmableContainer"
     merged = dict(result.get("metadata", {}))
     if not isinstance(metadata, dict):
         raise ValueError("Invalid metadata")
@@ -281,7 +287,7 @@ def write_model_file(source, destination, model):
     if destination.exists() and not destination.is_file():
         raise ValueError("Destination is not a regular file")
     # Preflight serialization/finite values before touching any file.
-    payload = json.dumps(model, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    payload = json.dumps(model, ensure_ascii=False, allow_nan=False, indent=2)
     fd, temp_name = tempfile.mkstemp(
         prefix=f".{destination.name}.editor.", suffix=".tmp",
         dir=destination.parent,
