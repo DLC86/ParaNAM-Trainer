@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: paranam-v085-draft-release
+  cancel-in-progress: true
 jobs:
   targets:
     runs-on: ubuntu-22.04
@@ -105,7 +108,7 @@ jobs:
           generate_release_notes: false
           body: |
             ## Changes
-            - Custom input WAVs no longer undergo NAM's preceding-silence validation. The validation remains enabled for bundled input signals.
+            - Custom training WAVs bypass NAM's preceding-silence validation; the check remains enabled for the separate validation signal and all bundled inputs.
             - All other NAM dataset validation checks remain unchanged.
           files: installers/*
           fail_on_unmatched_files: true
