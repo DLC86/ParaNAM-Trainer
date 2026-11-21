@@ -82,6 +82,21 @@ def test_custom_input_disables_only_nam_pre_silence_check(workspace, input_mode,
     assert all("require_input_pre_silence" not in row for row in spec["data"]["validation"])
 
 
+def test_legacy_custom_project_path_disables_nam_pre_silence_check(workspace):
+    ready(workspace)
+    # Simulate a project created by an older release: the project itself
+    # points to a custom WAV, but the saved preference still says "trunc".
+    workspace.project.train_input = "user-recording.wav"
+    workspace.preferences["input_mode"] = "trunc"
+    workspace.save()
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    assert all(
+        row["x_path"] == "user-recording.wav"
+        and row["require_input_pre_silence"] is None
+        for row in spec["data"]["train"]
+    )
+
+
 def tiny_job(workspace, monkeypatch):
     ready(workspace)
     workspace.project.input_level_dbu, workspace.project.output_level_dbu = 18, 12
