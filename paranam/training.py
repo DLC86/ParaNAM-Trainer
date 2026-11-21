@@ -427,9 +427,21 @@ def make_job(workspace, resume=False, job_directory=None):
         # NAM's pre-silence check protects the bundled signals' fixed capture
         # alignment. A user-supplied input WAV has no such guaranteed pre-roll,
         # so explicitly disable only that check for custom-input projects.
-        if workspace.preferences.get("input_mode") == "custom":
-            # Only the custom training signal lacks the bundled signal's
-            # guaranteed pre-roll. Keep NAM's validation-input check enabled.
+        train_input_name = Path(workspace.project.train_input).name
+        custom_train_input = (
+            workspace.preferences.get("input_mode") == "custom"
+            or train_input_name not in {
+                "input_train.wav",
+                "input_standard.wav",
+                "input_tts_v11.wav",
+                "input_trunc.wav",
+            }
+        )
+        if custom_train_input:
+            # Older projects can retain a custom train_input path while their
+            # saved input_mode preference is missing or stale. Detect the
+            # actual project input too, so NAM's pre-roll check is disabled
+            # for the custom training signal regardless of project version.
             for row in data["train"]:
                 row["require_input_pre_silence"] = None
         if not data["validation"]:
