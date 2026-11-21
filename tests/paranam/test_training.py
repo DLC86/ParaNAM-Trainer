@@ -74,10 +74,12 @@ def test_custom_input_disables_only_nam_pre_silence_check(workspace, input_mode,
     workspace.save()
     spec = read_json(training.make_job(workspace) / "spec.json")
     common = spec["data"]["common"]
+    assert "require_input_pre_silence" not in common
     if expected is None:
-        assert common["require_input_pre_silence"] is None
+        assert all(row["require_input_pre_silence"] is None for row in spec["data"]["train"])
     else:
-        assert "require_input_pre_silence" not in common
+        assert all("require_input_pre_silence" not in row for row in spec["data"]["train"])
+    assert all("require_input_pre_silence" not in row for row in spec["data"]["validation"])
 
 
 def tiny_job(workspace, monkeypatch):
