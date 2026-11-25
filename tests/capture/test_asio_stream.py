@@ -6,6 +6,7 @@ import pytest
 
 from nam.capture._asio_stream import AsioRecorder, _BlockJob, check_timing, transfer
 from nam.capture.audio import AudioDeviceError, SounddeviceRecorder
+from nam.capture.audio import AudioDropoutError, _CallbackTimingGuard
 
 
 @pytest.fixture
@@ -89,6 +90,35 @@ def test_requested_native_buffer_is_verified_before_playback():
     assert "driver uses 64" in str(job.error)
     assert job.done.is_set()
     assert not output.any()
+
+
+def test_asio_callback_rejects_a_large_hardware_timestamp_gap():
+    obj = engine()
+    obj.native_asio = False
+    obj.settings = dict(settings(), blocksize=0)
+    job = _BlockJob(
+        np.ones(128),
+        None,
+        np.zeros(128),
+        None,
+        timing_guard=_CallbackTimingGuard(48000),
+    )
+    obj.job = job
+    status = SimpleNamespace(input_overflow=False, output_underflow=False)
+    incoming = np.zeros((64, 8))
+    outgoing = np.zeros_like(incoming)
+    obj._callback(
+        incoming, outgoing, 64,
+        SimpleNamespace(inputBufferAdcTime=1.0), status,
+    )
+    assert job.position == 64
+    obj._callback(
+        incoming, outgoing, 64,
+        SimpleNamespace(inputBufferAdcTime=1.1), status,
+    )
+    assert isinstance(job.error, AudioDropoutError)
+    assert "timestamp jumped" in str(job.error)
+    assert job.done.is_set()
 
 
 def test_cancelled_job_is_acknowledged_without_playing_audio():
