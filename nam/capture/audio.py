@@ -120,6 +120,61 @@ LATENCY_CHOICES: _Tuple[_Tuple[str, _Latency], ...] = (
 )
 
 
+class _CallbackTimingGuard:
+    """Reject callback timestamp resets or large gaps when the host exposes them."""
+
+    _FIELDS = ("inputBufferAdcTime", "outputBufferDacTime")
+
+    def __init__(self, sample_rate: int):
+        self.sample_rate = float(sample_rate)
+        self.previous = {}
+
+    def check(self, frames: int, timing) -> None:
+        if frames <= 0:
+            raise AudioDropoutError("The audio driver delivered an empty callback block.")
+        for field in self._FIELDS:
+            value = getattr(timing, field, None)
+            if value is None:
+                continue
+            current = float(value)
+            if not _np.isfinite(current) or current < 0:
+                raise AudioDropoutError(
+                    f"The audio driver returned an invalid {field} timestamp."
+                )
+            # Some host APIs report zero when a hardware timestamp is unavailable.
+            if current == 0:
+                continue
+            previous = self.previous.get(field)
+            if previous is not None:
+                old_time, old_frames = previous
+                delta = current - old_time
+                expected = old_frames / self.sample_rate
+                # Callback sizes may vary. Allow normal scheduling jitter, but reject
+                # clock resets and gaps large enough to hide one or more audio blocks.
+                tolerance = max(0.02, expected * 2.0)
+                if delta <= 0 or delta > expected + tolerance:
+                    raise AudioDropoutError(
+                        f"The audio driver's {field} timestamp jumped by {delta:.6f} "
+                        f"seconds (expected about {expected:.6f}). The capture was not saved."
+                    )
+            self.previous[field] = (current, frames)
+
+
+def validate_recording(recording, expected_shape, *, label="recording"):
+    """Validate captured samples outside the real-time callback."""
+    array = _np.asarray(recording)
+    if array.shape != tuple(expected_shape):
+        raise AudioDeviceError(
+            f"Recorder returned {label} shape {array.shape}; expected {tuple(expected_shape)}"
+        )
+    if not _np.isfinite(array).all():
+        raise AudioDropoutError(
+            f"The {label} contains NaN or infinite samples. The capture was not saved; "
+            "check the audio driver and reconnect the interface before retrying."
+        )
+    return array
+
+
 class CaptureCancelled(Exception):
     """
     Raised when the user cancels an in-flight capture.
@@ -654,12 +709,23 @@ class SounddeviceRecorder:
         recording = _np.empty((len(playback), input_channels), dtype=_np.float32)
         position = 0
         dropout = None
+        timing_guard = _CallbackTimingGuard(sample_rate)
 
         def callback(incoming, outgoing, frames, timing, status):
             nonlocal position, dropout
             outgoing.fill(0)
             if status.input_overflow or status.output_underflow:
                 dropout = status
+                raise sd.CallbackAbort
+            try:
+                timing_guard.check(frames, timing)
+            except AudioDropoutError as exc:
+                dropout = exc
+                raise sd.CallbackAbort
+            if incoming.shape[0] < frames or outgoing.shape[0] < frames:
+                dropout = AudioDropoutError(
+                    "The audio driver supplied an incomplete callback block. The capture was not saved."
+                )
                 raise sd.CallbackAbort
             count = min(frames, len(playback) - position)
             end = position + count
@@ -714,6 +780,8 @@ class SounddeviceRecorder:
                         )
                         metered = end
                     sd.sleep(self._POLL_MS)
+                if isinstance(dropout, AudioDropoutError):
+                    raise dropout
                 _raise_on_dropout(dropout, latency=latency, blocksize=blocksize)
                 if position != len(playback):
                     raise AudioDropoutError(
