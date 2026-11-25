@@ -339,12 +339,16 @@ class AsioRecorder:
             job.done.set()
 
     def _exchange(self, main, loop, cancel, progress=None, meter=None):
+        settings = getattr(self, "settings", None) or {}
+        sample_rate = settings.get("sample_rate")
         job = _BlockJob(
             main,
             loop,
             np.zeros_like(main),
             None if loop is None else np.zeros_like(loop),
-            timing_guard=_CallbackTimingGuard(self.settings["sample_rate"]),
+            timing_guard=(
+                _CallbackTimingGuard(sample_rate) if sample_rate else None
+            ),
         )
         self.job = job
         metered = 0
