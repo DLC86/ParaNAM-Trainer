@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .audio import AudioDeviceError, AudioDropoutError, CaptureCancelled, asio_com_apartment
+from .audio import (
+    AudioDeviceError,
+    AudioDropoutError,
+    CaptureCancelled,
+    _CallbackTimingGuard,
+    asio_com_apartment,
+)
 
 
 class _UnstableReference(AudioDeviceError):
@@ -97,6 +103,7 @@ class _BlockJob:
     done: threading.Event = field(default_factory=threading.Event)
     error: object = None
     cancelled: bool = False
+    timing_guard: object = None
 
 
 class AsioRecorder:
@@ -286,6 +293,12 @@ class AsioRecorder:
             return
         try:
             requested = self.settings["blocksize"]
+            if job.timing_guard is not None:
+                job.timing_guard.check(frames, timing)
+            if incoming.shape[0] < frames or outgoing.shape[0] < frames:
+                raise AudioDropoutError(
+                    "The audio driver supplied an incomplete callback block. The capture was not saved."
+                )
             if getattr(self, "native_asio", True) and requested and frames != requested:
                 raise AudioDeviceError(
                     f"ASIO requested {requested} samples but the driver uses {frames}. Choose a supported native buffer size."
@@ -331,6 +344,7 @@ class AsioRecorder:
             loop,
             np.zeros_like(main),
             None if loop is None else np.zeros_like(loop),
+            timing_guard=_CallbackTimingGuard(self.settings["sample_rate"]),
         )
         self.job = job
         metered = 0
