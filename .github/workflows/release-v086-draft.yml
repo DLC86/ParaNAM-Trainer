@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: paranam-v085-draft-release
+  group: paranam-v086-draft-release
   cancel-in-progress: true
 jobs:
   targets:
@@ -105,7 +105,7 @@ jobs:
           pattern: ParaNAM-*
           path: installers
           merge-multiple: true
-      - name: Create 0.8.5 as a draft release
+      - name: Create 0.8.6 as a draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.8.6
