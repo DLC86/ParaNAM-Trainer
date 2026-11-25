@@ -49,6 +49,7 @@ import numpy as _np
 
 from . import RAW_RECORDING_SINCE_VERSION as _RAW_RECORDING_SINCE_VERSION
 from .audio import PlaybackRecorder as _PlaybackRecorder
+from .audio import validate_recording as _validate_recording
 from .audio import peak_to_dbfs as _peak_to_dbfs
 from .export import update_data_json as _update_data_json
 from .latency import BlipPreamble as _BlipPreamble
@@ -902,18 +903,17 @@ class CaptureSession:
             **({"meter": meter} if meter is not None else {}),
             **self._resolve_devices(),
         )
-        main = _np.asarray(main, dtype=_np.float32).squeeze()
-        if main.shape != playback.shape:
-            raise CaptureSessionError(
-                f"Recorder returned shape {main.shape}; expected {playback.shape}"
-            )
+        main = _validate_recording(
+            _np.asarray(main, dtype=_np.float32).squeeze(),
+            playback.shape,
+            label="return recording",
+        )
         if loopback is not None:
-            loopback = _np.asarray(loopback, dtype=_np.float32).squeeze()
-            if loopback.shape != playback.shape:
-                raise CaptureSessionError(
-                    f"Recorder returned loopback shape {loopback.shape}; expected "
-                    f"{playback.shape}"
-                )
+            loopback = _validate_recording(
+                _np.asarray(loopback, dtype=_np.float32).squeeze(),
+                playback.shape,
+                label="loopback recording",
+            )
         return main, loopback
 
     def _resolve_latency(
