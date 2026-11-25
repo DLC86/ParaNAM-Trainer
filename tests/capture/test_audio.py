@@ -6,6 +6,8 @@ import pytest as _pytest
 
 from nam.capture.audio import _enable_asio_on_windows
 from nam.capture.audio import _raise_on_dropout
+from nam.capture.audio import _CallbackTimingGuard
+from nam.capture.audio import validate_recording as _validate_recording
 from nam.capture.audio import asio_com_apartment as _asio_com_apartment
 from nam.capture.audio import current_device_sample_rates as _current_device_sample_rates
 from nam.capture.audio import AudioDeviceError as _AudioDeviceError
@@ -277,3 +279,52 @@ def test_latency_choices_run_from_safest_to_tightest():
     assert _LATENCY_CHOICES[1][1] == "low"
     seconds = [value for _, value in _LATENCY_CHOICES if isinstance(value, float)]
     assert seconds == sorted(seconds, reverse=True)
+
+
+def test_recording_validation_rejects_non_finite_samples():
+    import numpy as np
+
+    for value in (np.nan, np.inf, -np.inf):
+        recording = np.array([0.0, value], dtype=np.float32)
+        with _pytest.raises(_AudioDropoutError, match="NaN or infinite"):
+            _validate_recording(recording, (2,), label="return recording")
+
+
+def test_recording_validation_rejects_wrong_shape():
+    import numpy as np
+
+    with _pytest.raises(_AudioDeviceError, match="expected"):
+        _validate_recording(np.zeros((2, 1)), (2,), label="loopback recording")
+
+
+def test_recording_validation_accepts_finite_audio():
+    import numpy as np
+
+    recording = np.array([0.0, 0.5, -0.5], dtype=np.float32)
+    assert _validate_recording(recording, (3,)) is recording
+
+
+def test_callback_timing_guard_accepts_contiguous_timestamps():
+    from types import SimpleNamespace
+
+    guard = _CallbackTimingGuard(48000)
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=1.0, outputBufferDacTime=1.01))
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=1.01, outputBufferDacTime=1.02))
+
+
+@pytest.mark.parametrize("second", [0.99, 1.1])
+def test_callback_timing_guard_rejects_clock_reset_or_large_gap(second):
+    from types import SimpleNamespace
+
+    guard = _CallbackTimingGuard(48000)
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=1.0))
+    with _pytest.raises(_AudioDropoutError, match="timestamp jumped"):
+        guard.check(480, SimpleNamespace(inputBufferAdcTime=second))
+
+
+def test_callback_timing_guard_ignores_unavailable_zero_timestamps():
+    from types import SimpleNamespace
+
+    guard = _CallbackTimingGuard(48000)
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=0.0, outputBufferDacTime=0.0))
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=0.0, outputBufferDacTime=0.0))
