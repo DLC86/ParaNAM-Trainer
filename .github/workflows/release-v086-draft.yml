@@ -4,6 +4,8 @@ on:
     branches: [feature/capture-recording-integrity-086]
     paths:
       - .github/workflows/release-v086-draft.yml
+      - paranam/__init__.py
+      - pyproject.toml
       - nam/capture/**
       - tests/capture/**
       - packaging/**
@@ -105,6 +107,10 @@ jobs:
           pattern: ParaNAM-*
           path: installers
           merge-multiple: true
+      - name: Remove previous 0.8.6 draft and tag before replacing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete v0.8.6 --yes --cleanup-tag || true
       - name: Create 0.8.6 as a draft release
         uses: softprops/action-gh-release@v2
         with:
