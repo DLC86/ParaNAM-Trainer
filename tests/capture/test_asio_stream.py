@@ -95,7 +95,7 @@ def test_requested_native_buffer_is_verified_before_playback():
 def test_asio_callback_rejects_a_large_hardware_timestamp_gap():
     obj = engine()
     obj.native_asio = False
-    obj.settings = dict(settings(), blocksize=0)
+    obj.settings = dict(settings(), blocksize=0, monitor_return_enabled=False)
     job = _BlockJob(
         np.ones(128),
         None,
