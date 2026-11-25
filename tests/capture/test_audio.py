@@ -312,7 +312,7 @@ def test_callback_timing_guard_accepts_contiguous_timestamps():
     guard.check(480, SimpleNamespace(inputBufferAdcTime=1.01, outputBufferDacTime=1.02))
 
 
-@pytest.mark.parametrize("second", [0.99, 1.1])
+@_pytest.mark.parametrize("second", [0.99, 1.1])
 def test_callback_timing_guard_rejects_clock_reset_or_large_gap(second):
     from types import SimpleNamespace
 
