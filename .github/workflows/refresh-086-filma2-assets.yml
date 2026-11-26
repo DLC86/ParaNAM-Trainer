@@ -1,0 +1,151 @@
+name: Refresh 0.8.6 draft from verified FiLMA2 artifacts
+on:
+  push:
+    branches: [maintenance/refresh-086-filma2-assets]
+    paths:
+      - .github/workflows/refresh-086-filma2-assets.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: refresh-existing-086-draft-assets
+  cancel-in-progress: false
+jobs:
+  transfer:
+    if: github.ref == 'refs/heads/maintenance/refresh-086-filma2-assets'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_ID: '458530091'
+      BUILD_RUN: '45873394697'
+      BUILD_SHA: '73a900bbe7ffea4e4f7ab635b5a2d1fa76000c28'
+      TEST_RUN: '45876245020'
+      TEST_SHA: '326ebe301ec8e49b50fba772c3a3382ce1ec6177'
+      OLD_TARGET: 'bf3d5567b1b70da5634075acf7ffbb74c67ba13a'
+    steps:
+      - name: Verify successful builds and tests and the exact existing draft
+        run: |
+          set -euo pipefail
+          for kind in BUILD TEST; do
+            run_var="${kind}_RUN"
+            sha_var="${kind}_SHA"
+            gh api "repos/$GH_REPO/actions/runs/${!run_var}" | jq -e --arg sha "${!sha_var}" '.head_sha == $sha and .conclusion == "success"'
+          done
+          gh api "repos/$GH_REPO/compare/$BUILD_SHA...$TEST_SHA" | jq -e '.status == "ahead" and (.files | length > 0 and all(.filename | startswith("tests/")))'
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" | jq -e --arg target "$OLD_TARGET" '.draft == true and .name == "ParaNAM Trainer 0.8.6" and .target_commitish == $target'
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/artifacts" | jq -e '(.artifacts | map(select(.expired == false) | .name) | sort) == ["ParaNAM-linux","ParaNAM-macos-arm64","ParaNAM-macos-intel","ParaNAM-windows"]'
+      - name: Download completed installers without rebuilding
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 45873394697
+          github-token: ${{ github.token }}
+          pattern: ParaNAM-*
+          merge-multiple: true
+          path: installers
+      - name: Stage verified assets, replace draft files, and check all digests
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, urllib.parse
+          repo, release_id = os.environ["GH_REPO"], os.environ["RELEASE_ID"]
+          build_sha, old_target = os.environ["BUILD_SHA"], os.environ["OLD_TARGET"]
+          root = f"repos/{repo}/releases"
+          endpoint = f"{root}/{release_id}"
+          names = [
+              "ParaNAM-Trainer-0.8.6-Windows-x64-Setup.exe",
+              "ParaNAM-Trainer-0.8.6-Linux-amd64.deb",
+              "ParaNAM-Trainer-0.8.6-Linux-x86_64.tar.gz",
+              "ParaNAM-Trainer-0.8.6-macOS-arm64.dmg",
+              "ParaNAM-Trainer-0.8.6-macOS-x86_64.dmg",
+          ]
+          def api(path, method="GET", **fields):
+              args = ["gh", "api", "--method", method, path]
+              for k,v in fields.items():
+                  args += ["-f", f"{k}={v}"]
+              out = subprocess.check_output(args, text=True)
+              return json.loads(out) if out.strip() else None
+          def digest(path):
+              h = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for block in iter(lambda: stream.read(1024*1024), b""):
+                      h.update(block)
+              return "sha256:" + h.hexdigest()
+          def check(asset, path, expected):
+              assert asset["state"] == "uploaded" and asset["size"] == path.stat().st_size and asset["digest"] == expected, asset
+          def rename(asset_id, name):
+              result = api(f"{root}/assets/{asset_id}", "PATCH", name=name)
+              assert result["name"] == name
+              return result
+          release = api(endpoint)
+          assert release["draft"] and release["target_commitish"] == old_target
+          old = {a["name"]: a for a in release["assets"]}
+          assert set(old) == set(names), old.keys()
+          local = {}
+          for name in names:
+              found = list(pathlib.Path("installers").rglob(name))
+              assert len(found) == 1 and found[0].stat().st_size > 0, name
+              local[name] = (found[0], digest(found[0]))
+          staged = {}
+          renamed_old = []
+          renamed_new = []
+          prefix = "pending-" + build_sha[:7] + "-"
+          backup = "backup-" + old_target[:7] + "-"
+          upload_url = release["upload_url"].split("{", 1)[0]
+          try:
+              for name in names:
+                  path, expected = local[name]
+                  url = upload_url + "?" + urllib.parse.urlencode({"name": prefix+name})
+                  result = subprocess.check_output([
+                      "curl", "--fail-with-body", "--silent", "--show-error",
+                      "--connect-timeout", "30", "--max-time", "600",
+                      "-H", "Authorization: Bearer " + os.environ["GH_TOKEN"],
+                      "-H", "Content-Type: application/octet-stream",
+                      "-H", "Accept: application/vnd.github+json",
+                      "--data-binary", "@"+str(path), url,
+                  ], text=True)
+                  asset = json.loads(result)
+                  staged[name] = asset["id"]
+                  check(asset, path, expected)
+                  print("Staged and verified:", name, flush=True)
+              current = api(endpoint)
+              assert current["draft"] and current["target_commitish"] == old_target
+              assert {a["id"] for a in current["assets"]} == {a["id"] for a in old.values()} | set(staged.values())
+              for name in names:
+                  rename(old[name]["id"], backup+name)
+                  renamed_old.append(name)
+              for name in names:
+                  rename(staged[name], name)
+                  renamed_new.append(name)
+              updated = api(endpoint, "PATCH", target_commitish=build_sha)
+              assert updated["draft"] and updated["target_commitish"] == build_sha
+              assets = {a["name"]: a for a in api(endpoint)["assets"]}
+              for name in names:
+                  assert assets[name]["id"] == staged[name]
+                  check(assets[name], *local[name])
+          except Exception:
+              # Keep the previously published draft usable if the swap fails.
+              for name in reversed(renamed_new):
+                  try: rename(staged[name], prefix+name)
+                  except Exception as exc: print("Rollback staged:", exc)
+              for name in reversed(renamed_old):
+                  try: rename(old[name]["id"], name)
+                  except Exception as exc: print("Rollback old:", exc)
+              try:
+                  if api(endpoint)["target_commitish"] == build_sha:
+                      api(endpoint, "PATCH", target_commitish=old_target)
+              except Exception as exc: print("Rollback target:", exc)
+              raise
+          for name in names:
+              api(f"{root}/assets/{old[name]['id']}", "DELETE")
+          final = api(endpoint)
+          assert final["draft"] and final["target_commitish"] == build_sha
+          assets = {a["name"]: a for a in final["assets"]}
+          assert set(assets) == set(names)
+          for name in names:
+              check(assets[name], *local[name])
+              print("Verified final:", name, assets[name]["digest"], flush=True)
+          print("Existing draft refreshed; no builds were executed.", flush=True)
+          PY
