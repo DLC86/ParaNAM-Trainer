@@ -1,0 +1,33 @@
+name: Update 0.8.6 draft release notes
+on:
+  push:
+    branches: [maintenance/refresh-086-filma2-assets]
+    paths:
+      - .github/workflows/update-086-draft-notes.yml
+      - .github/release-notes/v0.8.6.md
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: refresh-existing-086-draft-assets
+  cancel-in-progress: false
+jobs:
+  notes:
+    if: github.ref == 'refs/heads/maintenance/refresh-086-filma2-assets'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update only the body of the existing draft and verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          endpoint="repos/$GH_REPO/releases/458530091"
+          gh api "$endpoint" > before.json
+          jq -e '.draft == true and .name == "ParaNAM Trainer 0.8.6" and .target_commitish == "73a900bbe7ffea4e4f7ab635b5a2d1fa76000c28" and (.assets | length == 5 and all(.state == "uploaded"))' before.json
+          jq -n --rawfile body .github/release-notes/v0.8.6.md '{body: $body}' | gh api --method PATCH "$endpoint" --input - > response.json
+          gh api "$endpoint" > after.json
+          jq -e --rawfile expected .github/release-notes/v0.8.6.md --slurpfile before before.json '.draft == true and .body == $expected and .target_commitish == $before[0].target_commitish and ([.assets[].id] | sort) == ($before[0].assets | map(.id) | sort)' after.json
+          echo "Release notes verified; draft and assets unchanged."
