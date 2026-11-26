@@ -447,11 +447,18 @@ def test_new_project_defaults_and_existing_saved_settings_are_preserved(
     assert options["hypernetwork_mode"] == "low_rank"
     assert not options["condition_dilated_convolutions"]
     assert options["learning_rate"] == 0.004
-    assert options["hypernetwork_learning_rate"] == 0.001
+    assert options["hypernetwork_learning_rate"] == 0.004
+    assert options["hypernetwork_lr_decay"] == 0.994
+    assert options["waveform_loss"] == "segment_esr"
+    assert options["segment_esr_min_rms_dbfs"] == -60.0
     window._attach(fresh)
     assert window.epochs.value() == 100
     assert window.advanced_fields["hypernetwork_recipe"].currentData() == "HyperA2"
     assert window.advanced_fields["rate_preset"].currentData() == "a2_updates"
+    assert window.advanced_fields["hypernetwork_learning_rate"].value() == 0.004
+    assert window.advanced_fields["hypernetwork_lr_decay"].value() == 0.994
+    assert window.advanced_fields["waveform_loss"].currentData() == "segment_esr"
+    assert window.advanced_fields["segment_esr_min_rms_dbfs"].value() == -60.0
     fresh.preferences.update(
         epochs=250,
         batch_size=16,
