@@ -2450,14 +2450,14 @@ class WizardWindow(
             return
         try:
             import uuid
-            import wavio
+            import soundfile as sf
 
-            wav = wavio.read(path)
-            if wav.data.shape[1] != 1 or wav.rate != 48000:
+            info = sf.info(path)
+            if info.channels != 1 or info.samplerate != 48000:
                 raise ValueError(
                     "Custom training input must be mono at 48 kHz, matching the fixed validation file."
                 )
-            if len(wav.data) < 48000:
+            if info.frames < 48000:
                 raise ValueError(
                     "The custom training signal must be at least one second long."
                 )

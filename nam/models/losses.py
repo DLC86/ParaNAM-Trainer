@@ -84,7 +84,8 @@ def dual_file_energies(signals, synthetic_indices, pre=0.85, floor_db=30.0):
 def dual_file_esr(preds, targets, energies, pre=0.85, raw_weight=1.0):
     """Capture-grouped equivalent of Faverooo's V4 waveform objective."""
     raw, emphasized = energies
-    error = preds.float() - targets.float()
+    dtype = _torch.promote_types(_torch.float32, _torch.promote_types(preds.dtype, targets.dtype))
+    error = preds.to(dtype) - targets.to(dtype)
     return (apply_pre_emphasis_filter(error, pre).square().mean() / emphasized
             + raw_weight * error.square().mean() / raw)
 

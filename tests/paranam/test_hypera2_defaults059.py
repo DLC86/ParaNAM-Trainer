@@ -29,6 +29,9 @@ def requested_settings():
         "rms_loss_normalization": True,
         "rms_loss_normalization_exponent": 2.0,
         "waveform_loss": "mse",
+        "dual_pre_emphasis": 0.85,
+        "dual_raw_weight": 1.0,
+        "dual_floor_db": 30.0,
         "segment_esr_min_rms_dbfs": -58.0,
         "synthetic_mute_reference_rms": False,
     }

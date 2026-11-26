@@ -199,3 +199,70 @@ def test_native_playback_matches_scaled_python_bake(conditioning, tmp_path):
                                                rtol=2e-4)
                 finally:
                     native.close()
+
+
+import pytest
+import torch
+from nam.models.losses import dual_file_esr, dual_file_energies
+from paranam.recipes import training_preset, preset_batch_size
+
+
+def test_paired_floor_excludes_mutes_and_preserves_ratio():
+    y = torch.tensor([1., -1., 1., -1.], dtype=torch.float64)
+    quiet = y * 1e-3
+    pairs = dual_file_energies([y, y, quiet, torch.zeros_like(y)], {3})
+    assert pairs[2][0] == pytest.approx(1e-3)
+    assert pairs[2][1] / pairs[2][0] == pytest.approx(1.85**2)
+    assert pairs[3] is None
+    pred = (quiet * 2).float().requires_grad_()
+    loss = dual_file_esr(pred, quiet.float(), pairs[2])
+    assert loss.item() == pytest.approx(0.002)
+    loss.backward()
+    assert torch.isfinite(pred.grad).all()
+
+
+@pytest.mark.parametrize("name", ["FiLMA2 Linear", "FiLMA2 Neural"])
+def test_colab_recipe(name):
+    options = training_preset(name)
+    assert options["waveform_loss"] == "dual_file_esr"
+    assert options["learning_rate"] == options["hypernetwork_learning_rate"] == 0.002
+    assert options["lr_decay"] == options["hypernetwork_lr_decay"] == 0.95
+    assert options["rate_preset"] == options["hypernetwork_rate_preset"] == "fixed_1000"
+    assert options["ny"] == 48000 and preset_batch_size(name) == 12
+    assert options["weight_decay"] == 0 and not options["rms_loss_normalization"]
+
+
+def test_faverooo_exact_scheduler_clock():
+    from nam.train._lr_scheduler import GroupUpdateCadenceLR
+    p = torch.nn.Parameter(torch.ones(1))
+    q = torch.nn.Parameter(torch.ones(1))
+    opt = torch.optim.Adam([{"params": [p]}, {"params": [q]}], lr=0.002)
+    first = GroupUpdateCadenceLR(opt, 0, 1000, 0.95)
+    second = GroupUpdateCadenceLR(opt, 1, 1000, 0.95)
+    for _ in range(999):
+        opt.step()
+        first.step()
+        second.step()
+    assert [g["lr"] for g in opt.param_groups] == [0.002, 0.002]
+    opt.step()
+    first.step()
+    second.step()
+    assert [g["lr"] for g in opt.param_groups] == pytest.approx([0.0019, 0.0019])
+
+
+def test_faverooo_external_stimulus_wrap(tmp_path, monkeypatch):
+    import numpy as np
+    import soundfile as sf
+    from paranam import signals
+    rate = 48000
+    source, reference, out = [tmp_path / name for name in ("input.wav", "standard.wav", "adapted.wav")]
+    audio = np.full(rate, 0.25)
+    sf.write(source, audio, rate, subtype="PCM_24")
+    sf.write(reference, np.concatenate((np.full(10 * rate, 0.125), np.full(9 * rate, -0.125))), rate, subtype="PCM_24")
+    monkeypatch.setattr(signals, "asset_path", lambda _: reference)
+    signals.prepare_faverooo_input(source, out)
+    result, actual_rate = sf.read(out)
+    assert actual_rate == rate and len(result) == 20 * rate
+    np.testing.assert_array_equal(result[10 * rate:-9 * rate], audio)
+    np.testing.assert_array_equal(result[:10 * rate], 0.125)
+    np.testing.assert_array_equal(result[-9 * rate:], -0.125)
