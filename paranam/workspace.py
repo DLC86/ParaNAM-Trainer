@@ -610,7 +610,7 @@ class Workspace:
             if not (self.directory / "input_trunc.wav").is_file():
                 install_signals(self.directory, include_trunc=True)
             return "input_trunc.wav"
-        relative = self.preferences.get("custom_input")
+        relative = self.preferences.get("faverooo_input" if self.preferences["input_mode"] == "faverooo" else "custom_input")
         if not relative or not (self.directory / relative).is_file():
             raise ValueError(
                 "Choose a custom mono 48 kHz training WAV in the Controls step."
@@ -1078,6 +1078,9 @@ class Workspace:
             rms_loss_normalization=(kind == "parametric"),
             rms_loss_normalization_exponent=2.0,
             waveform_loss="mse",
+            dual_pre_emphasis=0.85,
+            dual_raw_weight=1.0,
+            dual_floor_db=30.0,
             segment_esr_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
@@ -1211,22 +1214,29 @@ class Workspace:
                 options.pop("synthetic_mute_reference_rms", None)
             static = self.project.capture_type == "static"
             segment_esr = not static and options["waveform_loss"] == "segment_esr"
+            dual = not static and options["waveform_loss"] == "dual_file_esr"
+            if not dual:
+                for key in ("dual_pre_emphasis", "dual_raw_weight", "dual_floor_db"):
+                    options.pop(key, None)
             if segment_esr:
                 _, threshold = waveform_loss_settings(options)
                 options["segment_esr_min_rms_dbfs"] = threshold
                 # These switches are retained in the editor for switching back to MSE.
+                options.pop("synthetic_mute_reference_rms", None)
+            elif dual:
+                options.pop("segment_esr_min_rms_dbfs")
                 options.pop("synthetic_mute_reference_rms", None)
             else:
                 # Preserve fingerprints of existing MSE jobs and presets.
                 options.pop("waveform_loss")
                 options.pop("segment_esr_min_rms_dbfs")
             rms_enabled = options["rms_loss_normalization"]
-            if static or segment_esr or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
+            if static or segment_esr or dual or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
                 options.pop("rms_loss_normalization_exponent")
             # SNR is independent of RMS: preserve its setting even when RMS is off.
             if static or not options["snr_weighted_loss_normalization"]:
                 options.pop("snr_weighted_loss_normalization")
-            if static or segment_esr or rms_enabled:
+            if static or segment_esr or dual or rms_enabled:
                 options.pop("rms_loss_normalization")
             method = data["settings"]["advanced_training"].get("checkpoint_method")
             # Preserve legacy fingerprints when only the new default options

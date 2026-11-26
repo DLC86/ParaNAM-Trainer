@@ -151,6 +151,11 @@ def job_can_resume(workspace, job):
         waveform_loss = waveform_loss_settings(options)
         if waveform_loss_settings(saved_learning) != waveform_loss:
             return False
+        if waveform_loss[0] == "dual_file_esr":
+            from nam.models.losses import dual_file_esr_settings
+
+            if dual_file_esr_settings(saved_learning) != dual_file_esr_settings(options):
+                return False
         if waveform_loss[0] == "mse":
             if saved_learning.get("rms_loss_normalization", True) != options["rms_loss_normalization"]:
                 return False
@@ -414,6 +419,7 @@ def make_job(workspace, resume=False, job_directory=None):
             "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
+            "fixed_1000",
         ):
             raise ValueError("Choose a listed learning-rate preset")
         if options.get("hypernetwork_rate_preset", "follow") not in (
@@ -424,6 +430,7 @@ def make_job(workspace, resume=False, job_directory=None):
             "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
+            "fixed_1000",
         ):
             raise ValueError("Choose a listed hypernetwork learning-rate preset")
         hyper_decay = options.get("hypernetwork_lr_decay", options["lr_decay"])
@@ -557,6 +564,7 @@ def make_job(workspace, resume=False, job_directory=None):
         reserve_validation_audio(data)
         if not is_static and (
             options.get("hypernetwork_rate_preset", "follow") != "follow"
+            or options.get("rate_preset") == "fixed_1000"
         ):
             from .recipes import rate_group_schedule
 
@@ -628,6 +636,12 @@ def make_job(workspace, resume=False, job_directory=None):
         waveform_loss, threshold = waveform_loss_settings(options)
         if waveform_loss == "segment_esr":
             learning.update(waveform_loss=waveform_loss, segment_esr_min_rms_dbfs=threshold)
+        if waveform_loss == "dual_file_esr" and not is_static:
+            from nam.models.losses import dual_file_esr_settings
+
+            pre, raw, floor = dual_file_esr_settings(options)
+            learning.update(waveform_loss=waveform_loss, dual_pre_emphasis=pre,
+                            dual_raw_weight=raw, dual_floor_db=floor)
         rms = options["rms_loss_normalization"]
         if not isinstance(rms, bool):
             raise ValueError("rms_loss_normalization must be a boolean")

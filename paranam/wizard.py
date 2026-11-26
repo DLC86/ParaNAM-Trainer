@@ -891,6 +891,7 @@ class WizardWindow(
         self.signal_mode.addItem(
             "Custom — choose a training WAV from this computer", "custom"
         )
+        self.signal_mode.addItem("Faverooo CaptureStimulus — import WAV", "faverooo")
         signal_form.addRow("Training input", self.signal_mode)
         # A selectable single-line path avoids clipped word-wrapped labels
         # in macOS QFormLayout rows.
@@ -912,7 +913,7 @@ class WizardWindow(
         box.addLayout(signal_form)
         box.addWidget(
             label(
-                "Custom input must be mono at 48 kHz and retain the standard initial/final validation segments (as in TTS v11). Training excludes the first 10 and final 9 seconds. Validation is also captured separately.",
+                "Custom input must be mono at 48 kHz and retain the standard initial/final validation segments. Faverooo import wraps the supplied stimulus with these segments automatically; the original WAV is not bundled. Training excludes the first 10 and final 9 seconds.",
                 "muted",
             )
         )
@@ -1234,6 +1235,7 @@ class WizardWindow(
         waveform_loss = QComboBox()
         waveform_loss.addItem("MSE", "mse")
         waveform_loss.addItem("ESR per segment", "segment_esr")
+        waveform_loss.addItem("Dual File-normalized ESR (Faverooo)", "dual_file_esr")
         waveform_loss.setToolTip(
             "ESR divides each real window's squared error by its own target energy. "
             "Synthetic Mute targets use unweighted MSE. Reported ESR stays the same."
@@ -1251,6 +1253,18 @@ class WizardWindow(
         threshold.setToolTip("Skip real windows below this target RMS in the segment ESR term.")
         self.advanced_fields["segment_esr_min_rms_dbfs"] = threshold
         advanced_form.addRow("Minimum target RMS for ESR", threshold)
+        for key, caption, initial, low, high in (
+            ("dual_pre_emphasis", "Pre-emphasis coefficient", 0.85, 0.0, 1.0),
+            ("dual_raw_weight", "Raw MSE weight", 1.0, 0.0, 100.0),
+            ("dual_floor_db", "Relative energy floor (dB)", 30.0, 0.1, 199.9),
+        ):
+            field = QDoubleSpinBox()
+            field.setDecimals(4)
+            field.setRange(low, high)
+            field.setValue(initial)
+            field.setFixedWidth(260)
+            self.advanced_fields[key] = field
+            advanced_form.addRow(caption, field)
         rms = QCheckBox("RMS loss normalization")
         rms.setToolTip(
             "Weight each capture's training MSE relative to -18 dBFS RMS, "
@@ -1340,6 +1354,7 @@ class WizardWindow(
         for field in (rate_preset, hyper_rate_preset):
             field.addItem("per epoch", "manual")
             field.addItem("per 62 optimizer updates (A2 cadence)", "a2_updates")
+            field.addItem("per 1,000 optimizer updates (Faverooo)", "fixed_1000")
             field.setToolTip(
                 "Cadence of this network's LR Decay. Legacy resumes retain the original checkpoint clock."
             )
@@ -1686,10 +1701,15 @@ class WizardWindow(
         mute_reference = self.advanced_fields["synthetic_mute_reference_rms"]
         form = self.advanced_panel.layout()
         esr = parametric and waveform_loss.currentData() == "segment_esr"
-        capture_rms = parametric and not esr
+        dual = parametric and waveform_loss.currentData() == "dual_file_esr"
+        capture_rms = parametric and not (esr or dual)
+        for key in ("dual_pre_emphasis", "dual_raw_weight", "dual_floor_db"):
+            field = self.advanced_fields[key]
+            form.setRowVisible(field, dual)
+            field.setEnabled(dual)
         form.setRowVisible(waveform_loss, parametric)
         form.setRowVisible(threshold, esr)
-        form.setRowVisible(rms, not esr)
+        form.setRowVisible(rms, not (esr or dual))
         form.setRowVisible(exponent, capture_rms)
         form.setRowVisible(mute_reference, capture_rms)
         threshold.setEnabled(esr)
@@ -1740,6 +1760,7 @@ class WizardWindow(
             "a2_slow",
             "a2_dataset",
             "a2_dataset_sqrt",
+            "fixed_1000",
         )
         self.advanced_fields["lr_decay"].setEnabled(True)
         self.advanced_fields["lr_decay"].setToolTip(
@@ -1747,7 +1768,7 @@ class WizardWindow(
             if matched
             else "Exponential learning-rate multiplier after each epoch."
         )
-        if parametric and hyper_preset != "follow":
+        if parametric and (hyper_preset != "follow" or self.advanced_fields["rate_preset"].currentData() == "fixed_1000"):
             self.rate_preview.setVisible(True)
             try:
                 from .recipes import workspace_group_schedules
@@ -2111,7 +2132,7 @@ class WizardWindow(
                 max(0, self.signal_mode.findData(prefs["input_mode"]))
             )
             self.custom_label.setText(
-                prefs.get("custom_input") or "No custom file selected"
+                prefs.get("faverooo_input" if prefs["input_mode"] == "faverooo" else "custom_input") or "No custom file selected"
             )
             self.accelerator.setCurrentIndex(
                 max(0, self.accelerator.findData(prefs["device"]))
@@ -2443,8 +2464,15 @@ class WizardWindow(
             folder = self.workspace.directory / "signals"
             folder.mkdir(exist_ok=True)
             relative = "signals/custom-" + uuid.uuid4().hex[:8] + ".wav"
-            shutil.copy2(path, self.workspace.directory / relative)
-            self.workspace.preferences["custom_input"] = relative
+            if self.signal_mode.currentData() == "faverooo":
+                from .signals import prepare_faverooo_input
+
+                relative = "signals/faverooo-" + uuid.uuid4().hex[:8] + ".wav"
+                prepare_faverooo_input(path, self.workspace.directory / relative)
+                self.workspace.preferences["faverooo_input"] = relative
+            else:
+                shutil.copy2(path, self.workspace.directory / relative)
+                self.workspace.preferences["custom_input"] = relative
             self.custom_label.setText(Path(path).name)
             self.workspace.save()
         except Exception as error:
@@ -3252,7 +3280,8 @@ class WizardWindow(
         if refresh_capture_recommendation:
             self.refresh_recommendation()
         self.refresh_rate_preview()
-        self.custom_button.setEnabled(prefs["input_mode"] == "custom")
+        self.custom_button.setEnabled(prefs["input_mode"] in ("custom", "faverooo"))
+        self.custom_label.setText(prefs.get("faverooo_input" if prefs["input_mode"] == "faverooo" else "custom_input") or "No custom file selected")
 
     def apply_plan(self):
         if not self.workspace or self.busy():

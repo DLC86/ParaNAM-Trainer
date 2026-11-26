@@ -31,6 +31,7 @@ from nam.data import apply_joint_dataset_hooks as _apply_joint_dataset_hooks
 from nam.data import get_joint_dataset_hooks as _get_joint_dataset_hooks
 from nam.data import init_dataset as _init_dataset
 from nam.models.losses import segment_esr as _segment_esr
+from nam.models.losses import dual_file_esr as _dual_file_esr, dual_file_energies as _dual_file_energies, dual_file_esr_settings as _dual_file_esr_settings
 from nam.models.losses import waveform_loss_settings as _waveform_loss_settings
 from nam.models.exportable import Exportable as _Exportable
 from nam.models.metadata import UserMetadata as _UserMetadata
@@ -811,6 +812,8 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._capture_mse_scales: tuple[float, ...] = ()
         self._segment_esr_min_power: _Optional[float] = None
+        self._dual_settings = None
+        self._dual_energies = ()
         self._capture_mrstft_scales: tuple[float, ...] = ()
         self._synthetic_train_indices: frozenset[int] = frozenset()
         self._synthetic_val_indices: frozenset[int] = frozenset()
@@ -990,6 +993,7 @@ class _ParametricLightningModule(_LightningModule):
 
     def set_waveform_loss(self, learning_config):
         mode, min_rms_dbfs = _waveform_loss_settings(learning_config)
+        self._dual_settings = _dual_file_esr_settings(learning_config) if mode == "dual_file_esr" else None
         self._segment_esr_min_power = (
             10.0 ** (min_rms_dbfs / 10.0) if mode == "segment_esr" else None
         )
@@ -1389,7 +1393,13 @@ class _ParametricLightningModule(_LightningModule):
         for size, (preds, targets, loss_dict) in steps:
             loss = _torch.zeros((), device=preds.device)
             segment_esr = self._segment_esr_min_power is not None
-            if segment_esr and not synthetic_mute:
+            dual = self._dual_settings is not None
+            if dual and not synthetic_mute:
+                if capture_index is None or not self._dual_energies:
+                    raise RuntimeError("Dual file ESR requires capture-grouped training")
+                pre, raw_weight, _ = self._dual_settings
+                loss = mse_scale * _dual_file_esr(preds, targets, self._dual_energies[capture_index], pre, raw_weight)
+            elif segment_esr and not synthetic_mute:
                 loss = _segment_esr(preds, targets, self._segment_esr_min_power)
             for name, v in loss_dict.items():
                 if v.weight is not None and v.weight > 0.0:
@@ -1399,9 +1409,9 @@ class _ParametricLightningModule(_LightningModule):
                         )
                     weight = v.weight
                     if name in ("MSE", "MSE_FFT"):
-                        if segment_esr and not synthetic_mute:
+                        if (segment_esr or dual) and not synthetic_mute:
                             continue  # MSE remains available for logging.
-                        if not segment_esr:
+                        if not (segment_esr or dual):
                             weight *= mse_scale
                     elif name in ("MRSTFT", "Pre-emphasized MRSTFT"):
                         weight *= mrstft_scale
@@ -1798,7 +1808,15 @@ def main(
     rms = learning_config.get("rms_loss_normalization", True)
     if not isinstance(rms, bool):
         raise ValueError("rms_loss_normalization must be a boolean")
-    rms = rms and model._segment_esr_min_power is None
+    rms = rms and model._segment_esr_min_power is None and model._dual_settings is None
+    if model._dual_settings is not None:
+        if not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler):
+            raise ValueError("Dual file ESR requires capture-grouped batches")
+        pre, _, floor = model._dual_settings
+        model._dual_energies = _dual_file_energies(
+            (capture.y for capture in _iter_inner_datasets(dataset_train)),
+            model._synthetic_train_indices, pre, floor,
+        )
     rms_exponent = learning_config.get("rms_loss_normalization_exponent", 2.0)
     if isinstance(rms_exponent, bool) or not isinstance(rms_exponent, (float, int)) or not _isfinite(rms_exponent) or not 0.01 <= rms_exponent <= 2.0:
         raise ValueError("RMS loss normalization exponent must be between 0.01 and 2")

@@ -22,8 +22,8 @@ SEGMENT_ESR_RMS_RANGE_DBFS = (-120.0, -1.0)
 def waveform_loss_settings(config):
     """Resolve the parametric waveform objective; old configs use MSE."""
     loss = config.get("waveform_loss", "mse")
-    if loss not in ("mse", "segment_esr"):
-        raise ValueError("Waveform loss must be mse or segment_esr")
+    if loss not in ("mse", "segment_esr", "dual_file_esr"):
+        raise ValueError("Waveform loss must be mse, segment_esr or dual_file_esr")
     threshold = config.get("segment_esr_min_rms_dbfs", DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
     low, high = SEGMENT_ESR_RMS_RANGE_DBFS
     if loss == "segment_esr" and (
@@ -33,7 +33,7 @@ def waveform_loss_settings(config):
         or not low <= threshold <= high
     ):
         raise ValueError(f"Segment ESR minimum target RMS must be between {low:g} and {high:g} dBFS")
-    if loss == "mse":
+    if loss != "segment_esr":
         threshold = DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS
     return loss, float(threshold)
 
@@ -48,6 +48,45 @@ def apply_pre_emphasis_filter(x: _torch.Tensor, coef: float) -> _torch.Tensor:
     :return: (*, L-1)
     """
     return x[..., 1:] - coef * x[..., :-1]
+
+
+def dual_file_esr_settings(config):
+    pre = float(config.get("dual_pre_emphasis", 0.85))
+    raw = float(config.get("dual_raw_weight", 1.0))
+    floor = float(config.get("dual_floor_db", 30.0))
+    if not (0 <= pre <= 1 and _isfinite(raw) and raw >= 0 and 0 < floor < 200):
+        raise ValueError("Invalid dual file ESR parameters")
+    return pre, raw, floor
+
+
+def dual_file_energies(signals, synthetic_indices, pre=0.85, floor_db=30.0):
+    """V4 paired raw/pre-emphasized energy floor; synthetic mutes are excluded."""
+    pairs = []
+    for i, y in enumerate(signals):
+        if i in synthetic_indices:
+            pairs.append(None)
+            continue
+        y = y.detach().double()
+        raw = y.square().mean().item()
+        emphasized = apply_pre_emphasis_filter(y, pre).square().mean().item()
+        if not (_isfinite(raw) and raw > 0 and _isfinite(emphasized) and emphasized > 0):
+            raise ValueError("Dual file ESR requires positive real capture energy; mark silent captures as Mute")
+        pairs.append((raw, emphasized))
+    raw_values = sorted(pair[0] for pair in pairs if pair is not None)
+    if not raw_values:
+        raise ValueError("Dual file ESR needs a real training capture")
+    floor = raw_values[(len(raw_values) - 1) // 2] * 10.0 ** (-floor_db / 10.0)
+    return tuple(None if pair is None else tuple(
+        e * max(1.0, floor / pair[0]) for e in pair
+    ) for pair in pairs)
+
+
+def dual_file_esr(preds, targets, energies, pre=0.85, raw_weight=1.0):
+    """Capture-grouped equivalent of Faverooo's V4 waveform objective."""
+    raw, emphasized = energies
+    error = preds.float() - targets.float()
+    return (apply_pre_emphasis_filter(error, pre).square().mean() / emphasized
+            + raw_weight * error.square().mean() / raw)
 
 
 def esr(preds: _torch.Tensor, targets: _torch.Tensor) -> _torch.Tensor:

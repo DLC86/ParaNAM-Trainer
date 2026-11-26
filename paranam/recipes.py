@@ -39,12 +39,13 @@ def training_preset(name):
         raise ValueError(f"Unknown training preset: {name}")
     # Each recipe is explicit; frozen jobs keep their own effective options.
     hyper_a2 = name != "HyperWaveNet"
+    film = name in FILM_PRESETS
     return dict(
-        rate_preset="a2_updates" if hyper_a2 else "manual",
-        cudnn_benchmark=False,
+        rate_preset="fixed_1000" if film else ("a2_updates" if hyper_a2 else "manual"),
+        cudnn_benchmark=film,
         deterministic_training=False,
-        hypernetwork_rate_preset="a2_updates" if hyper_a2 else "manual",
-        hypernetwork_lr_decay=0.998496613 if hyper_a2 else 0.994,
+        hypernetwork_rate_preset="fixed_1000" if film else ("a2_updates" if hyper_a2 else "manual"),
+        hypernetwork_lr_decay=0.95 if film else (0.998496613 if hyper_a2 else 0.994),
         hypernetwork_recipe=name,
         hypernetwork_mode="low_rank",
         hypernetwork_rank=2,
@@ -53,18 +54,21 @@ def training_preset(name):
         optimizer="Adam" if hyper_a2 else "AdamW",
         checkpoint_method="validation",
         checkpoint_alpha=0.75,
-        learning_rate=0.004 if hyper_a2 else 0.002,
-        hypernetwork_learning_rate=0.001 if hyper_a2 else 0.002,
-        lr_decay=0.994,
-        ny=8192,
+        learning_rate=0.004 if hyper_a2 and not film else 0.002,
+        hypernetwork_learning_rate=0.001 if hyper_a2 and not film else 0.002,
+        lr_decay=0.95 if film else 0.994,
+        ny=48000 if film else 8192,
         fit_mrstft=True,
-        rms_loss_normalization=True,
+        rms_loss_normalization=not film,
         rms_loss_normalization_exponent=2.0,
-        waveform_loss="mse",
+        waveform_loss="dual_file_esr" if film else "mse",
+        dual_pre_emphasis=0.85,
+        dual_raw_weight=1.0,
+        dual_floor_db=30.0,
         segment_esr_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
         snr_weighted_loss_normalization=False,
         mrstft_weight=0.0005,
-        weight_decay=3.17e-7,
+        weight_decay=0.0 if film else 3.17e-7,
         gradient_clipping=True,
         gradient_clip_val=1.0,
         check_nonfinite_gradients=not hyper_a2,
@@ -73,7 +77,7 @@ def training_preset(name):
 
 
 def preset_batch_size(name):
-    return 32 if name == "HyperWaveNet" else 16
+    return 12 if name in FILM_PRESETS else (32 if name == "HyperWaveNet" else 16)
 
 
 def a2_update_schedule(
@@ -269,6 +273,14 @@ def rate_group_schedule(
             final_learning_rate=rate * gamma**epochs,
             reductions=epochs,
         )
+    if preset == "fixed_1000":
+        accounting = a2_update_schedule(
+            data, directory, batch_size, options["ny"], epochs, rate, rate, gamma
+        )
+        reductions = accounting["steps_per_epoch"] * epochs // 1000
+        return dict(preset=preset, interval="step", step_size=1000, gamma=gamma,
+                    initial_learning_rate=rate, final_learning_rate=rate * gamma**reductions,
+                    reductions=reductions)
     if preset not in UPDATE_RATE_PRESETS:
         raise ValueError("Choose a listed learning-rate preset")
     schedule = a2_update_schedule(
