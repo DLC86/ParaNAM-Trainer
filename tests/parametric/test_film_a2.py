@@ -313,15 +313,18 @@ def test_packed_film_forward_and_gradients(conditioning, pad_start):
         error = (y - target).square().mean(dim=(0, 2))
         return error[0] * 0.37 + error[1] * 0.83
 
-    expected_grad = torch.autograd.grad(loss(expected), (x, *weights))
+    expected_grad = torch.autograd.grad(loss(expected), (x, *weights), allow_unused=True)
     rng = torch.random.get_rng_state().clone()
     model.set_uniform_batch_params(True)
     actual = model.forward_sizes(x, setting.expand(len(x), -1), pad_start=pad_start)
     assert torch.equal(rng, torch.random.get_rng_state())
     torch.testing.assert_close(actual, expected, atol=2e-10, rtol=1e-8)
-    actual_grad = torch.autograd.grad(loss(actual), (x, *weights))
+    actual_grad = torch.autograd.grad(loss(actual), (x, *weights), allow_unused=True)
     for got, wanted in zip(actual_grad, expected_grad):
-        torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
+        if wanted is None:
+            assert got is None or not torch.count_nonzero(got)
+        else:
+            torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
     assert tuple(model.state_dict()) == keys
     assert tuple(map(id, model.parameters())) == tuple(map(id, weights))
     execution = model._packed_execution_cache[0]
@@ -348,10 +351,13 @@ def test_film_grouped_fallback_and_uniform_guard(conditioning):
     torch.testing.assert_close(actual, expected, atol=2e-10, rtol=1e-8)
     # The fallback must retain gradients, even when rows are regrouped.
     for got, wanted in zip(
-        torch.autograd.grad(actual.square().mean(), tuple(model.parameters())),
-        torch.autograd.grad(expected.square().mean(), tuple(model.parameters())),
+        torch.autograd.grad(actual.square().mean(), tuple(model.parameters()), allow_unused=True),
+        torch.autograd.grad(expected.square().mean(), tuple(model.parameters()), allow_unused=True),
     ):
-        torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
+        if wanted is None:
+            assert got is None or not torch.count_nonzero(got)
+        else:
+            torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
     model.set_uniform_batch_params(True)
     with pytest.raises(RuntimeError, match="uniform batch"):
         model.forward_sizes(x, settings, pad_start=True)
