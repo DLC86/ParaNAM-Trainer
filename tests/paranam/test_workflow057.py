@@ -370,22 +370,24 @@ def test_asio_meter_reports_send_return_and_loopback_without_touching_recording(
     main = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
     loop = main * 2
     captured = main * 0.5
-    job = SimpleNamespace(
-        main=main,
-        loop=loop,
-        recorded=captured.copy(),
-        loop_recorded=loop.copy(),
-        position=0,
-        error=None,
-    )
+    block_job = asio._BlockJob
 
     class Done:
-        def wait(self, delay):
-            job.position += 2
-            return job.position == 4
+        def __init__(self, job):
+            self.job = job
 
-    job.done = Done()
-    monkeypatch.setattr(asio, "_BlockJob", lambda *a: job)
+        def wait(self, delay):
+            self.job.position += 2
+            return self.job.position == 4
+
+    def simulated_capture(*args, **kwargs):
+        job = block_job(*args, **kwargs)
+        job.recorded[:] = captured
+        job.loop_recorded[:] = loop
+        job.done = Done(job)
+        return job
+
+    monkeypatch.setattr(asio, "_BlockJob", simulated_capture)
     recorder = asio.AsioRecorder.__new__(asio.AsioRecorder)
     recorder.stream = SimpleNamespace(active=True)
     readings = []
