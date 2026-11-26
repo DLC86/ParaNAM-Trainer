@@ -191,6 +191,8 @@ def test_native_playback_matches_scaled_python_bake(conditioning, tmp_path):
                 native = NativeModel(tmp_path / "model.pnam", block_size=73, lite=size == "lite")
                 try:
                     native.parameters(params.numpy())
+                    # Drain the 100 ms weight ramp and the causal receptive field.
+                    native.process(np.zeros(9600 + model.receptive_field, dtype=np.float32))
                     baked = model.bake_size(size, params)
                     expected = baked(torch.from_numpy(samples)).numpy() / scale
                     np.testing.assert_allclose(native.process(samples), expected, atol=2e-6,
