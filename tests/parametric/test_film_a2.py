@@ -266,3 +266,122 @@ def test_faverooo_external_stimulus_wrap(tmp_path, monkeypatch):
     np.testing.assert_array_equal(result[10 * rate:-9 * rate], audio)
     np.testing.assert_array_equal(result[:10 * rate], 0.125)
     np.testing.assert_array_equal(result[-9 * rate:], -0.125)
+
+
+def _separate_reference(model, x, params, pad_start):
+    """Pre-optimization scalar folding and two independent functional calls."""
+    from torch.func import functional_call
+
+    if pad_start:
+        x = torch.nn.functional.pad(x, (model.receptive_field - 1, 0))
+    coeff = model._coefficients(model._encode_params(params))
+    results = []
+    for size in model.sizes:
+        channels = 3 if size == "lite" else 8
+        weights = {}
+        for name, value in model._template.named_parameters():
+            if size == "lite":
+                value = value[:channels]
+                if value.ndim == 3:
+                    value = value[:, :channels]
+            weights[name] = value
+        for prefix, affine in zip(model._layers, coeff):
+            gamma, beta = 1 + affine[:channels, 0], affine[:channels, 1]
+            for suffix in ("_conv.weight", "_input_mixer.weight", "_conv.bias"):
+                key = f"{prefix}.{suffix}"
+                weight = weights[key]
+                weights[key] = (weight * gamma[:, None, None] if weight.ndim == 3
+                                else weight * gamma + beta)
+        results.append(functional_call(model._core(size), weights, (x[:, None],))[:, 0])
+    return torch.stack(results, dim=1)
+
+
+@pytest.mark.parametrize("conditioning", ["linear", "neural"])
+@pytest.mark.parametrize("pad_start", [False, True])
+def test_packed_film_forward_and_gradients(conditioning, pad_start):
+    model = make_model(conditioning).double().train()
+    length = 48 if pad_start else model.receptive_field + 47
+    x = torch.randn(2, length, dtype=torch.float64, requires_grad=True)
+    setting = torch.tensor([2.0, 1.0], dtype=x.dtype)
+    weights = tuple(model.parameters())
+    keys = tuple(model.state_dict())
+    expected = _separate_reference(model, x, setting, pad_start)
+    target = torch.randn_like(expected)
+    # Different weights for Full and Lite also check the sum of their shared
+    # gradients, including the controller and the shared prefix of Full.
+    def loss(y):
+        error = (y - target).square().mean(dim=(0, 2))
+        return error[0] * 0.37 + error[1] * 0.83
+
+    expected_grad = torch.autograd.grad(loss(expected), (x, *weights))
+    rng = torch.random.get_rng_state().clone()
+    model.set_uniform_batch_params(True)
+    actual = model.forward_sizes(x, setting.expand(len(x), -1), pad_start=pad_start)
+    assert torch.equal(rng, torch.random.get_rng_state())
+    torch.testing.assert_close(actual, expected, atol=2e-10, rtol=1e-8)
+    actual_grad = torch.autograd.grad(loss(actual), (x, *weights))
+    for got, wanted in zip(actual_grad, expected_grad):
+        torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
+    assert tuple(model.state_dict()) == keys
+    assert tuple(map(id, model.parameters())) == tuple(map(id, weights))
+    execution = model._packed_execution_cache[0]
+    with torch.no_grad():
+        model.eval()
+        torch.testing.assert_close(
+            model.forward_sizes(x, setting, pad_start=pad_start), expected,
+            atol=2e-10, rtol=1e-8,
+        )
+    assert model._packed_execution_cache[0] is execution
+    assert not execution.shell.training
+
+
+@pytest.mark.parametrize("conditioning", ["linear", "neural"])
+def test_film_grouped_fallback_and_uniform_guard(conditioning):
+    model = make_model(conditioning).double()
+    x = torch.randn(3, 32, dtype=torch.float64)
+    settings = torch.tensor([[2., 0.], [8., 1.], [2., 0.]], dtype=x.dtype)
+    expected = torch.cat([
+        _separate_reference(model, row[None], setting, True)
+        for row, setting in zip(x, settings)
+    ])
+    actual = model.forward_sizes(x, settings, pad_start=True)
+    torch.testing.assert_close(actual, expected, atol=2e-10, rtol=1e-8)
+    # The fallback must retain gradients, even when rows are regrouped.
+    for got, wanted in zip(
+        torch.autograd.grad(actual.square().mean(), tuple(model.parameters())),
+        torch.autograd.grad(expected.square().mean(), tuple(model.parameters())),
+    ):
+        torch.testing.assert_close(got, wanted, atol=2e-10, rtol=1e-7)
+    model.set_uniform_batch_params(True)
+    with pytest.raises(RuntimeError, match="uniform batch"):
+        model.forward_sizes(x, settings, pad_start=True)
+    model.set_uniform_batch_params(False)
+    torch.testing.assert_close(model.forward_sizes(x, settings, pad_start=True),
+                               expected, atol=2e-10, rtol=1e-8)
+
+
+@pytest.mark.parametrize("conditioning", ["linear", "neural"])
+def test_film_optional_compiled_dispatch(conditioning, monkeypatch):
+    model = make_model(conditioning).train()
+    x = torch.randn(2, 32)
+    settings = torch.tensor([[2., 1.], [2., 1.]])
+    model.set_uniform_batch_params(True)
+    expected = model.forward_sizes(x, settings, pad_start=True)
+    calls = []
+
+    def fake_compile(fn, **kwargs):
+        def compiled(*args):
+            calls.append(kwargs)
+            return fn(*args)
+        return compiled
+
+    monkeypatch.setattr(torch, "compile", fake_compile)
+    model.set_compiled(True, backend="eager")
+    actual = model.forward_sizes(x, settings, pad_start=True)
+    torch.testing.assert_close(actual, expected)
+    assert calls == [{"backend": "eager"}]
+    with torch.no_grad():
+        model.forward_sizes(x, settings, pad_start=True)
+    assert len(calls) == 1
+    model.set_compiled(False)
+    assert model._compiled_step is None
