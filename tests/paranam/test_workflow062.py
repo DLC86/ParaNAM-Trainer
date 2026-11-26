@@ -288,6 +288,7 @@ def test_new_recipe_and_independent_epoch_budgets(window, workspace):
         assert [selector.itemData(i) for i in range(selector.count())] == [
             "manual",
             "a2_updates",
+            "fixed_1000",
         ]
 
 
