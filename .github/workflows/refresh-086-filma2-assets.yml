@@ -15,32 +15,50 @@ jobs:
   transfer:
     if: github.ref == 'refs/heads/maintenance/refresh-086-filma2-assets'
     runs-on: ubuntu-22.04
-    timeout-minutes: 35
+    timeout-minutes: 150
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_ID: '458530091'
-      BUILD_RUN: '45873394697'
-      BUILD_SHA: '73a900bbe7ffea4e4f7ab635b5a2d1fa76000c28'
-      TEST_RUN: '45876245020'
-      TEST_SHA: '326ebe301ec8e49b50fba772c3a3382ce1ec6177'
-      OLD_TARGET: 'bf3d5567b1b70da5634075acf7ffbb74c67ba13a'
+      BUILD_RUN: '45903150230'
+      BUILD_SHA: '3687d3c7ccbc32ca9e7970a415e1401c2e0eba69'
+      TEST_RUN: '45903150242'
+      TEST_SHA: '3687d3c7ccbc32ca9e7970a415e1401c2e0eba69'
+      OLD_TARGET: '73a900bbe7ffea4e4f7ab635b5a2d1fa76000c28'
     steps:
       - name: Verify successful builds and tests and the exact existing draft
         run: |
           set -euo pipefail
-          for kind in BUILD TEST; do
-            run_var="${kind}_RUN"
-            sha_var="${kind}_SHA"
-            gh api "repos/$GH_REPO/actions/runs/${!run_var}" | jq -e --arg sha "${!sha_var}" '.head_sha == $sha and .conclusion == "success"'
+          test "$BUILD_SHA" = "$TEST_SHA"
+          # Builds and tests are already running on the same immutable commit.
+          # Never touch the draft unless both runs succeed.
+          for attempt in $(seq 1 240); do
+            ready=1
+            for kind in BUILD TEST; do
+              run_var="${kind}_RUN"
+              sha_var="${kind}_SHA"
+              run=$(gh api "repos/$GH_REPO/actions/runs/${!run_var}")
+              jq -e --arg sha "${!sha_var}" '.head_sha == $sha and .head_branch == "feature/filma2-slimmable-086"' <<< "$run" >/dev/null
+              status=$(jq -r .status <<< "$run")
+              conclusion=$(jq -r .conclusion <<< "$run")
+              echo "$kind: $status / $conclusion"
+              if [ "$status" = completed ]; then
+                test "$conclusion" = success
+              else
+                ready=0
+              fi
+            done
+            if [ "$ready" = 1 ]; then break; fi
+            test "$attempt" -lt 240
+            sleep 30
           done
-          gh api "repos/$GH_REPO/compare/$BUILD_SHA...$TEST_SHA" | jq -e '.status == "ahead" and (.files | length > 0 and all(.filename | startswith("tests/")))'
+          test "$(gh api "repos/$GH_REPO/commits/feature/filma2-slimmable-086" --jq .sha)" = "$BUILD_SHA"
           gh api "repos/$GH_REPO/releases/$RELEASE_ID" | jq -e --arg target "$OLD_TARGET" '.draft == true and .name == "ParaNAM Trainer 0.8.6" and .target_commitish == $target'
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/artifacts" | jq -e '(.artifacts | map(select(.expired == false) | .name) | sort) == ["ParaNAM-linux","ParaNAM-macos-arm64","ParaNAM-macos-intel","ParaNAM-windows"]'
       - name: Download completed installers without rebuilding
         uses: actions/download-artifact@v4
         with:
-          run-id: 45873394697
+          run-id: ${{ env.BUILD_RUN }}
           github-token: ${{ github.token }}
           pattern: ParaNAM-*
           merge-multiple: true
