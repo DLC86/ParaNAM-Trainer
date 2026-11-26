@@ -119,8 +119,9 @@ Switches; clean volume is measured separately. New-project default validation co
 plans are unchanged. ESR_worst is the maximum complete-setting validation ESR,
 reported beside the mean for Full/Lite. It does not change best-checkpoint selection.
 
-New HyperA2 projects use LR 0.004/0.001, decay 0.994/0.998496613 per 62 optimizer
-updates, batch 16 and 50 epochs. Static models default to 200 epochs and retain
+New HyperA2 projects use LR 0.004 and decay 0.994 per 62 optimizer updates for
+both the audio model and hypernetwork, batch 16 and 100 epochs. Static models
+default to 200 epochs and retain
 per-epoch scheduling. Switching capture type preserves separate epoch budgets.
 
 For legacy presets, the editor computes an equivalent average decay. If the old
@@ -175,7 +176,7 @@ With MSE, **RMS loss normalization** selects between plain MSE and weighting
 by the target level of the whole capture. ESR per segment divides the
 squared error of each real training window by its own target energy plus
 `1e-12`, then averages the resulting ratios. Windows below **Minimum target
-RMS for ESR** (default −58 dBFS) are excluded from the ESR term. A batch with
+RMS for ESR** (−60 dBFS in new projects) are excluded from the ESR term. A batch with
 no eligible windows has zero waveform loss. Synthetic mute windows use
 unweighted MSE against zero. The capture RMS normalization, exponent, and
 synthetic mute RMS reference controls are hidden in this mode. Optional MRSTFT

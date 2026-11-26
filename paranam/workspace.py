@@ -306,7 +306,13 @@ class Workspace:
             parametric_epochs=100,
             static_epochs=200,
             batch_size=preset_batch_size("HyperA2"),
-            advanced_parametric={**training_preset("HyperA2"), "waveform_loss": "segment_esr"},
+            advanced_parametric=dict(
+                training_preset("HyperA2"),
+                waveform_loss="segment_esr",
+                hypernetwork_learning_rate=0.004,
+                hypernetwork_lr_decay=0.994,
+                segment_esr_min_rms_dbfs=-60.0,
+            ),
         )
         workspace.save()
         return workspace

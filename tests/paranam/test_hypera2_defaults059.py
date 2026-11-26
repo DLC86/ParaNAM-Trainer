@@ -40,10 +40,28 @@ def test_hypera2_preset_preserves_historical_fields_except_new_normalization_def
 
 def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_path):
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
-    expected = {**requested_settings(), "waveform_loss": "segment_esr"}
+    expected = dict(
+        requested_settings(),
+        waveform_loss="segment_esr",
+        hypernetwork_learning_rate=0.004,
+        hypernetwork_lr_decay=0.994,
+        segment_esr_min_rms_dbfs=-60.0,
+    )
     assert Workspace(workspace.directory).training_options() == expected
     assert workspace.preferences["epochs"] == 100
     assert workspace.training_batch_size() == 16
+    workspace.preferences.update(n_train=2, n_validation=1, corners=False)
+    workspace.generate_plan()
+    ready(workspace)
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    model = spec["model"]
+    assert model["optimizer"]["lr"] * model["hypernet_lr_scale"] == 0.004
+    assert model["lr_scheduler"]["kwargs"]["hypernetwork"] == {
+        "interval": "step", "step_size": 62, "gamma": 0.994,
+    }
+    assert spec["learning"]["waveform_loss"] == "segment_esr"
+    assert spec["learning"]["segment_esr_min_rms_dbfs"] == -60.0
+
     legacy = training_preset("HyperWaveNet")
     workspace.preferences["advanced_parametric"] = {
         key: value for key, value in legacy.items() if key != "waveform_loss"

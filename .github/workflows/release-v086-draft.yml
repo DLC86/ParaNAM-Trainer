@@ -4,9 +4,9 @@ on:
     branches: [feature/capture-recording-integrity-086]
     paths:
       - .github/workflows/release-v086-draft.yml
-      - paranam/__init__.py
+      - paranam/**
       - pyproject.toml
-      - nam/capture/**
+      - nam/**
       - tests/capture/**
       - packaging/**
   workflow_dispatch:
