@@ -64,6 +64,93 @@ def test_static_table_and_peak_columns(window, workspace):
     assert header.sectionSize(0) == 275
 
 
+@pytest.mark.parametrize("action", ["cancel", "keep", "delete"])
+def test_static_capture_removal_dialog(window, workspace, qapp, action):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QMessageBox
+    from nam.capture.export import update_data_json
+    from nam.capture.session import raw_paths
+
+    ws = static_workspace(workspace)
+    retained, removed = ws.static_groups()
+    for entry in retained + removed:
+        target = ws.directory / entry.y_path
+        target.parent.mkdir(exist_ok=True)
+        np_to_wav(np.zeros(64, dtype=np.float32), target, rate=48000)
+        entry.status = "captured"
+    raw, _ = raw_paths(ws.directory, removed[0].y_path)
+    raw.parent.mkdir(exist_ok=True)
+    raw.touch()
+    ws.save()
+    update_data_json(ws.project, ws.directory)
+    window._attach(ws)
+    window.navigate(2)
+    window.select_static_id(removed[0].capture_id)
+    window.capture_table.clearSelection()
+    assert not window.delete_static_button.isEnabled()
+    window.select_static_id(removed[0].capture_id)
+    assert window.delete_static_button.isEnabled()
+
+    defaults = []
+
+    def respond():
+        dialog = qapp.activeModalWidget()
+        checkbox = dialog.checkBox()
+        defaults.append(checkbox.isChecked())
+        checkbox.setChecked(action != "keep")
+        if action == "cancel":
+            dialog.button(QMessageBox.StandardButton.Cancel).click()
+        else:
+            next(button for button in dialog.buttons() if button.text() == "Delete").click()
+
+    QTimer.singleShot(0, respond)
+    window.delete_static_button.click()
+    assert defaults == [False]
+    assert window.capture_table.rowCount() == (2 if action == "cancel" else 1)
+    reopened = Workspace(ws.directory)
+    remaining = retained + removed if action == "cancel" else retained
+    assert [entry.y_path for entry in reopened.project.entries] == [e.y_path for e in remaining]
+    assert not reopened.plan_changed()
+    data = read_json(ws.directory / "data.json")
+    assert {row["y_path"] for split in ("train", "validation") for row in data[split]} == {
+        e.y_path for e in remaining
+    }
+    assert all((ws.directory / entry.y_path).exists() for entry in retained)
+    assert all((ws.directory / entry.y_path).exists() == (action != "delete") for entry in removed)
+    assert raw.exists()
+
+
+def test_removing_last_static_capture_persists_empty_plan(workspace):
+    ws = static_workspace(workspace)
+    for group in ws.static_groups():
+        ws.remove_static_capture(group[0].capture_id)
+    reopened = Workspace(ws.directory)
+    assert reopened.preferences["static_captures"] == []
+    assert reopened.static_groups() == []
+    assert not reopened.plan_changed()
+    assert not reopened.training_ready()
+    reopened.add_static_capture("New take")
+    assert [entry.index for entry in reopened.project.entries] == [0, 1]
+
+
+def test_static_capture_removal_preserves_shared_and_external_wavs(workspace, tmp_path):
+    ws = static_workspace(workspace)
+    retained, removed = ws.static_groups()
+    shared = ws.directory / retained[0].y_path
+    shared.parent.mkdir(exist_ok=True)
+    shared.touch()
+    external = tmp_path / "outside-project.wav"
+    external.touch()
+    removed[0].y_path = retained[0].y_path
+    removed[1].y_path = str(external)
+
+    warnings = ws.remove_static_capture(removed[0].capture_id, delete_wavs=True)
+
+    assert len(warnings) == 2
+    assert shared.is_file() and external.is_file()
+    assert len(Workspace(ws.directory).static_groups()) == 1
+
+
 def test_metadata_editor_preserves_unknown_fields(qapp):
     from paranam.widgets import MetadataEditor
 

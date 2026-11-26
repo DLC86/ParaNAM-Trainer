@@ -445,6 +445,13 @@ class QueueActions:
         self.load_capture_button.setEnabled(
             present and not active and not preparing_here and self.capture_table.currentRow() >= 0
         )
+        self.delete_static_button.setEnabled(
+            present
+            and self.workspace.project.capture_type == "static"
+            and not active
+            and not preparing_here
+            and self.capture_table.selectionModel().hasSelection()
+        )
         info = self.device.currentData()
         self.asio_settings_button.setVisible(info is not None and info.host_api == "ASIO")
         self.asio_settings_button.setEnabled(not active and not listening)

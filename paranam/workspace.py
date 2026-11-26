@@ -11,7 +11,7 @@ from pathlib import Path
 
 from nam.capture.params import KnobSpec, SwitchSpec, validate_knobs
 from nam.capture.plan_rules import PlanRule
-from nam.capture.planner import rule_capture_limits
+from nam.capture.planner import CAPTURES_DIRNAME, rule_capture_limits
 from nam.capture.project import (
     AudioSettingsModel,
     CaptureProject,
@@ -183,7 +183,7 @@ class Workspace:
             self.preferences["capture_level_dbfs"] = self.project.capture_level_dbfs
         if "capture_type" not in stored:
             self.preferences["capture_type"] = self.project.capture_type
-        if not self.preferences.get("static_captures"):
+        if self.preferences.get("static_captures") is None:
             groups = {}
             for entry in self.project.entries:
                 if entry.capture_id:
@@ -306,7 +306,7 @@ class Workspace:
             parametric_epochs=100,
             static_epochs=200,
             batch_size=preset_batch_size("HyperA2"),
-            advanced_parametric=training_preset("HyperA2"),
+            advanced_parametric={**training_preset("HyperA2"), "waveform_loss": "segment_esr"},
         )
         workspace.save()
         return workspace
@@ -526,6 +526,59 @@ class Workspace:
             if entry.capture_id == capture_id:
                 entry.capture_name = name
         self.save()
+
+    def remove_static_capture(self, capture_id, *, delete_wavs=False):
+        """Remove a named static take and optionally its processed train/validation WAVs."""
+        from nam.capture.export import update_data_json
+
+        project = self.project
+        if project.capture_type != "static" or not capture_id:
+            raise ValueError("Select a named static capture first.")
+        removed = [entry for entry in project.entries if entry.capture_id == capture_id]
+        if not removed:
+            raise ValueError("The selected static capture is no longer in the list.")
+
+        project.entries = [entry for entry in project.entries if entry.capture_id != capture_id]
+        for index, entry in enumerate(project.entries):
+            entry.index = index
+        self.preferences["static_captures"] = [
+            capture for capture in self.preferences["static_captures"]
+            if capture["id"] != capture_id
+        ]
+        project.n_train_lhs = len(self.static_groups())
+        if not delete_wavs:
+            for entry in removed:
+                if (self.directory / entry.y_path).is_file():
+                    project.unused_recordings.setdefault(entry.y_path, {
+                        "entry": entry.model_dump(mode="json"), "context": None,
+                    })
+        self.save()
+        update_data_json(project, self.directory)
+
+        if not delete_wavs:
+            return []
+        root = self.directory / CAPTURES_DIRNAME
+        referenced = {project.train_input, project.validation_input, *project.unused_recordings}
+        referenced.update(entry.y_path for entry in project.entries)
+        protected = {(self.directory / name).resolve() for name in referenced}
+        warnings = []
+        for name in dict.fromkeys(entry.y_path for entry in removed):
+            path = self.directory / name
+            try:
+                target = path.resolve()
+                if (
+                    path.is_symlink()
+                    or not target.is_relative_to(root)
+                    or path.suffix.lower() != ".wav"
+                ):
+                    warnings.append(f"{name}: expected a WAV in the project capture folder.")
+                elif target in protected:
+                    warnings.append(f"{name} is still used by the project.")
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as error:
+                warnings.append(f"{name}: {error}")
+        return warnings
 
     def set_static_metadata(self, capture_id, metadata):
         for capture in self.preferences["static_captures"]:

@@ -368,14 +368,21 @@ def test_segment_esr_editor_freezes_objective_and_threshold_on_enqueue(window, w
     mode = window.advanced_fields["waveform_loss"]
     rms = window.advanced_fields["rms_loss_normalization"]
     threshold = window.advanced_fields["segment_esr_min_rms_dbfs"]
+    exponent = window.advanced_fields["rms_loss_normalization_exponent"]
+    mute_reference = window.advanced_fields["synthetic_mute_reference_rms"]
+    form = window.advanced_panel.layout()
+    rms_options = (rms, exponent, mute_reference)
     mse_job = training.make_job(workspace)
     (mse_job / "resume-0.ckpt").touch()
     assert "waveform_loss" not in read_json(mse_job / "spec.json")["learning"]
     assert training.job_can_resume(workspace, mse_job)
     assert rms.isChecked() and rms.isEnabled() and not threshold.isEnabled()
+    assert all(form.isRowVisible(field) for field in rms_options)
 
     mode.setCurrentIndex(mode.findData("segment_esr"))
     assert threshold.isEnabled() and not rms.isEnabled()
+    assert form.isRowVisible(threshold)
+    assert not any(form.isRowVisible(field) for field in rms_options)
     assert threshold.value() == -58.0
     threshold.setValue(-60.5)
     reopened = Workspace(workspace.directory)
@@ -394,6 +401,7 @@ def test_segment_esr_editor_freezes_objective_and_threshold_on_enqueue(window, w
     assert not training.job_can_resume(Workspace(workspace.directory), esr_job)
     mode.setCurrentIndex(mode.findData("mse"))
     assert rms.isChecked() and rms.isEnabled() and not threshold.isEnabled()
+    assert all(form.isRowVisible(field) for field in rms_options)
     assert training.job_can_resume(Workspace(workspace.directory), mse_job)
 
 

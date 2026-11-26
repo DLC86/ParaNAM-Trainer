@@ -88,6 +88,14 @@ jobs:
         run: python -m pytest tests/capture/test_audio.py tests/capture/test_asio_stream.py -q -o addopts= --basetemp .test-temp
       - name: Segment ESR regression tests
         run: python -m pytest tests/parametric/test_train.py tests/paranam/test_advanced_training.py -k segment_esr -q -o addopts= --basetemp .test-temp
+      - name: Verify static capture removal, ESR defaults and ASIO metering
+        run: >-
+          python -m pytest -q -o addopts= --basetemp .test-temp
+          tests/paranam/test_static.py::test_static_capture_removal_dialog
+          tests/paranam/test_static.py::test_removing_last_static_capture_persists_empty_plan
+          tests/paranam/test_static.py::test_static_capture_removal_preserves_shared_and_external_wavs
+          tests/paranam/test_hypera2_defaults059.py::test_new_projects_use_requested_preset_and_old_projects_keep_settings
+          tests/paranam/test_workflow057.py::test_asio_meter_reports_send_return_and_loopback_without_touching_recording
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Upload installer

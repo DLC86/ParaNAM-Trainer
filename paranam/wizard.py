@@ -1065,7 +1065,12 @@ class WizardWindow(
         self.static_name.setPlaceholderText("Name for this A2 model")
         self.static_name.editingFinished.connect(self.rename_static)
         static_box.addWidget(self.static_name)
-        static_box.addWidget(button("Add static capture…", self.add_static))
+        static_actions = QHBoxLayout()
+        static_actions.addWidget(button("Add static capture…", self.add_static))
+        self.delete_static_button = button("Delete selected capture…", self.delete_static)
+        self.delete_static_button.setEnabled(False)
+        static_actions.addWidget(self.delete_static_button)
+        static_box.addLayout(static_actions)
         layout.addWidget(self.static_card)
         self.scene = ControlScene()
         layout.addWidget(self.scene)
@@ -1655,10 +1660,6 @@ class WizardWindow(
             kind or self.workspace.preferences["capture_type"]
         ) == "parametric"
         self.refresh_loss_normalization_controls(parametric)
-        self.advanced_panel.layout().setRowVisible(
-            self.advanced_fields["rms_loss_normalization_exponent"], parametric
-        )
-        self.refresh_synthetic_mute_controls(parametric)
         self.advanced_fields["hypernetwork_recipe"].setEnabled(parametric)
         self.advanced_fields["hypernetwork_learning_rate"].setEnabled(parametric)
         self.advanced_fields["cudnn_benchmark"].setEnabled(
@@ -1673,32 +1674,29 @@ class WizardWindow(
         self.refresh_checkpoint_controls()
         self.refresh_rate_preview(kind)
 
-    def refresh_synthetic_mute_controls(self, parametric=None):
-        if parametric is None:
-            parametric = self.capture_kind.currentData() == "parametric"
-        self.advanced_panel.layout().setRowVisible(
-            self.advanced_fields["synthetic_mute_reference_rms"], parametric
-        )
-
     def refresh_loss_normalization_controls(self, parametric=None):
         if parametric is None:
             parametric = self.capture_kind.currentData() == "parametric"
         rms = self.advanced_fields["rms_loss_normalization"]
         waveform_loss = self.advanced_fields["waveform_loss"]
         threshold = self.advanced_fields["segment_esr_min_rms_dbfs"]
+        exponent = self.advanced_fields["rms_loss_normalization_exponent"]
+        mute_reference = self.advanced_fields["synthetic_mute_reference_rms"]
         form = self.advanced_panel.layout()
         esr = parametric and waveform_loss.currentData() == "segment_esr"
+        capture_rms = parametric and not esr
         form.setRowVisible(waveform_loss, parametric)
         form.setRowVisible(threshold, esr)
+        form.setRowVisible(rms, not esr)
+        form.setRowVisible(exponent, capture_rms)
+        form.setRowVisible(mute_reference, capture_rms)
         threshold.setEnabled(esr)
-        rms.setEnabled(parametric and not esr)
-        self.advanced_fields["synthetic_mute_reference_rms"].setEnabled(parametric and not esr)
+        rms.setEnabled(capture_rms)
+        mute_reference.setEnabled(capture_rms)
         self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(
             parametric
         )
-        self.advanced_fields["rms_loss_normalization_exponent"].setEnabled(
-            parametric and not esr and rms.isChecked()
-        )
+        exponent.setEnabled(capture_rms and rms.isChecked())
 
     def refresh_checkpoint_controls(self, *_):
         if not self.workspace:
@@ -3351,6 +3349,52 @@ class WizardWindow(
             except Exception as error:
                 self.notify_error(error)
 
+    def delete_static(self):
+        row = self.capture_table.currentRow()
+        workspace = self.workspace
+        if (
+            not self.delete_static_button.isEnabled()
+            or not 0 <= row < len(self._capture_entries)
+        ):
+            return
+        entry = self._capture_entries[row]
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Delete static capture")
+        dialog.setText(f"Remove ‘{entry.capture_name or 'Capture'}’ from the capture list?")
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        delete_wavs = QCheckBox("Also delete the training and validation WAVs from disk", dialog)
+        dialog.setCheckBox(delete_wavs)
+        confirm = dialog.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if (
+            dialog.clickedButton() is not confirm
+            or self.workspace is not workspace
+            or not self.delete_static_button.isEnabled()
+        ):
+            return
+
+        try:
+            warnings = workspace.remove_static_capture(
+                entry.capture_id, delete_wavs=delete_wavs.isChecked()
+            )
+        except Exception as error:
+            self.notify_error(error)
+            return
+        if self.session is not None:
+            self._get_session()
+        self._confirmed_capture = None
+        self.rig_ready.setChecked(False)
+        self.capture_progress.setValue(0)
+        self.refresh_captures()
+        self.capture_status.setText("Static capture removed.")
+        if warnings:
+            self.notify_error(
+                "Capture removed. Some WAVs could not be deleted:\n" + "\n".join(warnings)
+            )
+
     def select_static_id(self, capture_id):
         row = next(
             (
@@ -3611,6 +3655,8 @@ class WizardWindow(
             self.capture_table.blockSignals(False)
             self.select_capture()
         else:
+            self._static_edit_id = None
+            self.static_name.clear()
             self.rig_ready.setChecked(False)
             self.scene.stop_blink()
             for action in self.mark_capture_actions:
@@ -3649,8 +3695,10 @@ class WizardWindow(
             )
 
     def select_capture(self):
-        if self.workspace and 0 <= self.capture_table.currentRow() < len(
-            self._capture_entries
+        if (
+            self.workspace
+            and self.capture_table.selectionModel().hasSelection()
+            and 0 <= self.capture_table.currentRow() < len(self._capture_entries)
         ):
             entry = self._capture_entries[self.capture_table.currentRow()]
             can_classify = (
@@ -3673,6 +3721,7 @@ class WizardWindow(
             self._update_capture_blink()
             if self.workspace.project.capture_type == "static":
                 self.record_button.setText("Record")
+                self.update_enabled()
                 return
             self.record_button.setText(
                 "Synthetic Mute — no recording needed"
@@ -3681,6 +3730,10 @@ class WizardWindow(
                 if entry.status == "captured"
                 else "Record this setting"
             )
+        elif self.workspace and self.workspace.project.capture_type == "static":
+            self._static_edit_id = None
+            self.static_name.clear()
+            self.update_enabled()
 
     def classify_selected_capture(self, classification):
         """Keep the marked row visible while excluding it from the dataset."""

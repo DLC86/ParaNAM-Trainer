@@ -40,14 +40,16 @@ def test_hypera2_preset_preserves_historical_fields_except_new_normalization_def
 
 def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_path):
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
-    assert workspace.training_options() == requested_settings()
+    expected = {**requested_settings(), "waveform_loss": "segment_esr"}
+    assert Workspace(workspace.directory).training_options() == expected
     assert workspace.preferences["epochs"] == 100
     assert workspace.training_batch_size() == 16
-    workspace.preferences["advanced_parametric"] = training_preset("HyperWaveNet")
+    legacy = training_preset("HyperWaveNet")
+    workspace.preferences["advanced_parametric"] = {
+        key: value for key, value in legacy.items() if key != "waveform_loss"
+    }
     workspace.save()
-    assert Workspace(workspace.directory).training_options() == training_preset(
-        "HyperWaveNet"
-    )
+    assert Workspace(workspace.directory).training_options() == legacy
 
 
 def test_0252_architecture_optimizer_safety_flags_and_both_decay_clocks(workspace):

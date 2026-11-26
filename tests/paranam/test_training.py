@@ -82,21 +82,26 @@ def test_custom_input_disables_only_nam_pre_silence_check(workspace, input_mode,
     assert all("require_input_pre_silence" not in row for row in spec["data"]["validation"])
 
 
-def test_legacy_custom_project_path_disables_nam_pre_silence_check(workspace):
-    ready(workspace)
+def test_legacy_custom_input_path_disables_nam_pre_silence_check(workspace):
     # Simulate a project created by an older release: the project itself
     # points to a custom WAV, but the saved preference still says "trunc".
+    np_to_wav(
+        np.full(1024, 0.1, dtype=np.float32),
+        workspace.directory / "user-recording.wav",
+        rate=48000,
+    )
     workspace.project.train_input = "user-recording.wav"
-    workspace.project.validation_input = "user-recording.wav"
     workspace.preferences["input_mode"] = "trunc"
-    workspace.save()
+    ready(workspace)
     spec = read_json(training.make_job(workspace) / "spec.json")
-    for split in ("train", "validation"):
-        assert all(
-            row["x_path"] == "user-recording.wav"
-            and row["require_input_pre_silence"] is None
-            for row in spec["data"][split]
-        )
+    assert all(
+        row["x_path"] == "user-recording.wav" and row["require_input_pre_silence"] is None
+        for row in spec["data"]["train"]
+    )
+    assert all(
+        row["x_path"] == "input_validation.wav" and "require_input_pre_silence" not in row
+        for row in spec["data"]["validation"]
+    )
 
 
 def tiny_job(workspace, monkeypatch):

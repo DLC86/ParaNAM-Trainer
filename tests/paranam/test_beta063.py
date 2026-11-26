@@ -44,16 +44,17 @@ def test_worst_is_per_complete_setting_and_does_not_weight_loud_captures():
     assert ungrouped.worst_esr() is None
 
 
-def test_beta_publication_keeps_draft(monkeypatch):
+def test_native_084_release_finalization_keeps_draft(monkeypatch):
     import json
     import runpy
     import subprocess
     import sys
     from pathlib import Path
     from types import SimpleNamespace
-    from paranam import __version__
 
     root = Path(__file__).resolve().parents[2]
+    # This historical publication script targets the 0.8.4 release explicitly.
+    version = "0.8.4"
     monkeypatch.setenv("GH_REPO", "DLC86/ParaNAM-Trainer")
     monkeypatch.setenv("RELEASE_ID", "123")
     monkeypatch.setenv("GITHUB_SHA", "source")
@@ -62,10 +63,10 @@ def test_beta_publication_keeps_draft(monkeypatch):
         draft=True,
         prerelease=True,
         target_commitish="source",
-        tag_name="v0.6.3-beta",
+        tag_name=f"v{version}",
         assets=[
             dict(
-                name=f"ParaNAM-Trainer-{__version__}-" + suffix,
+                name=f"ParaNAM-Trainer-{version}-" + suffix,
                 state="uploaded",
                 size=100,
             )
@@ -89,7 +90,7 @@ def test_beta_publication_keeps_draft(monkeypatch):
     )
     edits = []
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: edits.append(a))
-    monkeypatch.setitem(sys.modules, "build", SimpleNamespace(VERSION=__version__))
+    monkeypatch.setitem(sys.modules, "build", SimpleNamespace(VERSION=version))
     monkeypatch.setattr(sys, "argv", ["publish_native.py", "finalize"])
     runpy.run_path(str(root / "packaging/publish_native.py"), run_name="__main__")
     assert not edits
