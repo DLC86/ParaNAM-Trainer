@@ -328,3 +328,15 @@ def test_callback_timing_guard_ignores_unavailable_zero_timestamps():
     guard = _CallbackTimingGuard(48000)
     guard.check(480, SimpleNamespace(inputBufferAdcTime=0.0, outputBufferDacTime=0.0))
     guard.check(480, SimpleNamespace(inputBufferAdcTime=0.0, outputBufferDacTime=0.0))
+
+
+def test_callback_timing_guard_counts_frames_without_timestamps():
+    from types import SimpleNamespace
+
+    guard = _CallbackTimingGuard(48000)
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=-0.08))
+    guard.check(960, SimpleNamespace(inputBufferAdcTime=0.0))
+    guard.check(1920, SimpleNamespace())
+    guard.check(480, SimpleNamespace(inputBufferAdcTime=-0.01))
+    with _pytest.raises(_AudioDropoutError, match="timestamp jumped"):
+        guard.check(480, SimpleNamespace(inputBufferAdcTime=0.1))

@@ -127,17 +127,20 @@ class _CallbackTimingGuard:
 
     def __init__(self, sample_rate: int):
         self.sample_rate = float(sample_rate)
+        self.position = 0
         self.previous = {}
 
     def check(self, frames: int, timing) -> None:
         if frames <= 0:
             raise AudioDropoutError("The audio driver delivered an empty callback block.")
+        position = self.position
+        self.position += frames
         for field in self._FIELDS:
             value = getattr(timing, field, None)
             if value is None:
                 continue
             current = float(value)
-            if not _np.isfinite(current) or current < 0:
+            if not _np.isfinite(current):
                 raise AudioDropoutError(
                     f"The audio driver returned an invalid {field} timestamp."
                 )
@@ -146,18 +149,18 @@ class _CallbackTimingGuard:
                 continue
             previous = self.previous.get(field)
             if previous is not None:
-                old_time, old_frames = previous
+                old_time, old_position = previous
                 delta = current - old_time
-                expected = old_frames / self.sample_rate
-                # Callback sizes may vary. Allow normal scheduling jitter, but reject
-                # clock resets and gaps large enough to hide one or more audio blocks.
+                # Count the frames in callbacks with missing timestamps as well.
+                expected = (position - old_position) / self.sample_rate
+                # Allow scheduling jitter and reject clock resets and large gaps.
                 tolerance = max(0.02, expected * 2.0)
                 if delta <= 0 or delta > expected + tolerance:
                     raise AudioDropoutError(
                         f"The audio driver's {field} timestamp jumped by {delta:.6f} "
                         f"seconds (expected about {expected:.6f}). The capture was not saved."
                     )
-            self.previous[field] = (current, frames)
+            self.previous[field] = (current, position)
 
 
 def validate_recording(recording, expected_shape, *, label="recording"):
