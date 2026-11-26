@@ -6,6 +6,7 @@
 Loss functions
 """
 
+from math import isfinite as _isfinite
 from typing import Optional as _Optional
 
 import torch as _torch
@@ -13,6 +14,28 @@ import torch as _torch
 from .._dependencies.auraloss.freq import (
     MultiResolutionSTFTLoss as _MultiResolutionSTFTLoss,
 )
+
+DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS = -58.0
+SEGMENT_ESR_RMS_RANGE_DBFS = (-120.0, -1.0)
+
+
+def waveform_loss_settings(config):
+    """Resolve the parametric waveform objective; old configs use MSE."""
+    loss = config.get("waveform_loss", "mse")
+    if loss not in ("mse", "segment_esr"):
+        raise ValueError("Waveform loss must be mse or segment_esr")
+    threshold = config.get("segment_esr_min_rms_dbfs", DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
+    low, high = SEGMENT_ESR_RMS_RANGE_DBFS
+    if loss == "segment_esr" and (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not _isfinite(threshold)
+        or not low <= threshold <= high
+    ):
+        raise ValueError(f"Segment ESR minimum target RMS must be between {low:g} and {high:g} dBFS")
+    if loss == "mse":
+        threshold = DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS
+    return loss, float(threshold)
 
 
 def apply_pre_emphasis_filter(x: _torch.Tensor, coef: float) -> _torch.Tensor:
@@ -49,6 +72,26 @@ def esr(preds: _torch.Tensor, targets: _torch.Tensor) -> _torch.Tensor:
         _torch.mean(_torch.square(preds - targets), dim=1)
         / _torch.mean(_torch.square(targets), dim=1)
     )
+
+
+def segment_esr(preds: _torch.Tensor, targets: _torch.Tensor, min_power: float) -> _torch.Tensor:
+    """Mean of per-window error/target energies above a target RMS threshold.
+
+    `min_power` is the squared minimum target RMS in full-scale units.
+    A batch without eligible windows has a differentiable zero waveform loss.
+    """
+    if preds.shape != targets.shape or preds.ndim not in (1, 2):
+        raise ValueError("Segment ESR requires matching (samples,) or (batch, samples) tensors")
+    if preds.ndim == 1:
+        preds, targets = preds[None], targets[None]
+    # Accumulate in at least FP32, even under mixed precision.
+    dtype = _torch.promote_types(_torch.float32, _torch.promote_types(preds.dtype, targets.dtype))
+    preds, targets = preds.to(dtype), targets.to(dtype)
+    energy = targets.square().sum(dim=-1)
+    eligible = energy >= min_power * targets.shape[-1]
+    error = _torch.where(eligible[:, None], preds - targets, 0.0)
+    denominator = _torch.where(eligible, energy + 1e-12, 1.0)
+    return (error.square().sum(dim=-1) / denominator).sum() / eligible.sum().clamp_min(1)
 
 
 def multi_resolution_stft_loss(

@@ -86,6 +86,8 @@ jobs:
         run: python tests/run_pytest_isolated.py tests/paranam/test_model_editor_ui.py -q -o addopts= --basetemp .test-temp
       - name: Capture stream integrity regression tests
         run: python -m pytest tests/capture/test_audio.py tests/capture/test_asio_stream.py -q -o addopts= --basetemp .test-temp
+      - name: Segment ESR regression tests
+        run: python -m pytest tests/parametric/test_train.py tests/paranam/test_advanced_training.py -k segment_esr -q -o addopts= --basetemp .test-temp
       - name: Freeze application and package installer
         run: python packaging/build.py --flavor ${{ matrix.flavor }}
       - name: Upload installer
@@ -107,25 +109,32 @@ jobs:
           pattern: ParaNAM-*
           path: installers
           merge-multiple: true
-      - name: Remove previous 0.8.6 draft and tag before replacing assets
+      - name: Replace assets of the existing 0.8.6 draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete v0.8.6 --yes --cleanup-tag || true
-      - name: Create 0.8.6 as a draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v0.8.6
-          target_commitish: feature/capture-recording-integrity-086
-          name: ParaNAM Trainer 0.8.6
-          draft: true
-          prerelease: false
-          make_latest: false
-          generate_release_notes: false
-          body: |
-            ## Recording integrity
-            - Reject return and loopback recordings containing NaN or infinite samples before alignment or saving.
-            - Reject malformed recording shapes and incomplete callback buffers rather than accepting potentially invalid WAV data.
-            - Monitor PortAudio input/output callback timestamps on ASIO and non-ASIO streams; reject timestamp resets and unusually large gaps when the host exposes usable timestamps.
-            - Keep the existing overflow/underflow, stream-stall, timing-alignment and clipping checks in place.
-          files: installers/*
-          fail_on_unmatched_files: true
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=v0.8.6
+          branch=feature/capture-recording-integrity-086
+          release=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "v0.8.6")')
+          jq -e --arg branch "$branch" '.draft == true and .target_commitish == $branch' <<< "$release"
+          id=$(jq -er .id <<< "$release")
+          test "$(gh api "repos/$GH_REPO/commits/$branch" --jq .sha)" = "$GITHUB_SHA"
+          packages=(
+            installers/ParaNAM-Trainer-0.8.6-Windows-x64-Setup.exe
+            installers/ParaNAM-Trainer-0.8.6-Linux-amd64.deb
+            installers/ParaNAM-Trainer-0.8.6-Linux-x86_64.tar.gz
+            installers/ParaNAM-Trainer-0.8.6-macOS-arm64.dmg
+            installers/ParaNAM-Trainer-0.8.6-macOS-x86_64.dmg
+          )
+          for package in "${packages[@]}"; do test -s "$package"; done
+          gh release upload "$tag" "${packages[@]}" --clobber
+          updated=$(gh api "repos/$GH_REPO/releases/$id")
+          jq -e '.draft == true' <<< "$updated"
+          for package in "${packages[@]}"; do
+            digest="sha256:$(sha256sum "$package" | cut -d ' ' -f 1)"
+            jq -e --arg name "${package##*/}" --arg digest "$digest" \
+              '.assets | any(.name == $name and .digest == $digest and .state == "uploaded")' <<< "$updated"
+          done

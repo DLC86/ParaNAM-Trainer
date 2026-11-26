@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 from nam.capture.project import atomic_write_json, replace_file
+from nam.models.losses import waveform_loss_settings
 from .workspace import Workspace, read_json
 
 TERMINAL = {"completed", "paused", "stopped", "failed", "needs_captures"}
@@ -138,15 +139,21 @@ def job_can_resume(workspace, job):
     legacy_safety = not any(key in (saved_options or {}) for key in safety_keys)
     options = workspace.training_options()
     if workspace.project.capture_type == "parametric":
-        if spec.get("learning", {}).get("rms_loss_normalization", True) != options[
-            "rms_loss_normalization"
-        ]:
+        saved_learning = spec.get("learning", {})
+        waveform_loss = waveform_loss_settings(options)
+        if waveform_loss_settings(saved_learning) != waveform_loss:
             return False
-        if options["rms_loss_normalization"] and (
-            spec.get("learning", {}).get("rms_loss_normalization_exponent", 2.0)
-            != options["rms_loss_normalization_exponent"]
-        ):
-            return False
+        if waveform_loss[0] == "mse":
+            if saved_learning.get("rms_loss_normalization", True) != options["rms_loss_normalization"]:
+                return False
+            if options["rms_loss_normalization"] and (
+                saved_learning.get("rms_loss_normalization_exponent", 2.0)
+                != options["rms_loss_normalization_exponent"]
+            ):
+                return False
+            if (saved_learning.get("synthetic_mute_reference_rms", False)
+                    != options["synthetic_mute_reference_rms"]):
+                return False
         # Previously SNR was always off when RMS was off. Compare it
         # independently now, including when resuming older job snapshots.
         if (
@@ -164,9 +171,6 @@ def job_can_resume(workspace, job):
         if (has_synthetic_mutes and not spec.get("model", {}).get("loss", {}).get(
                 "synthetic_mute"
         )):
-            return False
-        if (spec.get("learning", {}).get("synthetic_mute_reference_rms", False)
-                != options["synthetic_mute_reference_rms"]):
             return False
     saved_trainer = spec.get("learning", {}).get("trainer", {})
     if bool(saved_trainer.get("benchmark", True)) != (
@@ -596,6 +600,9 @@ def make_job(workspace, resume=False, job_directory=None):
             prefs["rate_schedule"] = schedule
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
+        waveform_loss, threshold = waveform_loss_settings(options)
+        if waveform_loss == "segment_esr":
+            learning.update(waveform_loss=waveform_loss, segment_esr_min_rms_dbfs=threshold)
         rms = options["rms_loss_normalization"]
         if not isinstance(rms, bool):
             raise ValueError("rms_loss_normalization must be a boolean")
@@ -603,7 +610,7 @@ def make_job(workspace, resume=False, job_directory=None):
         if isinstance(exponent, bool) or not isinstance(exponent, (float, int)) or not math.isfinite(exponent) or not 0.01 <= exponent <= 2.0:
             raise ValueError("RMS loss normalization exponent must be between 0.01 and 2")
         learning["rms_loss_normalization_exponent"] = float(exponent)
-        learning["rms_loss_normalization"] = rms
+        learning["rms_loss_normalization"] = rms and waveform_loss == "mse"
         snr_weighted = options["snr_weighted_loss_normalization"]
         if not isinstance(snr_weighted, bool):
             raise ValueError("snr_weighted_loss_normalization must be a boolean")
@@ -621,7 +628,7 @@ def make_job(workspace, resume=False, job_directory=None):
                 if row["y_path"] in paths
             ]
             learning["synthetic_mute_reference_rms"] = bool(
-                options["synthetic_mute_reference_rms"]
+                waveform_loss == "segment_esr" or options["synthetic_mute_reference_rms"]
             )
             if not data["train"] or len(learning["synthetic_mute_train_indices"]) == len(data["train"]):
                 raise ValueError("Synthetic mute training needs at least one real training capture")

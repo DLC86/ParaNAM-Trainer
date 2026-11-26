@@ -166,6 +166,23 @@ for static and parametric modes and recorded in each job's spec. Changing a
 recipe, an LR or gradient controls requires a new run. Jobs using the reserved
 validation-audio protocol can resume with matching settings and optimizer state.
 
+## Waveform loss
+
+**Waveform loss** in parametric training selects **MSE** or **ESR per segment**.
+With MSE, **RMS loss normalization** selects between plain MSE and weighting
+by the target level of the whole capture. ESR per segment instead divides the
+squared error of each real training window by its own target energy plus
+`1e-12`, then averages the resulting ratios. Windows below **Minimum target
+RMS for ESR** (default −58 dBFS) are excluded from the ESR term. A batch with
+no eligible windows has zero waveform loss. Synthetic mute windows use
+unweighted MSE against zero. Optional MRSTFT remains a separate loss.
+
+Train and validation ESR keep the same reduction for all modes. Resume keeps
+the waveform loss and threshold saved with the job. To compare objectives,
+create separate jobs with the same captures, randomization and update budget.
+The waveform terms have different scales, so an unchanged MRSTFT coefficient
+does not imply the same relative spectral weight.
+
 ## Presets
 
 Selecting a preset restores its advanced settings and batch size. Values can

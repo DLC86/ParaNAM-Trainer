@@ -362,6 +362,41 @@ def test_legacy_zero_exponent_migrates_to_equivalent_snr_only_settings(workspace
     assert spec["learning"]["rms_loss_normalization_exponent"] == pytest.approx(0.01)
 
 
+def test_segment_esr_editor_freezes_objective_and_threshold_on_enqueue(window, workspace):
+    ready(workspace)
+    window._attach(workspace)
+    mode = window.advanced_fields["waveform_loss"]
+    rms = window.advanced_fields["rms_loss_normalization"]
+    threshold = window.advanced_fields["segment_esr_min_rms_dbfs"]
+    mse_job = training.make_job(workspace)
+    (mse_job / "resume-0.ckpt").touch()
+    assert "waveform_loss" not in read_json(mse_job / "spec.json")["learning"]
+    assert training.job_can_resume(workspace, mse_job)
+    assert rms.isChecked() and rms.isEnabled() and not threshold.isEnabled()
+
+    mode.setCurrentIndex(mode.findData("segment_esr"))
+    assert threshold.isEnabled() and not rms.isEnabled()
+    assert threshold.value() == -58.0
+    threshold.setValue(-60.5)
+    reopened = Workspace(workspace.directory)
+    assert not training.job_can_resume(reopened, mse_job)
+    esr_job = training.make_job(reopened)
+    (esr_job / "resume-0.ckpt").touch()
+    spec = read_json(esr_job / "spec.json")
+    assert spec["learning"]["waveform_loss"] == "segment_esr"
+    assert spec["learning"]["segment_esr_min_rms_dbfs"] == -60.5
+    assert spec["learning"]["rms_loss_normalization"] is False
+    assert spec["learning"]["synthetic_mute_reference_rms"] is True
+    assert spec["learning"]["checkpoint_metric"] == "ESR_full"
+    assert training.job_can_resume(reopened, esr_job)
+
+    threshold.setValue(-61)
+    assert not training.job_can_resume(Workspace(workspace.directory), esr_job)
+    mode.setCurrentIndex(mode.findData("mse"))
+    assert rms.isChecked() and rms.isEnabled() and not threshold.isEnabled()
+    assert training.job_can_resume(Workspace(workspace.directory), mse_job)
+
+
 def test_synthetic_mute_reference_is_only_visible_option(window, workspace):
     from nam.capture.params import KnobSpec
 

@@ -28,6 +28,8 @@ def requested_settings():
         "gradient_clipping": True,
         "rms_loss_normalization": True,
         "rms_loss_normalization_exponent": 2.0,
+        "waveform_loss": "mse",
+        "segment_esr_min_rms_dbfs": -58.0,
         "synthetic_mute_reference_rms": False,
     }
 

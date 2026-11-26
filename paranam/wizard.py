@@ -1224,10 +1224,32 @@ class WizardWindow(
             field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
+        from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS, SEGMENT_ESR_RMS_RANGE_DBFS
+
+        waveform_loss = QComboBox()
+        waveform_loss.addItem("MSE", "mse")
+        waveform_loss.addItem("ESR per segment", "segment_esr")
+        waveform_loss.setToolTip(
+            "ESR divides each real window's squared error by its own target energy. "
+            "Synthetic Mute targets use unweighted MSE. Reported ESR stays the same."
+        )
+        self.advanced_fields["waveform_loss"] = waveform_loss
+        advanced_form.addRow("Waveform loss", waveform_loss)
+        waveform_loss.currentIndexChanged.connect(self.save_preferences)
+        waveform_loss.currentIndexChanged.connect(lambda _: self.refresh_loss_normalization_controls())
+        threshold = QDoubleSpinBox()
+        threshold.setRange(*SEGMENT_ESR_RMS_RANGE_DBFS)
+        threshold.setDecimals(1)
+        threshold.setValue(DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
+        threshold.setSuffix(" dBFS")
+        threshold.setFixedWidth(260)
+        threshold.setToolTip("Skip real windows below this target RMS in the segment ESR term.")
+        self.advanced_fields["segment_esr_min_rms_dbfs"] = threshold
+        advanced_form.addRow("Minimum target RMS for ESR", threshold)
         rms = QCheckBox("RMS loss normalization")
         rms.setToolTip(
             "Weight each capture's training MSE relative to -18 dBFS RMS, "
-            "with a -60 dBFS floor."
+            "with a -58 dBFS floor."
         )
         self.advanced_fields["rms_loss_normalization"] = rms
         advanced_form.addRow(rms)
@@ -1251,7 +1273,7 @@ class WizardWindow(
         snr_weighted.setToolTip(
             "Use measured pre-blip noise to scale training MSE by a capped linear "
             "reliability (minimum 10%) and MRSTFT by a gentler square-root "
-            "reliability (minimum 20%). RMS scaling applies only to MSE. "
+            "reliability (minimum 20%). Segment ESR is unweighted. "
             "Legacy captures without raw recordings use unweighted SNR."
         )
         self.advanced_fields["snr_weighted_loss_normalization"] = snr_weighted
@@ -1662,12 +1684,20 @@ class WizardWindow(
         if parametric is None:
             parametric = self.capture_kind.currentData() == "parametric"
         rms = self.advanced_fields["rms_loss_normalization"]
-        rms.setEnabled(parametric)
+        waveform_loss = self.advanced_fields["waveform_loss"]
+        threshold = self.advanced_fields["segment_esr_min_rms_dbfs"]
+        form = self.advanced_panel.layout()
+        esr = parametric and waveform_loss.currentData() == "segment_esr"
+        form.setRowVisible(waveform_loss, parametric)
+        form.setRowVisible(threshold, esr)
+        threshold.setEnabled(esr)
+        rms.setEnabled(parametric and not esr)
+        self.advanced_fields["synthetic_mute_reference_rms"].setEnabled(parametric and not esr)
         self.advanced_fields["snr_weighted_loss_normalization"].setEnabled(
             parametric
         )
         self.advanced_fields["rms_loss_normalization_exponent"].setEnabled(
-            parametric and rms.isChecked()
+            parametric and not esr and rms.isChecked()
         )
 
     def refresh_checkpoint_controls(self, *_):

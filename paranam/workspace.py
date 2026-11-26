@@ -24,6 +24,7 @@ from nam.capture.project import (
     reconcile_with_disk,
     save_project,
 )
+from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS, waveform_loss_settings
 
 DEFAULTS = {
     "capture_level_dbfs": 0.0,
@@ -1017,6 +1018,8 @@ class Workspace:
             # Explicit saved settings always override the type-specific default.
             rms_loss_normalization=(kind == "parametric"),
             rms_loss_normalization_exponent=2.0,
+            waveform_loss="mse",
+            segment_esr_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
             weight_decay=3.17e-7,
@@ -1148,13 +1151,23 @@ class Workspace:
             if not options["synthetic_mute_reference_rms"]:
                 options.pop("synthetic_mute_reference_rms", None)
             static = self.project.capture_type == "static"
+            segment_esr = not static and options["waveform_loss"] == "segment_esr"
+            if segment_esr:
+                _, threshold = waveform_loss_settings(options)
+                options["segment_esr_min_rms_dbfs"] = threshold
+                # These switches are retained in the editor for switching back to MSE.
+                options.pop("synthetic_mute_reference_rms", None)
+            else:
+                # Preserve fingerprints of existing MSE jobs and presets.
+                options.pop("waveform_loss")
+                options.pop("segment_esr_min_rms_dbfs")
             rms_enabled = options["rms_loss_normalization"]
-            if static or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
+            if static or segment_esr or not rms_enabled or options["rms_loss_normalization_exponent"] == 2.0:
                 options.pop("rms_loss_normalization_exponent")
             # SNR is independent of RMS: preserve its setting even when RMS is off.
             if static or not options["snr_weighted_loss_normalization"]:
                 options.pop("snr_weighted_loss_normalization")
-            if static or rms_enabled:
+            if static or segment_esr or rms_enabled:
                 options.pop("rms_loss_normalization")
             method = data["settings"]["advanced_training"].get("checkpoint_method")
             # Preserve legacy fingerprints when only the new default options

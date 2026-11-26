@@ -273,16 +273,20 @@ def _build_data_config(tmp_path, *, normalize: bool) -> dict:
     return data_config
 
 
-def test_parametric_training_main_exports_baked_and_parametric_models(tmp_path):
+@_pytest.mark.parametrize("waveform_loss", ["mse", "segment_esr"])
+def test_parametric_training_main_exports_baked_and_parametric_models(tmp_path, waveform_loss):
     model_config = _tiny_model_config()
     data_config = _build_data_config(tmp_path, normalize=True)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
+    learning = _learning_config()
+    if waveform_loss == "segment_esr":
+        learning["waveform_loss"] = waveform_loss
     _main(
         data_config=data_config,
         model_config=model_config,
-        learning_config=_learning_config(),
+        learning_config=learning,
         outdir=run_dir,
         no_show=True,
         make_plots=False,
@@ -573,6 +577,39 @@ def test_snr_weights_mrstft_separately_without_scaling_other_losses(mocker):
     module.on_train_epoch_start()
     loss = module.training_step((preds, targets), 0)
     assert loss.item() == _pytest.approx(0.1 * 4.0 + 0.5 * 8.0 + 2.0)
+
+
+def test_segment_esr_training_averages_ratios_and_excludes_quiet_windows():
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    module.set_waveform_loss({"waveform_loss": "segment_esr", "segment_esr_min_rms_dbfs": -40})
+    preds = _torch.tensor([[0.0, 0.0], [3.0, 3.0], [1.0, 1.0]], requires_grad=True)
+    targets = _torch.tensor([[1.0, 1.0], [2.0, 2.0], [0.001, 0.001]])
+    module.on_train_epoch_start()
+    loss = module.training_step((preds, targets), 0)
+    assert loss.item() == _pytest.approx((1.0 + 0.25) / 2.0)
+    loss.backward()
+    assert preds.grad[2].count_nonzero() == 0
+    assert preds.grad[:2].count_nonzero() == 4
+
+
+def test_segment_esr_all_quiet_is_differentiable_but_synthetic_mute_keeps_mse():
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    module.set_waveform_loss({"waveform_loss": "segment_esr"})
+    sampler = _CaptureBatchSampler((1, 1), batch_size=1, shuffle=False, drop_last=False)
+    list(sampler)
+    module.set_capture_batch_samplers(train_sampler=sampler)
+    module.set_synthetic_mute_indices(train_indices=(1,))
+    module._capture_mse_scales = (10000.0, 10000.0)
+    prediction = _torch.full((1, 8), 0.5, requires_grad=True)
+    module.on_train_epoch_start()
+    quiet = module.training_step((prediction, _torch.zeros_like(prediction)), 0)
+    assert quiet.item() == 0.0
+    quiet.backward()
+    assert prediction.grad.count_nonzero() == 0
+    mute = module.training_step((prediction, _torch.zeros_like(prediction)), 1)
+    assert mute.item() == _pytest.approx(0.25)
+    mute.backward()
+    assert prediction.grad.count_nonzero() == 8
 
 
 def test_parametric_lightning_training_logs_seen_audio_seen_params_bucket(monkeypatch):

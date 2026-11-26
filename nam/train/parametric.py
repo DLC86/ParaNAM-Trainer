@@ -30,6 +30,8 @@ from nam.data import Split as _Split
 from nam.data import apply_joint_dataset_hooks as _apply_joint_dataset_hooks
 from nam.data import get_joint_dataset_hooks as _get_joint_dataset_hooks
 from nam.data import init_dataset as _init_dataset
+from nam.models.losses import segment_esr as _segment_esr
+from nam.models.losses import waveform_loss_settings as _waveform_loss_settings
 from nam.models.exportable import Exportable as _Exportable
 from nam.models.metadata import UserMetadata as _UserMetadata
 from nam.models.parametric import HyperWaveNet as _HyperWaveNet
@@ -807,6 +809,7 @@ class _ParametricLightningModule(_LightningModule):
         self._train_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._capture_mse_scales: tuple[float, ...] = ()
+        self._segment_esr_min_power: _Optional[float] = None
         self._capture_mrstft_scales: tuple[float, ...] = ()
         self._synthetic_train_indices: frozenset[int] = frozenset()
         self._synthetic_val_indices: frozenset[int] = frozenset()
@@ -981,6 +984,12 @@ class _ParametricLightningModule(_LightningModule):
             spectral_scales.append(max(0.2, reliability**0.5))
         self._capture_mse_scales = tuple(scales)
         self._capture_mrstft_scales = tuple(spectral_scales)
+
+    def set_waveform_loss(self, learning_config):
+        mode, min_rms_dbfs = _waveform_loss_settings(learning_config)
+        self._segment_esr_min_power = (
+            10.0 ** (min_rms_dbfs / 10.0) if mode == "segment_esr" else None
+        )
 
     @staticmethod
     def _capture_index(sampler: _Optional[_Sampler], batch_idx: int) -> _Optional[int]:
@@ -1372,6 +1381,9 @@ class _ParametricLightningModule(_LightningModule):
         steps = self._size_steps(batch, synthetic_mute=True) if synthetic_mute else self._size_steps(batch)
         for size, (preds, targets, loss_dict) in steps:
             loss = _torch.zeros((), device=preds.device)
+            segment_esr = self._segment_esr_min_power is not None
+            if segment_esr and not synthetic_mute:
+                loss = _segment_esr(preds, targets, self._segment_esr_min_power)
             for name, v in loss_dict.items():
                 if v.weight is not None and v.weight > 0.0:
                     if v.value is None:
@@ -1380,7 +1392,10 @@ class _ParametricLightningModule(_LightningModule):
                         )
                     weight = v.weight
                     if name in ("MSE", "MSE_FFT"):
-                        weight *= mse_scale
+                        if segment_esr and not synthetic_mute:
+                            continue  # MSE remains available for logging.
+                        if not segment_esr:
+                            weight *= mse_scale
                     elif name in ("MRSTFT", "Pre-emphasized MRSTFT"):
                         weight *= mrstft_scale
                     loss = loss + weight * v.value
@@ -1766,6 +1781,7 @@ def main(
         learning_config.get("synthetic_mute_validation_indices", ()),
         reference_rms=learning_config.get("synthetic_mute_reference_rms", False),
     )
+    model.set_waveform_loss(learning_config)
     if (model._synthetic_train_indices or model._synthetic_val_indices) and (
         not isinstance(train_dataloader.batch_sampler, _CaptureBatchSampler)
         or not isinstance(val_dataloader.batch_sampler, _CaptureBatchSampler)
@@ -1774,6 +1790,7 @@ def main(
     rms = learning_config.get("rms_loss_normalization", True)
     if not isinstance(rms, bool):
         raise ValueError("rms_loss_normalization must be a boolean")
+    rms = rms and model._segment_esr_min_power is None
     rms_exponent = learning_config.get("rms_loss_normalization_exponent", 2.0)
     if isinstance(rms_exponent, bool) or not isinstance(rms_exponent, (float, int)) or not _isfinite(rms_exponent) or not 0.01 <= rms_exponent <= 2.0:
         raise ValueError("RMS loss normalization exponent must be between 0.01 and 2")
