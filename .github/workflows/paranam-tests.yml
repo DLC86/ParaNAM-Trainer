@@ -1,7 +1,7 @@
 name: ParaNAM tests
 on:
   push:
-    branches: [main, 'beta/**']
+    branches: [main, 'beta/**', feature/filma2-slimmable-086]
     # Pure packaging/installer workflow fixes do not change application
     # behavior. Do not repeat the full ~816-test suite for those commits.
     paths-ignore:
@@ -46,5 +46,5 @@ jobs:
             sleep 15
           done
           exit 1
-      - run: python -m pytest tests/paranam tests/capture tests/test_nam/test_data.py tests/parametric/test_dataset.py tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2.py tests/parametric/test_hyper_a2_packed.py -v -o addopts= --basetemp .test-temp
+      - run: python -m pytest tests/paranam tests/capture tests/test_nam/test_data.py tests/parametric/test_dataset.py tests/parametric/test_a2_recipe.py tests/parametric/test_hyper_a2.py tests/parametric/test_hyper_a2_packed.py tests/parametric/test_film_a2.py -v -o addopts= --basetemp .test-temp
 

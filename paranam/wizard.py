@@ -1011,7 +1011,7 @@ class WizardWindow(
         )
         box.addWidget(
             label(
-                "Active learning trains independent HyperA2 members and compares their Full/Lite predictions to suggest new settings.\n"
+                "Active learning trains independent parametric models and compares their Full/Lite predictions to suggest new settings.\n"
                 "You return to the capture step for each new batch. Every new parametric export uses ParametricSlimmableContainer with Full + Lite.",
                 "muted",
             )
@@ -1327,6 +1327,8 @@ class WizardWindow(
         preset = QComboBox()
         preset.addItem("HyperA2", "HyperA2")
         preset.addItem("HyperWaveNet (Phillip Self)", "HyperWaveNet")
+        preset.addItem("FiLMA2 Neural (experimental)", "FiLMA2 Neural")
+        preset.addItem("FiLMA2 Linear (experimental)", "FiLMA2 Linear")
         preset.setToolTip(
             "Selecting a preset resets its advanced values and batch size. You can customize them afterwards. Both presets train Full and Lite."
         )
@@ -1836,15 +1838,15 @@ class WizardWindow(
         self.advanced_panel.layout().setRowVisible(
             self.hypernetwork_rate_row, parametric
         )
-        for key in (
-            "hypernetwork_mode",
-            "condition_dilated_convolutions",
-            "branch_loss_reduction",
-        ):
-            self.advanced_fields[key].setEnabled(parametric)
+        from .recipes import FILM_PRESETS
+
+        film = FILM_PRESETS.get(self.advanced_fields["hypernetwork_recipe"].currentData())
+        for key in ("hypernetwork_mode", "condition_dilated_convolutions"):
+            self.advanced_fields[key].setEnabled(parametric and film is None)
+        self.advanced_fields["branch_loss_reduction"].setEnabled(parametric)
         self.preset_description.setVisible(parametric)
         low_rank = self.advanced_fields["hypernetwork_mode"].currentData() == "low_rank"
-        self.advanced_fields["hypernetwork_rank"].setEnabled(parametric and low_rank)
+        self.advanced_fields["hypernetwork_rank"].setEnabled(parametric and low_rank and film is None)
         mode = (
             f"low rank (rank {self.advanced_fields['hypernetwork_rank'].value()})"
             if low_rank
@@ -1856,6 +1858,11 @@ class WizardWindow(
             else "shared"
         )
         reduction = self.advanced_fields["branch_loss_reduction"].currentData()
+        if film is not None:
+            self.preset_description.setText(
+                f"{film.capitalize()} FiLM; shared A2 weights; Full/Lite loss: {reduction}."
+            )
+            return
         self.preset_description.setText(
             f"Weight deltas: {mode}; dilated kernels: {kernels}; Full/Lite loss: {reduction}."
             if parametric
@@ -4074,7 +4081,7 @@ class WizardWindow(
             from .queue_controller import ExportSavedBest
 
             self.export_status.setText(
-                "Exporting the best saved Full and Lite checkpoints…"
+                "Exporting the best saved model…"
             )
             self.export_worker = ExportSavedBest(self.job, self)
             self.export_worker.finished.connect(self._saved_export_finished)

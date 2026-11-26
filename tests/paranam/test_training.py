@@ -38,6 +38,24 @@ def ready(workspace):
     workspace.save()
 
 
+@pytest.mark.parametrize("conditioning", ["Neural", "Linear"])
+def test_train_job_freezes_filma2_as_a_joint_checkpoint(workspace, conditioning):
+    ready(workspace)
+    options = workspace.training_options("parametric")
+    options["hypernetwork_recipe"] = f"FiLMA2 {conditioning}"
+    workspace.preferences["advanced_parametric"] = options
+    workspace.save()
+
+    spec = read_json(training.make_job(workspace) / "spec.json")
+    assert spec["model"]["net"]["name"] == "ParametricSlimmableContainer"
+    config = spec["model"]["net"]["config"]
+    assert config["conditioning"] == conditioning.lower()
+    assert "hypernet" not in config
+    assert spec["model"]["loss"]["synthetic_mute"]
+    assert spec["learning"]["checkpoint_metric"] == "ESR_full"
+    assert not spec["learning"]["separate_size_checkpoints"]
+
+
 @pytest.mark.parametrize("capture_type", ["static", "parametric"])
 @pytest.mark.parametrize("loopback", [False, True])
 def test_training_retains_capture_safety_margin_once(workspace, capture_type, loopback):

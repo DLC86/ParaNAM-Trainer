@@ -1,19 +1,22 @@
 name: ParaNAM 0.8.6 draft release
 on:
   push:
-    branches: [feature/capture-recording-integrity-086]
+    branches: [feature/capture-recording-integrity-086, feature/filma2-slimmable-086]
     paths:
       - .github/workflows/release-v086-draft.yml
       - paranam/**
       - pyproject.toml
       - nam/**
       - tests/capture/**
+      - tests/parametric/test_film_a2.py
+      - native/**
+      - external/playback-runtime
       - packaging/**
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: paranam-v086-draft-release
+  group: paranam-v086-draft-release-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   targets:
@@ -80,6 +83,9 @@ jobs:
       - name: Targeted capture and HyperA2 regression checks (Windows)
         if: runner.os == 'Windows'
         run: python -m pytest tests/paranam/test_control_dialog_knob.py tests/paranam/test_plan_rules.py tests/capture/test_switch_controls.py tests/parametric/test_hyper_a2_packed.py -q -o addopts= --basetemp .test-temp
+      - name: Verify FiLMA2 training, baking and native playback
+        if: github.ref == 'refs/heads/feature/filma2-slimmable-086'
+        run: python -m pytest tests/parametric/test_film_a2.py -q -o addopts= --basetemp .test-temp
       - name: Model Editor migration tests
         run: python -m pytest tests/paranam/test_model_editor.py -q -o addopts= --basetemp .test-temp
       - name: Model Editor UI regression tests
@@ -107,6 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   draft-release:
+    if: github.ref == 'refs/heads/feature/capture-recording-integrity-086'
     needs: build
     runs-on: ubuntu-22.04
     permissions:

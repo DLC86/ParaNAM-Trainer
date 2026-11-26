@@ -27,6 +27,7 @@ from ._dataset import ParametricDataset as _ParametricDataset
 from ._dataset import resolve_named_params as _resolve_named_params
 from ._hyperwavenet import HyperWaveNet as _HyperWaveNet
 from ._hyper_a2 import HyperA2 as _HyperA2
+from ._film_a2 import FiLMA2 as _FiLMA2
 
 _RawParams = _Mapping[str, _Any] | _Sequence[float] | _torch.Tensor
 _Settings = _Mapping[str, _RawParams] | _Sequence[tuple[str, _RawParams]]
@@ -246,7 +247,7 @@ def bake_to_files(
 def _make_parametric_scale_hook(
     model: _ParametricNet, scale: float
 ) -> _Dataset._ScaleOutputHook:
-    if isinstance(model, _HyperA2):
+    if isinstance(model, (_HyperA2, _FiLMA2)):
         return _HyperA2ScaleOutputHook(scale=scale)
     if isinstance(model, _HyperWaveNet):
         return _HyperWaveNetScaleOutputHook(

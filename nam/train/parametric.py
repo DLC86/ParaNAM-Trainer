@@ -36,6 +36,7 @@ from nam.models.exportable import Exportable as _Exportable
 from nam.models.metadata import UserMetadata as _UserMetadata
 from nam.models.parametric import HyperWaveNet as _HyperWaveNet
 from nam.models.parametric import HyperA2 as _HyperA2
+from nam.models.parametric import FiLMA2 as _FiLMA2
 from nam.models.parametric import ParametricDataset as _ParametricDataset
 from nam.models.parametric import ParametricNet as _ParametricNet
 from nam.models.parametric._anchors import anchor_output as _anchor_output
@@ -303,7 +304,7 @@ def _enable_training_fast_paths(
     dataloaders, so `_release_training_fast_paths` takes it back once fitting is over and
     later calls (bake, export checks) go through the general path.
     """
-    if isinstance(net, (_HyperWaveNet, _HyperA2)):
+    if isinstance(net, (_HyperWaveNet, _HyperA2, _FiLMA2)):
         net.set_uniform_batch_params(
             all(
                 isinstance(dataloader.batch_sampler, _CaptureBatchSampler)
@@ -316,7 +317,7 @@ def _enable_training_fast_paths(
 
 
 def _release_training_fast_paths(net: _ParametricNet) -> None:
-    if isinstance(net, (_HyperWaveNet, _HyperA2)):
+    if isinstance(net, (_HyperWaveNet, _HyperA2, _FiLMA2)):
         net.set_uniform_batch_params(False)
     net.set_compiled(False)
     net.set_validate_params(True)
@@ -748,8 +749,8 @@ class _ParametricLightningModule(_LightningModule):
         )
         if not _isfinite(hypernet_lr_scale) or hypernet_lr_scale <= 0:
             raise ValueError("hypernet_lr_scale must be finite and positive")
-        if hypernet_lr_scale != 1.0 and not isinstance(net, _HyperA2):
-            raise ValueError("hypernet_lr_scale requires HyperA2")
+        if hypernet_lr_scale != 1.0 and not isinstance(net, (_HyperA2, _FiLMA2)):
+            raise ValueError("hypernet_lr_scale requires a slimmable A2 model")
         if output_gain is not None:
             from ..capture.output_gain import OutputGainExportHook
 
@@ -833,6 +834,8 @@ class _ParametricLightningModule(_LightningModule):
     def on_save_checkpoint(self, checkpoint):
         super().on_save_checkpoint(checkpoint)
         checkpoint["hypernet_lr_scale"] = self._hypernet_lr_scale
+        if isinstance(self.net, _FiLMA2):
+            checkpoint["output_scale"] = getattr(self, "_output_scale", None)
         mute = self._loss_config.mute_anchor
         checkpoint["mute_anchor_settings"] = mute.settings() if mute is not None else None
         checkpoint["mute_training_mode"] = (
@@ -1130,11 +1133,15 @@ class _ParametricLightningModule(_LightningModule):
         if self._hypernet_lr_scale != 1.0 or independent_rates:
             # A readout coefficient affects many conditioned audio weights. The
             # static A2 LR is not an equivalent step in this parameter space.
-            hyper = [
-                p
-                for branch in self.net._branches.values()
-                for p in branch._hypernet.parameters()
-            ]
+            hyper = (
+                list(self.net._conditioner.parameters())
+                if isinstance(self.net, _FiLMA2)
+                else [
+                    p
+                    for branch in self.net._branches.values()
+                    for p in branch._hypernet.parameters()
+                ]
+            )
             hyper_ids = {id(p) for p in hyper}
             base = [p for p in self.parameters() if id(p) not in hyper_ids]
             lr = self._optimizer_config.get("lr", 0.001)
@@ -1210,7 +1217,7 @@ class _ParametricLightningModule(_LightningModule):
                 self._log_bucket({"Mute RMS dBFS": dbfs}, f"{bucket}/{size}")
 
     def _size_steps(self, batch, *, synthetic_mute=False):
-        if isinstance(self.net, _HyperA2):
+        if isinstance(self.net, (_HyperA2, _FiLMA2)):
             predictions = self.net.forward_sizes(*batch[:-1], pad_start=False)
             for index, size in enumerate(self.net.sizes):
                 with self.net.using_size(size):
@@ -1310,7 +1317,7 @@ class _ParametricLightningModule(_LightningModule):
         audio = x.index_select(0, indices)[:, -(net.receptive_field - 1 + ny):].contiguous()
         setting = self._mute_anchor_setting(net, config, target_index, x.device)
         setting = setting.expand(count, -1)
-        if isinstance(net, _HyperA2):
+        if isinstance(net, (_HyperA2, _FiLMA2)):
             outputs = net.forward_sizes(audio, setting, pad_start=False)
             return outputs.abs().mean(dim=(0, 2))
         return net(audio, setting, pad_start=False).abs().mean().unsqueeze(0)
@@ -1326,7 +1333,7 @@ class _ParametricLightningModule(_LightningModule):
         x = batch[0]
         setting = self._mute_anchor_setting(net, config, target_index, x.device)
         settings = setting.expand(x.shape[0], -1)
-        if isinstance(net, _HyperA2):
+        if isinstance(net, (_HyperA2, _FiLMA2)):
             outputs = net.forward_sizes(x, settings, pad_start=False)
             errors = outputs.square().mean(dim=(0, 2))
             reduced = (errors.sum() if self._loss_config.training_recipe == "a2"
@@ -1526,7 +1533,7 @@ class _ParametricModelCheckpoint(_ModelCheckpoint):
                 _bake(net, net.nominal_params, output_scale=self._output_scale).export(
                     outdir, basename=basename, user_metadata=self._user_metadata
                 )
-            elif isinstance(net, _HyperA2):
+            elif isinstance(net, (_HyperA2, _FiLMA2)):
                 net.bake(net.nominal_params, output_scale=self._output_scale).export(
                     outdir, basename=basename, user_metadata=self._user_metadata
                 )
@@ -1759,6 +1766,7 @@ def main(
     net.sample_rate = getattr(dataset_train, "sample_rate", None)
     _handshake_datasets(model, dataset_train, dataset_validation)
     output_scale = _output_scale_from_datasets((dataset_train, dataset_validation))
+    model._output_scale = output_scale
 
     train_dataloader = _make_parametric_dataloader(
         dataset_train, learning_config["train_dataloader"]
@@ -1900,7 +1908,7 @@ def main(
                 net.nominal_params,
                 output_scale=output_scale,
             ).export(outdir, user_metadata=user_metadata)
-        elif isinstance(net, _HyperA2):
+        elif isinstance(net, (_HyperA2, _FiLMA2)):
             net.bake(net.nominal_params, output_scale=output_scale).export(
                 outdir, user_metadata=user_metadata
             )

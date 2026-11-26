@@ -28,6 +28,7 @@ from ._concat_wavenet import ConcatWaveNet
 from ._hypernet import Hypernetwork
 from ._hyperwavenet import HyperWaveNet
 from ._hyper_a2 import HyperA2
+from ._film_a2 import FiLMA2
 from ._spec import ParamSpec
 
 _register_dataset_initializer("parametric", _init_dataset)
@@ -35,6 +36,15 @@ _factory.register("ConcatLSTM", ConcatLSTM.init_from_config)
 _factory.register("ConcatWaveNet", ConcatWaveNet.init_from_config)
 _factory.register("HyperWaveNet", HyperWaveNet.init_from_config)
 _factory.register("HyperA2", HyperA2.init_from_config)
+
+
+def _init_slimmable_container(config):
+    if "conditioning" in config:
+        return FiLMA2.init_from_config(config)
+    return HyperA2.init_from_config(config)
+
+
+_factory.register("ParametricSlimmableContainer", _init_slimmable_container)
 
 __all__ = [
     "abbreviate_param_names",
@@ -46,6 +56,7 @@ __all__ = [
     "Hypernetwork",
     "HyperWaveNet",
     "HyperA2",
+    "FiLMA2",
     "make_capture_y_path",
     "ParamSpec",
     "ParametricDataset",

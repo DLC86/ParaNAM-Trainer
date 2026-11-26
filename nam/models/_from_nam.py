@@ -197,6 +197,16 @@ def init_from_nam(config) -> _BaseNet:
     ...     config = json.load(fp)
     ...     model = init_from_nam(config)
     """
+    if config["architecture"] in ("HyperA2", "ParametricSlimmableContainer"):
+        from . import parametric  # Register the parametric constructors.
+        from .factory import init
+
+        model = init(
+            config["architecture"],
+            kwargs={"config": {**config["config"], "sample_rate": config.get("sample_rate")}},
+        )
+        model.import_weights(config["weights"])
+        return model
     # NB: Some old .nam files don't have a sample_rate. Must .get()
     model = {
         "Linear": _init_linear,

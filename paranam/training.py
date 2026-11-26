@@ -30,6 +30,14 @@ class TrainingStopped(Exception):
     pass
 
 
+def _is_film(spec):
+    return "conditioning" in spec.get("model", {}).get("net", {}).get("config", {})
+
+
+def _parametric_name(spec):
+    return "FiLMA2 Full + Lite" if _is_film(spec) else "HyperA2 Full + Lite"
+
+
 def current_job(directory):
     pointer = read_json(Path(directory) / "training" / "current.json", {})
     return Path(pointer["directory"]) if pointer.get("directory") else None
@@ -182,6 +190,12 @@ def job_can_resume(workspace, job):
         != options["deterministic_training"]
     ):
         return False
+    from .recipes import FILM_PRESETS
+
+    saved_conditioning = spec.get("model", {}).get("net", {}).get("config", {}).get("conditioning")
+    conditioning = FILM_PRESETS.get(options["hypernetwork_recipe"])
+    if not spec.get("static_captures") and conditioning != saved_conditioning:
+        return False
     generation_keys = (
         "hypernetwork_mode",
         "hypernetwork_rank",
@@ -193,7 +207,12 @@ def job_can_resume(workspace, job):
         spec.get("model", {}).get("net", {}).get("config", {}).get("hypernet", {})
     )
     old_mode = old_hypernet.get("mode", "low_rank")
-    same_generation = bool(spec.get("static_captures")) or (
+    same_reduction = options["branch_loss_reduction"] == (
+        "sum"
+        if spec.get("model", {}).get("loss", {}).get("training_recipe", "legacy") == "a2"
+        else "mean"
+    )
+    same_hypernet = (
         options["hypernetwork_mode"] == old_mode
         and (
             old_mode != "low_rank"
@@ -204,13 +223,9 @@ def job_can_resume(workspace, job):
             "_conv.weight"
             not in old_hypernet.get("selector", {}).get("exclude_suffixes", [])
         )
-        and options["branch_loss_reduction"]
-        == (
-            "sum"
-            if spec.get("model", {}).get("loss", {}).get("training_recipe", "legacy")
-            == "a2"
-            else "mean"
-        )
+    )
+    same_generation = bool(spec.get("static_captures")) or (
+        same_reduction and (conditioning is not None or same_hypernet)
     )
     old_clip = spec.get("learning", {}).get("trainer", {}).get("gradient_clip_val")
     old_check = spec.get("model", {}).get(
@@ -454,6 +469,10 @@ def make_job(workspace, resume=False, job_directory=None):
             raise ValueError(
                 "At least one validation capture is required to report a meaningful ESR."
             )
+        from .recipes import FILM_PRESETS
+
+        recipe = options["hypernetwork_recipe"]
+        conditioning = FILM_PRESETS.get(recipe)
         # Every member and every final export uses the SAME nested Full/Lite architecture.
         is_static = workspace.project.capture_type == "static"
         if is_static:
@@ -474,32 +493,38 @@ def make_job(workspace, resume=False, job_directory=None):
                     if control.name == curve["name"]
                 )
                 model["output_gain"] = curve
-            if options["hypernetwork_recipe"] not in ("HyperA2", "HyperWaveNet"):
-                raise ValueError(
-                    "Choose HyperA2 or HyperWaveNet as the training preset"
+            if conditioning is not None:
+                model["net"]["name"] = "ParametricSlimmableContainer"
+                config = model["net"]["config"]
+                config.pop("hypernet")
+                config["conditioning"] = conditioning
+            else:
+                if recipe not in ("HyperA2", "HyperWaveNet"):
+                    raise ValueError(
+                        "Choose HyperA2 or HyperWaveNet as the training preset"
+                    )
+                if options["hypernetwork_mode"] not in ("full", "low_rank"):
+                    raise ValueError("Hypernetwork weight mode must be full or low_rank")
+                rank = options["hypernetwork_rank"]
+                if (
+                    isinstance(rank, bool)
+                    or not isinstance(rank, int)
+                    or not 1 <= rank <= 8
+                ):
+                    raise ValueError("Hypernetwork rank must be an integer from 1 to 8")
+                if not isinstance(options["condition_dilated_convolutions"], bool):
+                    raise ValueError("Condition dilated convolutions must be a boolean")
+                model["net"]["config"]["hypernet"].update(
+                    mode=options["hypernetwork_mode"],
+                    rank=rank,
+                    selector=(
+                        {}
+                        if options["condition_dilated_convolutions"]
+                        else {"exclude_suffixes": ["_conv.weight"]}
+                    ),
                 )
-            if options["hypernetwork_mode"] not in ("full", "low_rank"):
-                raise ValueError("Hypernetwork weight mode must be full or low_rank")
-            rank = options["hypernetwork_rank"]
-            if (
-                isinstance(rank, bool)
-                or not isinstance(rank, int)
-                or not 1 <= rank <= 8
-            ):
-                raise ValueError("Hypernetwork rank must be an integer from 1 to 8")
-            if not isinstance(options["condition_dilated_convolutions"], bool):
-                raise ValueError("Condition dilated convolutions must be a boolean")
             if options["branch_loss_reduction"] not in ("sum", "mean"):
                 raise ValueError("Full/Lite loss reduction must be sum or mean")
-            model["net"]["config"]["hypernet"].update(
-                mode=options["hypernetwork_mode"],
-                rank=rank,
-                selector=(
-                    {}
-                    if options["condition_dilated_convolutions"]
-                    else {"exclude_suffixes": ["_conv.weight"]}
-                ),
-            )
             model["loss"]["training_recipe"] = (
                 "a2" if options["branch_loss_reduction"] == "sum" else "legacy"
             )
@@ -635,7 +660,7 @@ def make_job(workspace, resume=False, job_directory=None):
             if len(learning["synthetic_mute_validation_indices"]) == len(data["validation"]):
                 raise ValueError("Validation ESR requires at least one non-mute capture")
         learning["checkpoint_metric"] = "ESR_full"
-        learning["separate_size_checkpoints"] = True
+        learning["separate_size_checkpoints"] = conditioning is None
         learning["export_checkpoints"] = False
         learning["torch_compile"] = {
             "enabled": False
@@ -782,6 +807,7 @@ def export_best_model(trainer, spec, member, target, selection=None):
     from nam.models.parametric import export_parametric
 
     static = bool(spec.get("static_captures"))
+    film = _is_film(spec)
     checkpoint_class = PackedLightningModule if static else _ParametricLightningModule
     if selection is not None:
         paths, scores = selection
@@ -804,7 +830,14 @@ def export_best_model(trainer, spec, member, target, selection=None):
             None,
         )
         selected = selector.selected_checkpoints() if selector is not None else None
-        if selected and all(selected.values()):
+        if film:
+            full = selected.get("full") if selected else None
+            if full is None:
+                callback = next(c for c in trainer.checkpoint_callbacks if c.monitor == "ESR_full")
+                full = {"path": callback.best_model_path}
+            paths = dict.fromkeys(("full", "lite"), full["path"])
+            scores = {}
+        elif selected and all(selected.values()):
             paths = {size: selected[size]["path"] for size in ("full", "lite")}
             scores = {size: selected[size]["val"] for size in ("full", "lite")}
         else:
@@ -822,12 +855,20 @@ def export_best_model(trainer, spec, member, target, selection=None):
         raise ValueError("A validated Full and Lite checkpoint is not available yet")
     # Constructors consume CPU RNG; exporting must not change the run.
     with torch.random.fork_rng(devices=[]), torch.no_grad():
-        checkpoints = {
-            size: torch.load(path, map_location="cpu", weights_only=False)
-            for size, path in paths.items()
-        }
+        if film:
+            checkpoint = torch.load(paths["full"], map_location="cpu", weights_only=False)
+            checkpoints = dict.fromkeys(("full", "lite"), checkpoint)
+            scores = {size: checkpoint.get(f"validation_esr_{size}")
+                      for size in checkpoints}
+            if any(value is None or not math.isfinite(value) for value in scores.values()):
+                raise ValueError("The shared FiLMA2 checkpoint has no valid Full/Lite scores")
+        else:
+            checkpoints = {
+                size: torch.load(path, map_location="cpu", weights_only=False)
+                for size, path in paths.items()
+            }
         models = {}
-        for size in ("full", "lite"):
+        for size in (("full",) if film else ("full", "lite")):
             model = checkpoint_class.init_from_config(spec["model"])
             model.on_load_checkpoint(checkpoints[size])
             model.load_state_dict(checkpoints[size]["state_dict"])
@@ -836,6 +877,8 @@ def export_best_model(trainer, spec, member, target, selection=None):
         if static:
             net.import_submodel(0, models["lite"].net.extract_submodel(0))
             net.apply_mask()
+            export_net = net
+        elif film:
             export_net = net
         else:
             net.branch("lite").load_state_dict(
@@ -853,7 +896,10 @@ def export_best_model(trainer, spec, member, target, selection=None):
             if static:
                 export_net.export(Path(directory), basename="snapshot")
             else:
-                export_parametric(export_net, Path(directory), basename="snapshot")
+                export_parametric(
+                    export_net, Path(directory), basename="snapshot",
+                    output_scale=checkpoints["full"].get("output_scale") if film else None,
+                )
             exported = read_json(Path(directory) / ("snapshot" + extension))
         source = read_json(Path(spec["project"]) / "capture_project.json", {})
         if not static and source.get("knobs"):
@@ -953,6 +999,15 @@ def export_saved_best(job, target):
         settings = spec.get("preferences", {}).get("advanced_training", {})
         method = settings.get("checkpoint_method", "validation")
         chosen = saved_selection(saved, method, settings.get("checkpoint_alpha", 0.75))
+        if _is_film(spec):
+            full = chosen.get("full") if chosen else None
+            path = full["path"] if full else paths["full"]
+            if not path or not Path(path).is_file():
+                raise ValueError("A validated shared FiLMA2 checkpoint is not available yet")
+            return export_best_model(
+                None, spec, member, target,
+                selection=(dict.fromkeys(("full", "lite"), path), {}),
+            )
         if chosen and all(chosen.values()):
             paths = {size: chosen[size]["path"] for size in ("full", "lite")}
             scores = {size: chosen[size]["val"] for size in ("full", "lite")}
@@ -971,7 +1026,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
     label = (
         f"A2 Full + Lite: {spec['static_captures'][member]['name']}"
         if spec.get("static_captures")
-        else "HyperA2 Full + Lite"
+        else _parametric_name(spec)
     )
 
     class ProgressCallback(Callback):
@@ -1747,6 +1802,13 @@ def run_job(job):
                     chosen = selector.selected_checkpoints()
                     if all(chosen.values()):
                         full, lite = chosen["full"], chosen["lite"]
+                        if _is_film(spec):
+                            snapshot = torch.load(full["path"], map_location="cpu", weights_only=False)
+                            lite = dict(
+                                epoch=full["epoch"],
+                                val=snapshot["validation_esr_lite"],
+                                train=snapshot["train_esr_lite"],
+                            )
                         progress.best = full["val"]
                         progress.best_metrics = dict(
                             epoch=full["epoch"], epoch_full=full["epoch"],
@@ -1881,9 +1943,8 @@ def run_job(job):
                 from .model_names import set_model_metadata_name
                 set_model_metadata_name(selected_model, current_name)
             model_metadata = selected_model.get("metadata", {})
-            destination = export / (
-                model_basename(model_metadata.get("name"), "ParaNAM_HyperA2") + ".pnam"
-            )
+            default_name = "ParaNAM_FiLMA2" if _is_film(spec) else "ParaNAM_HyperA2"
+            destination = export / (model_basename(model_metadata.get("name"), default_name) + ".pnam")
             # Re-finalize even a previously completed member: on resume it
             # might have been exported by an older trainer, and is skipped in
             # the per-member loop above. Never copy an unannotated PNAM.
@@ -1917,7 +1978,7 @@ def run_job(job):
                 message=(
                     f"{len(additions)} new captures suggested"
                     if additions
-                    else "HyperA2 Full + Lite is ready"
+                    else f"{_parametric_name(spec)} is ready"
                 ),
                 additions=len(additions),
             )

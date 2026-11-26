@@ -49,6 +49,8 @@ if(NOT GEMM_RESULT EQUAL 0)
   message(FATAL_ERROR "Playback GEMM delta-kernel smoothing patch: ${GEMM_ERROR}")
 endif()
 message(STATUS "${GEMM_OUTPUT}")
+set(NAM_CORE_DIR "${CORE}")
+include("${RUNTIME}/patches/apply-filma2.cmake")
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS "${CORE}/NAM/*.cpp" "${CORE}/NAM/*/*.cpp")
 # Keep the plugin DSP unchanged except for Windows Unicode path interpretation.
 file(READ "${RUNTIME}/Source/DSP/NamModelEngine.cpp" ENGINE_SOURCE)

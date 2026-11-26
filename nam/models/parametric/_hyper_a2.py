@@ -40,7 +40,31 @@ def _template_config(channels, head_scale):
     }
 
 
-class HyperA2(_ParametricNet):
+class SlimmableA2(_ParametricNet):
+    @property
+    def sizes(self):
+        return tuple(_CHANNELS)
+
+    @property
+    def size(self):
+        return self._size
+
+    def set_size(self, size):
+        if size not in _CHANNELS:
+            raise ValueError(f"A2 size must be 'lite' or 'full'; got {size!r}")
+        self._size = size
+
+    @_contextmanager
+    def using_size(self, size):
+        previous = self.size
+        self.set_size(size)
+        try:
+            yield
+        finally:
+            self.set_size(previous)
+
+
+class HyperA2(SlimmableA2):
     """Two HyperWaveNets, selectable as A2-Lite (3ch) or A2-Full (8ch).
 
     ``size`` is a playback selection, independent of the hypernetwork's
@@ -87,28 +111,6 @@ class HyperA2(_ParametricNet):
                     "HyperA2 submodel layout does not match its configuration"
                 )
         return dict(branches=branches, size=size, sample_rate=sample_rate)
-
-    @property
-    def sizes(self):
-        return tuple(_CHANNELS)
-
-    @property
-    def size(self):
-        return self._size
-
-    def set_size(self, size):
-        if size not in _CHANNELS:
-            raise ValueError(f"HyperA2 size must be 'lite' or 'full'; got {size!r}")
-        self._size = size
-
-    @_contextmanager
-    def using_size(self, size):
-        previous = self.size
-        self.set_size(size)
-        try:
-            yield
-        finally:
-            self.set_size(previous)
 
     def branch(self, size):
         if size not in _CHANNELS:
@@ -227,30 +229,34 @@ class HyperA2(_ParametricNet):
             branch = self.branch(size)
             branch.sample_rate = self.sample_rate
             baked.append(bake(branch, params))
-        packed = _PackedWaveNet.init_from_config(
-            {
-                "sample_rate": self.sample_rate,
-                "submodels": [
-                    {
-                        "name": f"channels_{_CHANNELS[size]}",
-                        "config": model._net.export_config(),
-                    }
-                    for size, model in zip(self.sizes, baked)
-                ],
-                "export": {"container_max_values": "uniform"},
-            }
-        )
-        if self.device is not None:
-            packed.to(self.device)
-        for index, model in enumerate(baked):
-            packed.import_submodel(index, model)
-        if output_scale is not None:
-            from ...data import Dataset
-            from ._export import _normalize_output_scale
+        return _pack_baked_sizes(self, baked, output_scale)
 
-            output_scale = _normalize_output_scale(output_scale)
-            packed.export_model_dict_post_hooks.append(
-                Dataset._ScaleOutputHook(scale=1.0 / output_scale)
-            )
-        packed.eval()
-        return packed
+
+def _pack_baked_sizes(model, baked, output_scale):
+    packed = _PackedWaveNet.init_from_config(
+        {
+            "sample_rate": model.sample_rate,
+            "submodels": [
+                {
+                    "name": f"channels_{_CHANNELS[size]}",
+                    "config": child._net.export_config(),
+                }
+                for size, child in zip(model.sizes, baked)
+            ],
+            "export": {"container_max_values": "uniform"},
+        }
+    )
+    if model.device is not None:
+        packed.to(model.device)
+    for index, child in enumerate(baked):
+        packed.import_submodel(index, child)
+    if output_scale is not None:
+        from ...data import Dataset
+        from ._export import _normalize_output_scale
+
+        output_scale = _normalize_output_scale(output_scale)
+        packed.export_model_dict_post_hooks.append(
+            Dataset._ScaleOutputHook(scale=1.0 / output_scale)
+        )
+    packed.eval()
+    return packed

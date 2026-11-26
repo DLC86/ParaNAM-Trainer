@@ -8,6 +8,8 @@ from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS
 
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
 
+FILM_PRESETS = {"FiLMA2 Neural": "neural", "FiLMA2 Linear": "linear"}
+
 DATASET_RATE_PRESETS = ("a2_dataset", "a2_dataset_sqrt")
 CONTROL_RATE_PRESETS = ("a2_updates", "a2_controls", "a2_slow")
 UPDATE_RATE_PRESETS = (*CONTROL_RATE_PRESETS, *DATASET_RATE_PRESETS)
@@ -33,10 +35,10 @@ def rate_cadence_multiplier(project, preset):
 
 
 def training_preset(name):
-    if name not in ("HyperA2", "HyperWaveNet"):
+    if name not in ("HyperA2", "HyperWaveNet", *FILM_PRESETS):
         raise ValueError(f"Unknown training preset: {name}")
     # Each recipe is explicit; frozen jobs keep their own effective options.
-    hyper_a2 = name == "HyperA2"
+    hyper_a2 = name != "HyperWaveNet"
     return dict(
         rate_preset="a2_updates" if hyper_a2 else "manual",
         cudnn_benchmark=False,
@@ -71,7 +73,7 @@ def training_preset(name):
 
 
 def preset_batch_size(name):
-    return 16 if name == "HyperA2" else 32
+    return 32 if name == "HyperWaveNet" else 16
 
 
 def a2_update_schedule(
