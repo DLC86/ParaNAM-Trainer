@@ -2,13 +2,15 @@
 """Jointly trained A2 widths with a shared control-to-affine conditioner."""
 
 from copy import deepcopy
+from itertools import groupby
 
 import torch
 from torch import nn
 from torch.func import functional_call
 
 from .._from_nam import convert_nam_wavenet_config
-from ..wavenet import WaveNet
+from ..wavenet import PackedWaveNet, WaveNet
+from ..wavenet._packed_conv import PackedConv1dBase
 from ..wavenet._wavenet import WaveNet as WaveNetCore
 from ._hyper_a2 import SlimmableA2, _CHANNELS, _KERNELS, _template_config
 from ._spec import ParamSpec
@@ -44,6 +46,29 @@ class FiLMA2(SlimmableA2):
             if conditioning == "neural" else nn.Sequential(readout)
         )
         self._uniform_batch_params = False
+        self._uniform_batch_params_checked = False
+
+        # Cache module/attribute lookup rather than Tensor views: .to(), state
+        # loading and deepcopy may replace Parameters.
+        base = dict(self._template.named_parameters())
+        self._parameter_plan = tuple(
+            (name, self._template.get_submodule(name.rsplit(".", 1)[0]),
+             name.rsplit(".", 1)[1])
+            for name in base
+        )
+        # Batch identically shaped layer weights. Consecutive kernel runs avoid
+        # building a device index tensor or issuing one multiply per layer.
+        plan = []
+        for suffix in ("_conv.weight", "_input_mixer.weight", "_conv.bias"):
+            keys = tuple(f"{prefix}.{suffix}" for prefix in self._layers)
+            start = 0
+            for _, group in groupby(keys, key=lambda key: tuple(base[key].shape)):
+                group = tuple(group)
+                stop = start + len(group)
+                plan.append((start, stop, group, suffix == "_conv.bias"))
+                start = stop
+        self._fold_plan = tuple(plan)
+        self._packed_execution_cache = None
 
     @staticmethod
     def _make_core(channels, head_scale):
@@ -70,33 +95,63 @@ class FiLMA2(SlimmableA2):
         return self._template.receptive_field
 
     def set_uniform_batch_params(self, uniform):
-        self._uniform_batch_params = uniform
+        self._uniform_batch_params = bool(uniform)
+        self._uniform_batch_params_checked = False
+
+    def _check_uniform_batch_params(self, encoded):
+        if not self._uniform_batch_params_checked:
+            if not torch.equal(encoded, encoded[:1].expand_as(encoded)):
+                raise RuntimeError("FiLMA2 uniform batch promise was violated")
+            self._uniform_batch_params_checked = True
+
+    @staticmethod
+    def _lite_prefix(value):
+        value = value[:_CHANNELS["lite"]]
+        return value[:, :_CHANNELS["lite"]] if value.ndim == 3 else value
+
+    def _full_parameters(self):
+        return {name: getattr(module, attr) for name, module, attr in self._parameter_plan}
 
     def _base_parameters(self, size):
-        channels = _CHANNELS[size]
-        result = {}
-        for name, value in self._template.named_parameters():
-            if size == "lite":
-                # Head outputs are mono, while all other outputs are channel prefixes.
-                value = value[:channels]
-                if value.ndim == 3:
-                    value = value[:, :channels]
-            result[name] = value
-        return result
+        weights = self._full_parameters()
+        if size == "lite":
+            return {name: self._lite_prefix(value) for name, value in weights.items()}
+        return weights
+
+    def _fold_full(self, coeff):
+        weights = self._full_parameters()
+        gamma, beta = 1.0 + coeff[..., 0], coeff[..., 1]
+        for start, stop, keys, bias in self._fold_plan:
+            stacked = torch.stack([weights[key] for key in keys])
+            g = gamma[start:stop]
+            folded = (stacked * g + beta[start:stop] if bias
+                      else stacked * g[..., None, None])
+            weights.update(zip(keys, folded.unbind(0)))
+        return weights
 
     def _fold(self, size, coeff):
-        channels = _CHANNELS[size]
-        weights = self._base_parameters(size)
-        for prefix, affine in zip(self._layers, coeff):
-            gamma = 1.0 + affine[:channels, 0]
-            beta = affine[:channels, 1]
-            for suffix in ("_conv.weight", "_input_mixer.weight", "_conv.bias"):
-                key = f"{prefix}.{suffix}"
-                weights[key] = (
-                    weights[key] * gamma[:, None, None] if weights[key].ndim == 3
-                    else weights[key] * gamma + beta
-                )
+        weights = self._fold_full(coeff)
+        if size == "lite":
+            return {name: self._lite_prefix(value) for name, value in weights.items()}
         return weights
+
+    def _prepare_packed(self, x):
+        cache = self._packed_execution_cache
+        if cache is None:
+            # Do not register a second set of trainable parameters or change RNG.
+            cache = (_PackedFiLMA2Execution(self),)
+            self._packed_execution_cache = cache
+        execution = cache[0]
+        execution.prepare(self, x)
+        return execution
+
+    @property
+    def supports_compiled_step(self):
+        return True
+
+    def _compilable_step(self, x, p):
+        # _prepare_packed is called outside the compiled region.
+        return self._packed_execution_cache[0](self, x, p)
 
     def _coefficients(self, encoded):
         return self._conditioner(encoded).reshape(len(_KERNELS), 8, 2)
@@ -105,9 +160,18 @@ class FiLMA2(SlimmableA2):
         if encoded.ndim == 2 and x.shape[0] != encoded.shape[0]:
             raise ValueError("FiLMA2 requires one setting per audio row")
         if encoded.ndim == 1 or self._uniform_batch_params:
-            coeff = self._coefficients(encoded if encoded.ndim == 1 else encoded[0])
+            if encoded.ndim == 2:
+                self._check_uniform_batch_params(encoded)
+                encoded = encoded[0]
+            full = self._fold_full(self._coefficients(encoded))
             return torch.stack([
-                functional_call(self._core(size), self._fold(size, coeff), (x[:, None],))[:, 0]
+                functional_call(
+                    self._core(size),
+                    full if size == "full" else {
+                        name: self._lite_prefix(value) for name, value in full.items()
+                    },
+                    (x[:, None],),
+                )[:, 0]
                 for size in sizes
             ], dim=1)
         unique, inverse = torch.unique(encoded, dim=0, return_inverse=True)
@@ -128,7 +192,16 @@ class FiLMA2(SlimmableA2):
     def forward_sizes(self, x, params, pad_start=False):
         if pad_start:
             x = nn.functional.pad(x, (self.receptive_field - 1, 0))
-        return self._evaluate(x, self._encode_params(params), self.sizes)
+        encoded = self._encode_params(params)
+        if encoded.ndim == 2 and x.shape[0] != encoded.shape[0]:
+            raise ValueError("FiLMA2 requires one setting per audio row")
+        if self._uniform_batch_params:
+            if encoded.ndim == 2:
+                self._check_uniform_batch_params(encoded)
+                encoded = encoded[0]
+            self._prepare_packed(x)
+            return self._run_step(x, encoded)
+        return self._evaluate(x, encoded, self.sizes)
 
     def _core(self, size):
         return self._template if size == "full" else self._lite[0]
@@ -245,3 +318,61 @@ class FiLMA2(SlimmableA2):
 
         return _pack_baked_sizes(self, [self.bake_size(size, params) for size in self.sizes],
                                  output_scale)
+
+
+class _PackedFiLMA2Execution:
+    """One packed A2 forward with differentiable shared Full/Lite weights."""
+
+    def __init__(self, model):
+        with torch.random.fork_rng(devices=[]):
+            self.shell = PackedWaveNet.init_from_config({
+                "submodels": [
+                    {"name": size, "config": model._core(size).export_config()}
+                    for size in model.sizes
+                ]
+            })
+        self.shell.requires_grad_(False)
+        base = model._full_parameters()
+        groups = {}
+        for name, module in self.shell.named_modules():
+            if not isinstance(module, PackedConv1dBase):
+                continue
+            for suffix in ("weight", "bias"):
+                if suffix == "bias" and module.bias is None:
+                    continue
+                key = name + "." + suffix
+                source = key.removeprefix("_net.")
+                value = base[source]
+                lite = model._lite_prefix(value)
+                group = (suffix, module.shared_input, tuple(value.shape), tuple(lite.shape))
+                groups.setdefault(group, []).append((key, source))
+        self.plan = tuple((suffix, shared, tuple(entries))
+                          for (suffix, shared, _, _), entries in groups.items())
+
+    def prepare(self, model, x):
+        parameter = next(self.shell.parameters())
+        if parameter.device != x.device or parameter.dtype != x.dtype:
+            self.shell.to(device=x.device, dtype=x.dtype)
+        if self.shell.training != model.training:
+            self.shell.train(model.training)
+        self.shell._net._head_scale = model._template._head_scale
+
+    def __call__(self, model, x, encoded):
+        full = model._fold_full(model._coefficients(encoded))
+        weights = {}
+        for suffix, shared, entries in self.plan:
+            # Stack across layers of the same shape, then pack in a handful of
+            # GPU operations rather than padding/concatenating every layer.
+            wide = torch.stack([full[source] for _, source in entries])
+            narrow = wide[:, :_CHANNELS["lite"]]
+            if suffix == "weight":
+                narrow = narrow[:, :, :_CHANNELS["lite"]]
+                if not shared:
+                    narrow, wide = (
+                        nn.functional.pad(narrow, (0, 0, 0, wide.shape[2])),
+                        nn.functional.pad(wide, (0, 0, narrow.shape[2], 0)),
+                    )
+            packed = torch.cat((narrow, wide), dim=1)
+            weights.update(zip((key for key, _ in entries), packed.unbind(0)))
+        return functional_call(self.shell, weights, (x,),
+                               dict(pad_start=False), strict=False)
