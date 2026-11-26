@@ -1,19 +1,5 @@
 name: ParaNAM 0.8.5 draft release
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/release-v085-draft.yml
-      - paranam/model_editor_core.py
-      - paranam/model_editor_ui.py
-      - paranam/compare_layout.py
-      - paranam/widgets.py
-      - paranam/training.py
-      - tests/paranam/test_model_editor.py
-      - tests/paranam/test_model_editor_ui.py
-      - tests/run_pytest_isolated.py
-      - tests/paranam/conftest.py
-      - tests/paranam/test_training.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,6 +17,11 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os
+          from runpy import run_path
+
+          version = run_path('paranam/__init__.py')['__version__']
+          if version != '0.8.5':
+              raise SystemExit(f'This workflow requires a 0.8.5 source ref, found {version}.')
           targets = json.load(open('packaging/targets.json'))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('matrix=' + json.dumps(targets) + '\n')
@@ -114,7 +105,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.8.5
-          target_commitish: main
+          target_commitish: ${{ github.sha }}
           name: ParaNAM Trainer 0.8.5
           draft: true
           prerelease: false
