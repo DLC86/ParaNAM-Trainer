@@ -3,7 +3,7 @@
 import math
 from pathlib import Path
 
-from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS
+from nam.models.losses import DEFAULT_RMS_LEVEL_WEIGHT, DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS
 
 
 PRESET_SOURCE = "https://github.com/phillipmself/neural-amp-modeler-parametric/tree/a3684411076be69dab53505df14922487697f2cf"
@@ -65,6 +65,8 @@ def training_preset(name):
         dual_pre_emphasis=0.85,
         dual_raw_weight=1.0,
         dual_floor_db=30.0,
+        rms_level_weight=DEFAULT_RMS_LEVEL_WEIGHT,
+        rms_level_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
         segment_esr_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
         snr_weighted_loss_normalization=False,
         mrstft_weight=0.0005,
