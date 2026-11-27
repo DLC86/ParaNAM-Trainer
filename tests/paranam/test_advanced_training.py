@@ -50,10 +50,14 @@ def test_defaults_match_reference_recipes(workspace, kind, lr):
         assert "gradient_clip_val" not in spec["learning"]["trainer"]
         assert workspace.training_options("static")["rms_loss_normalization"] is False
         assert spec["preferences"]["advanced_training"]["rms_loss_normalization"] is False
+        assert spec["data"]["joint"] == [{
+            "name": "nam.data.normalize_joint_dataset_output",
+            "kwargs": {"level_rms_dbfs": -18.0},
+        }]
     else:
+        assert not spec["data"].get("joint")
         assert spec["learning"]["trainer"]["gradient_clip_val"] == 1.0
         assert spec["model"]["hypernet_lr_scale"] == 0.1
-    assert not spec["data"].get("joint")  # User explicitly excludes RMS normalization.
     if kind == "parametric":
         assert spec["learning"]["rms_loss_normalization"] is True
         assert spec["learning"]["snr_weighted_loss_normalization"] is False
