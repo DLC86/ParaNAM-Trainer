@@ -1,0 +1,81 @@
+name: Update 0.8.6 draft release notes
+
+on:
+  push:
+    branches: [maintenance/refresh-086-filma2-assets]
+    paths: [.github/workflows/sync-086-capture-release-notes.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  update-notes:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: '5508c0f15941ac854ed2e75ff77076fc6d8ec20c'
+    steps:
+      - name: Update the existing draft body and verify its assets
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          url = f'repos/{os.environ["GH_REPO"]}/releases/458530091'
+          target = os.environ["BUILD_SHA"]
+
+          def get_release():
+              return json.loads(subprocess.check_output(["gh", "api", url], text=True))
+
+          def assets(release):
+              return sorted((a["id"], a["name"], a["digest"]) for a in release["assets"])
+
+          def check_draft(release):
+              assert release["draft"] and release["name"] == "ParaNAM Trainer 0.8.6"
+              assert release["target_commitish"] == target
+              assert len(release["assets"]) == 5
+
+          release = get_release()
+          check_draft(release)
+          body = release["body"]
+
+          def insert_before(heading, additions):
+              global body
+              if additions in body:
+                  return
+              assert body.count(heading) == 1
+              body = body.replace(heading, additions + "\n\n" + heading, 1)
+
+          insert_before("### Training losses and recipes", (
+              "- Optimized training for both FiLMA2 presets by packing Full and Lite "
+              "in a single forward pass and vectorizing the shared FiLM weight folding."
+          ))
+          insert_before("### Recording integrity", (
+              "- Recording a new static Train take also records a fresh Validation take. "
+              "If the second pass is interrupted, the previous Validation is left out of training."
+          ))
+          insert_before("### Packaging and verification", "\n".join([
+              "- Parametric training flags captures made with different audio devices, drivers, "
+              "or channels. Buffer and latency settings can vary because delay is measured per take.",
+              "- Reject clipping on the clean loopback and flag clipped parametric returns "
+              "before training.",
+              "- Check loopback timing throughout parametric recordings on Core Audio and other "
+              "paths without ASIO program timing verification, catching shifts between the timing marks.",
+              "- Store the actual digital Send and loopback playback for each recorded take. "
+              "Replacing an input WAV with one of the same length keeps earlier recording references intact.",
+          ]))
+          old = "v0.8.5...73a900bbe7ffea4e4f7ab635b5a2d1fa76000c28"
+          new = f"v0.8.5...{target}"
+          assert old in body or new in body
+          body = body.replace(old, new)
+          if body != release["body"]:
+              subprocess.run(
+                  ["gh", "api", "--method", "PATCH", url, "--raw-field", "body=" + body],
+                  stdout=subprocess.DEVNULL, check=True,
+              )
+          updated = get_release()
+          check_draft(updated)
+          assert updated["body"] == body
+          assert assets(updated) == assets(release)
+          print("Verified the draft notes, build target, and all five original assets.")
+          PY
