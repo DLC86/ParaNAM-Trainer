@@ -1475,6 +1475,7 @@ class WizardWindow(
         rank = QSpinBox()
         rank.setRange(1, 8)
         rank.setValue(2)
+        rank.setMinimumWidth(100)
         rank.setToolTip(
             "Rank of generated matrix deltas, from 1 to 8. Effective rank is also limited by each matrix's dimensions."
         )
