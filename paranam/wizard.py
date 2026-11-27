@@ -3928,17 +3928,17 @@ class WizardWindow(
 
             def capture_signals(progress, cancel):
                 if static:
-                    # Persist the invalidation before Train can succeed on its own.
-                    for capture in captures:
-                        if capture.split == "validation":
-                            capture.status = "pending"
-                            capture.delay = None
-                            capture.captured_at = None
-                            capture.qa = None
-                            capture.stream_config = None
-                            capture.validation_from_tail = False
-                    save_project(session.project, session.project_dir)
-                    update_data_json(session.project, session.project_dir)
+                    validation = next(e for e in captures if e.split == "validation")
+                    if validation.status == "captured":
+                        # Persist the invalidation before Train can succeed on its own.
+                        validation.status = "pending"
+                        validation.delay = None
+                        validation.captured_at = None
+                        validation.qa = None
+                        validation.stream_config = None
+                        validation.validation_from_tail = False
+                        save_project(session.project, session.project_dir)
+                        update_data_json(session.project, session.project_dir)
                 results = []
                 for offset, capture in enumerate(captures):
                     self.capture_stage.emit(
