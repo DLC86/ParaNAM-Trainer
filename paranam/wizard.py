@@ -67,7 +67,9 @@ from nam.capture.params import (
     capture_grid_limits, capture_count_maxima,
 )
 from nam.capture.planner import corner_capture_count, rule_capture_limits
-from nam.capture.project import AudioSettingsModel, CaptureProject, atomic_write_json
+from nam.capture.project import (
+    AudioSettingsModel, CaptureProject, atomic_write_json, save_project,
+)
 from nam.capture.session import CaptureSession, timebase_problem
 from .workspace import Workspace, control_from_dict, read_json
 from .value_format import format_knob_value
@@ -3902,10 +3904,7 @@ class WizardWindow(
                 if static
                 else [entry]
             )
-            captures = (
-                group if static and any(e.validation_from_tail for e in group)
-                else [e for e in group if e.status != "captured"] or group
-            )
+            captures = sorted(group, key=lambda e: e.split != "train") if static else group
             if any(e.status == "captured" for e in captures):
                 backup = (
                     self.workspace.directory
@@ -3928,6 +3927,18 @@ class WizardWindow(
             self._recorded_capture_path = entry.y_path
 
             def capture_signals(progress, cancel):
+                if static:
+                    # Persist the invalidation before Train can succeed on its own.
+                    for capture in captures:
+                        if capture.split == "validation":
+                            capture.status = "pending"
+                            capture.delay = None
+                            capture.captured_at = None
+                            capture.qa = None
+                            capture.stream_config = None
+                            capture.validation_from_tail = False
+                    save_project(session.project, session.project_dir)
+                    update_data_json(session.project, session.project_dir)
                 results = []
                 for offset, capture in enumerate(captures):
                     self.capture_stage.emit(
@@ -3972,8 +3983,6 @@ class WizardWindow(
             )
             if last is not None and last.split == "gain":
                 from nam.capture.output_gain import advance_calibration
-                from nam.capture.project import save_project
-
                 try:
                     advance_calibration(
                         self.workspace.project, self.workspace.directory

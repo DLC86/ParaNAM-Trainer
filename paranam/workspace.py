@@ -686,10 +686,15 @@ class Workspace:
         def key(entry, context):
             return (tuple(context), entry.split, entry.capture_id, tuple(sorted(entry.params.items())))
 
+        static = replacement.capture_type == "static"
+        active_paths = {entry.y_path for entry in previous.captured_entries()}
+        reused_static_train = set()
         available = {}
         for path, record in pool.items():
             if record["context"] is not None and (self.directory / path).is_file():
                 entry = CaptureEntryModel.model_validate(record["entry"])
+                if static and entry.split == "validation" and path not in active_paths:
+                    continue
                 if entry.validation_from_tail and not validation_matches:
                     continue
                 signature = key(entry, record["context"])
@@ -711,6 +716,12 @@ class Workspace:
                 continue
             context = self._recording_context(replacement, entry.split, validation_matches=True)
             recorded = available.pop(key(entry, context), None)
+            if static:
+                if entry.split == "train" and recorded is not None and recorded.y_path in active_paths:
+                    reused_static_train.add(entry.capture_id)
+                elif entry.split == "validation" and entry.capture_id not in reused_static_train:
+                    # A different Train take needs a new, paired validation.
+                    recorded = None
             if recorded is not None:
                 if entry.split == "train" and entry.is_corner is None:
                     entry.is_corner = False

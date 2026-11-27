@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json as _json
 import math as _math
+import hashlib as _hashlib
 import os as _os
 import tempfile as _tempfile
 import time as _time
@@ -598,20 +599,6 @@ def build_playback(
     return playback, preamble
 
 
-def _wav_frame_count(path: _Path) -> _Optional[int]:
-    """
-    Frames in a WAV from its header, without decoding it, or ``None`` if it cannot be
-    read at all.
-    """
-    import wave
-
-    try:
-        with wave.open(str(path)) as fp:
-            return fp.getnframes()
-    except (OSError, wave.Error):
-        return None
-
-
 def playback_input_path(
     project_dir: _Path, x_path: str, level_dbfs: float = 0.0
 ) -> _Path:
@@ -626,7 +613,7 @@ def playback_input_path(
     return (
         _Path(project_dir)
         / _CAPTURES_RAW_DIRNAME
-        / f"{stem}{_PLAYBACK_INPUT_SUFFIX}-timing-v2.wav"
+        / f"{stem}{_PLAYBACK_INPUT_SUFFIX}-timing-v3.wav"
     )
 
 
@@ -802,32 +789,19 @@ class CaptureSession:
 
     def _write_playback_inputs(self, sample_rate: int) -> None:
         """
-        Save each input WAV as it will actually be played -- preamble, input, tail -- into
-        ``captures_raw/``.
-
-        This is the reference a raw recording is recovered against: correlating a return
-        against the exact stream that produced it gives the delay whether or not the
-        blips survived the chain, which is what a capture reamped in a DAW (or an input
-        file with no blips in it) will need. Written here rather than when the inputs are
-        chosen because this is the one place that has both the audio and the validated
-        sample rate, and it runs before any route test or capture; inputs dropped into
-        the project folder by hand are covered for free.
-
-        Rewritten only when what is on disk is not the right length, so replacing an
-        input WAV regenerates it and an unchanged project does no work.
+        Export preview WAVs for reamping outside the app. Capture manifest entries
+        refer to immutable snapshots of the arrays passed to the recorder.
         """
         for split in ("train", "validation"):
             x_path = self.project.input_for_split(split)
             playback, _ = build_playback(self._inputs[split], sample_rate)
             path = playback_input_path(self.project_dir, x_path)
-            if _wav_frame_count(path) != len(playback):
-                self._write_wav(path, playback, sample_rate)
+            self._write_wav(path, playback, sample_rate)
             if self.project.capture_level_dbfs:
-                path = playback_input_path(
+                send_path = playback_input_path(
                     self.project_dir, x_path, self.project.capture_level_dbfs
                 )
-                if _wav_frame_count(path) != len(playback):
-                    self._write_wav(path, playback * self._send_gain(), sample_rate)
+                self._write_wav(send_path, playback * self._send_gain(), sample_rate)
 
     def _input_for_split(self, split: str) -> tuple[_np.ndarray, int]:
         split = "validation" if split == "gain" else split
@@ -1273,8 +1247,9 @@ class CaptureSession:
             else None
         )
 
+        main_playback = playback * self._send_gain()
         main, loopback = self._playrec(
-            playback * self._send_gain(),
+            main_playback,
             sample_rate,
             progress,
             cancel,
@@ -1352,8 +1327,8 @@ class CaptureSession:
                 sample_rate,
                 preamble_samples=preamble.n_samples,
                 input_samples=len(played_input),
-                playback_override=playback * self._send_gain() if volume_reference else None,
-                loopback_playback_override=loopback_playback if volume_reference else None,
+                main_playback=main_playback,
+                loopback_playback=loopback_playback,
             )
             target = (self.project_dir / entry.y_path).resolve()
             root = self.project_dir.resolve()
@@ -1393,8 +1368,8 @@ class CaptureSession:
             sample_rate,
             preamble_samples=preamble.n_samples,
             input_samples=len(played_input),
-            playback_override=playback * self._send_gain() if volume_reference else None,
-            loopback_playback_override=loopback_playback if volume_reference else None,
+            main_playback=main_playback,
+            loopback_playback=loopback_playback,
         )
         if repeat_y is not None:
             if not _np.isfinite(repeat_y).all():
@@ -1775,8 +1750,8 @@ class CaptureSession:
         *,
         preamble_samples: int,
         input_samples: int,
-        playback_override: _Optional[_np.ndarray] = None,
-        loopback_playback_override: _Optional[_np.ndarray] = None,
+        main_playback: _np.ndarray,
+        loopback_playback: _Optional[_np.ndarray],
     ) -> None:
         """
         Save the recordings as they came off the interface: the whole stream, blips and
@@ -1797,29 +1772,10 @@ class CaptureSession:
             self._write_wav(loopback_path, loopback, sample_rate)
 
         x_path = self.project.input_for_split(entry.split)
-        playback_name = playback_input_path(
-            self.project_dir, x_path,
-            0.0 if loopback is not None else self.project.capture_level_dbfs,
-        ).name
-        main_playback_name = playback_input_path(
-            self.project_dir, x_path, self.project.capture_level_dbfs,
-        ).name
-        if playback_override is not None:
-            # Standard input playbacks contain only one pass. Preserve the
-            # actual double-length stream for raw timing audit/recovery.
-            stem = _Path(entry.y_path).stem
-            main_playback_name = stem + "-repeat-playback-main.wav"
-            self._write_wav(
-                self.project_dir / _CAPTURES_RAW_DIRNAME / main_playback_name,
-                playback_override, sample_rate,
-            )
-            playback_name = main_playback_name
-            if loopback_playback_override is not None:
-                playback_name = stem + "-repeat-playback-loopback.wav"
-                self._write_wav(
-                    self.project_dir / _CAPTURES_RAW_DIRNAME / playback_name,
-                    loopback_playback_override, sample_rate,
-                )
+        main_playback_name = self._archive_playback(main_playback, sample_rate)
+        playback_name = main_playback_name
+        if loopback is not None and loopback_playback is not None:
+            playback_name = self._archive_playback(loopback_playback, sample_rate)
         update_raw_manifest(
             self.project_dir,
             {
@@ -1837,6 +1793,17 @@ class CaptureSession:
             },
             note=_predates_raw_recording_note(self.project),
         )
+
+    def _archive_playback(self, playback: _np.ndarray, sample_rate: int) -> str:
+        # Many takes send the same samples. Share their WAV by content while
+        # keeping older manifest references valid if the input is replaced.
+        samples = _np.ascontiguousarray(playback, dtype="<f4")
+        digest = _hashlib.sha256(samples).hexdigest()
+        filename = f"played-{sample_rate}-{digest}.wav"
+        path = self.project_dir / _CAPTURES_RAW_DIRNAME / filename
+        if not path.is_file():
+            self._write_wav(path, samples, sample_rate)
+        return filename
 
     def _write_capture_wav(
         self, entry: _CaptureEntryModel, y: _np.ndarray, sample_rate: int

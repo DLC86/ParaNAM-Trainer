@@ -282,3 +282,32 @@ def test_real_static_batch_pause_resume_and_metadata(
     assert (
         read_json(Path(progress["exports"][0]))["metadata"]["gear_model"] == "Test amp"
     )
+
+
+def test_static_plan_keeps_validation_only_with_the_active_train_take(workspace):
+    ws = static_workspace(workspace)
+    train, validation = ws.static_groups()[0]
+    for entry in (train, validation):
+        path = ws.directory / entry.y_path
+        path.parent.mkdir(exist_ok=True)
+        np_to_wav(np.zeros(64, dtype=np.float32), path, rate=48000)
+        entry.status = "captured"
+        entry.delay = 0
+
+    ws.generate_plan()
+    assert [entry.status for entry in ws.static_groups()[0]] == ["captured", "captured"]
+
+    previous_mode = ws.preferences["input_mode"]
+    custom = ws.directory / "another-input.wav"
+    np_to_wav(np.zeros(48000, dtype=np.float32), custom, rate=48000)
+    ws.preferences.update(input_mode="custom", custom_input=custom.name)
+    ws.generate_plan()
+    assert [entry.status for entry in ws.static_groups()[0]] == ["pending", "pending"]
+    assert validation.y_path in ws.project.unused_recordings
+
+    # Switching back can recover Train, but cannot select a validation from the pool.
+    ws.preferences["input_mode"] = previous_mode
+    ws.generate_plan()
+    current_train, current_validation = ws.static_groups()[0]
+    assert current_train.y_path == train.y_path and current_train.status == "captured"
+    assert current_validation.status == "pending"

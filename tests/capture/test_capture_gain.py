@@ -40,3 +40,32 @@ def test_capture_applies_calibrated_send_gain_and_preserves_training_reference(
     ).squeeze()
     np.testing.assert_allclose(reference, clock_reference * 10 ** (-12 / 20), atol=2e-7)
     assert entry.status == "captured"
+
+
+def test_equal_length_input_replacement_preserves_each_capture_send(tmp_path):
+    from nam.capture.session import build_playback
+    from nam.data import np_to_wav
+
+    root = _make_project_dir(tmp_path)
+    project = load_project(root)
+    project.capture_level_dbfs = -9.0
+    _enable_loopback(project)
+    train = project.entries_for_split("train")
+    input_path = root / project.input_for_split("train")
+    recorder = _FakeRecorder(480, gain=0.5, noise=0.0)
+
+    expected = []
+    for entry, scale in zip(train, (1.0, 0.5)):
+        if scale != 1.0:
+            np_to_wav(wav_to_np(input_path) * scale, input_path)
+        playback, _ = build_playback(wav_to_np(input_path).astype(np.float32), 48000)
+        expected.append((playback, playback * 10 ** (-9 / 20)))
+        CaptureSession(project, root, recorder=recorder).capture_entry(entry)
+
+    records = json.loads((root / "captures_raw/manifest.json").read_text())["captures"]
+    assert len({record["main_playback"] for record in records}) == 2
+    assert len({record["playback"] for record in records}) == 2
+    for record, (loopback, send) in zip(records, expected):
+        for key, samples in (("playback", loopback), ("main_playback", send)):
+            archived = wav_to_np(root / "captures_raw" / record[key])
+            np.testing.assert_allclose(archived, samples, atol=2e-7)
