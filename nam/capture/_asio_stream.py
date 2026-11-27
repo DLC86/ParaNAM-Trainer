@@ -312,7 +312,10 @@ class AsioRecorder:
             n = min(frames, len(job.main) - start)
             stop = start + n
             outgoing[:n, self.settings["output_channel"] - 1] = job.main[start:stop]
-            if self.settings["monitor_return_enabled"]:
+            monitoring = self.settings["monitor_return_enabled"]
+            if callable(monitoring):
+                monitoring = monitoring()
+            if monitoring:
                 returned = incoming[:n, self.settings["input_channel"] - 1]
                 for channel in (
                     self.settings["monitor_output_left"],

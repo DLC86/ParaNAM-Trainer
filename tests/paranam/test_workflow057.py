@@ -544,3 +544,28 @@ def test_pause_queue_prevents_successors_and_resumes_current_first(
     assert [
         entry["id"] for entry in restarted.store.entries() if entry["state"] == "queued"
     ] == [e["id"] for e in entries]
+
+
+def test_capture_options_update_the_reserved_session_without_navigation(window, workspace):
+    from nam.capture.project import load_project
+
+    window._attach(workspace)
+    session = window._get_session()
+    assert window.monitor_return.isChecked()
+    assert not window.verify_asio_timing.isChecked()
+
+    window.verify_asio_timing.setChecked(True)
+    assert session.project.audio.verify_asio_timing
+    assert load_project(workspace.directory).audio.verify_asio_timing
+
+    window.worker = object()
+    try:
+        window.verify_asio_timing.setChecked(False)
+        assert window.verify_asio_timing.isChecked()
+        assert session.project.audio.verify_asio_timing
+
+        window.monitor_return.setChecked(False)
+        assert not session.project.audio.monitor_return_enabled
+        assert load_project(workspace.directory).audio.monitor_return_enabled
+    finally:
+        window.worker = None

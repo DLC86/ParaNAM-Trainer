@@ -728,6 +728,26 @@ class CaptureSession:
         if close is not None:
             close()
 
+    def _monitor_return_enabled(self):
+        return self.project.audio.monitor_return_enabled
+
+    def _monitor_settings(self):
+        audio = self.project.audio
+        reserved = {None, audio.output_channel}
+        if audio.loopback_enabled:
+            reserved.add(audio.loopback_output_channel)
+        left = audio.monitor_output_left
+        right = audio.monitor_output_right
+        left = None if left in reserved else left
+        right = None if right in reserved or right == left else right
+        return dict(
+            # Resolve the route once, but read the switch on every audio block.
+            # With no free monitor output, the ON preference is harmless.
+            monitor_return_enabled=self._monitor_return_enabled if left or right else False,
+            monitor_output_left=left,
+            monitor_output_right=right,
+        )
+
     def reserve_audio(self, on_error):
         """Keep the capture recorder open and silent between takes."""
         audio = self.project.audio
@@ -743,9 +763,7 @@ class CaptureSession:
             loopback_output_channel=(
                 audio.loopback_output_channel if audio.loopback_enabled else None
             ),
-            monitor_return_enabled=audio.monitor_return_enabled,
-            monitor_output_left=audio.monitor_output_left,
-            monitor_output_right=audio.monitor_output_right,
+            **self._monitor_settings(),
             blocksize=audio.blocksize,
             latency=audio.latency,
             **self._resolve_devices(),
@@ -865,9 +883,7 @@ class CaptureSession:
             ),
             loopback_playback=loopback_playback if use_loopback else None,
             verify_asio_timing=audio.verify_asio_timing,
-            monitor_return_enabled=audio.monitor_return_enabled,
-            monitor_output_left=audio.monitor_output_left,
-            monitor_output_right=audio.monitor_output_right,
+            **self._monitor_settings(),
             blocksize=audio.blocksize,
             latency=audio.latency,
             host_api=audio.host_api,

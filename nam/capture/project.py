@@ -271,9 +271,9 @@ class AudioSettingsModel(_BaseModel):
     instrument_input_channel: _Optional[int] = None
     monitor_output_left: _Optional[int] = None
     monitor_output_right: _Optional[int] = None
-    monitor_return_enabled: bool = False
+    monitor_return_enabled: bool = True
     verify_asio_timing: bool = _Field(
-        default=True,
+        default=False,
         validation_alias=_AliasChoices("verify_asio_timing", "prewarm_enabled"),
     )
     # Optional second I/O pair (on the same devices) wired as a direct loopback: a copy

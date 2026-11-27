@@ -121,3 +121,33 @@ def test_coreaudio_monitor_rejects_invalid_channels(
             monitor_output_left=left, monitor_output_right=right,
         )
     assert _MockStream.outputs == []
+
+
+def test_coreaudio_can_toggle_return_monitor_between_audio_blocks(mock_coreaudio):
+    enabled = False
+    observed = []
+
+    class TwoBlockStream(_MockStream):
+        def __enter__(self):
+            nonlocal enabled
+            incoming = np.full((32, 4), 0.4, dtype=np.float32)
+            for enabled in (False, True):
+                outgoing = np.zeros((32, 6), dtype=np.float32)
+                try:
+                    self.callback(incoming, outgoing, 32, None, _Flags())
+                except _Finished:
+                    self.active = False
+                observed.append(outgoing)
+            return self
+
+    mock_coreaudio.Stream = TwoBlockStream
+    played = np.full(64, 0.2, dtype=np.float32)
+    recorded, _ = SounddeviceRecorder().playrec(
+        played, 48000, host_api="Core Audio", input_device=1, output_device=1,
+        monitor_return_enabled=lambda: enabled, monitor_output_left=3,
+    )
+
+    np.testing.assert_array_equal(np.concatenate(observed)[:, 0], played)
+    np.testing.assert_allclose(observed[0][:, 2], 0)
+    np.testing.assert_allclose(observed[1][:, 2], 0.4)
+    np.testing.assert_allclose(recorded, 0.4)

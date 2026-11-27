@@ -463,7 +463,7 @@ class PlaybackRecorder(_Protocol):
         loopback_input_channel: _Optional[int] = None,
         loopback_playback: _Optional[_np.ndarray] = None,
         verify_asio_timing: bool = True,
-        monitor_return_enabled: bool = False,
+        monitor_return_enabled: bool | _Callable[[], bool] = False,
         monitor_output_left: _Optional[int] = None,
         monitor_output_right: _Optional[int] = None,
         blocksize: int = 0,
@@ -579,7 +579,7 @@ class SounddeviceRecorder:
         loopback_input_channel: _Optional[int] = None,
         loopback_playback: _Optional[_np.ndarray] = None,
         verify_asio_timing: bool = True,
-        monitor_return_enabled: bool = False,
+        monitor_return_enabled: bool | _Callable[[], bool] = False,
         monitor_output_left: _Optional[int] = None,
         monitor_output_right: _Optional[int] = None,
         blocksize: int = 0,
@@ -733,7 +733,11 @@ class SounddeviceRecorder:
             count = min(frames, len(playback) - position)
             end = position + count
             outgoing[:count] = playback_frame[position:end]
-            if monitor_return_enabled:
+            monitoring = (
+                monitor_return_enabled() if callable(monitor_return_enabled)
+                else monitor_return_enabled
+            )
+            if monitoring:
                 # CoreAudio/non-ASIO uses this callback, not AsioRecorder.
                 # Monitor the live Return directly on the chosen physical
                 # outputs, never on Send or the clean loopback.

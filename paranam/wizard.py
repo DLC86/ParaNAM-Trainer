@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QProcess,
     QProcessEnvironment,
     QSettings,
+    QSignalBlocker,
     QTimer,
     QStandardPaths,
     QUrl,
@@ -190,6 +191,7 @@ class WizardWindow(
         self.session = None
         self.worker = None
         self._pending_capture_metadata = None
+        self._capture_monitor_dirty = False
         self.cancel_token = None
         self.process = None
         self.job = None
@@ -1049,13 +1051,19 @@ class WizardWindow(
         self.verify_asio_timing = QCheckBox(
             "Check timing stability before each capture"
         )
-        self.verify_asio_timing.setChecked(True)
+        defaults = AudioSettingsModel()
+        self.monitor_return.setChecked(defaults.monitor_return_enabled)
+        self.verify_asio_timing.setChecked(defaults.verify_asio_timing)
         self.verify_asio_timing.setToolTip(
             "Check ASIO loopback timing stability before each capture. Turn off to "
             "skip the additional probes; captured timing markers are still used for alignment."
         )
-        self.monitor_return.toggled.connect(lambda *_: self.save_audio())
-        self.verify_asio_timing.toggled.connect(lambda *_: self.save_audio())
+        self.monitor_return.toggled.connect(
+            lambda checked: self._save_capture_audio_option("monitor_return_enabled", checked)
+        )
+        self.verify_asio_timing.toggled.connect(
+            lambda checked: self._save_capture_audio_option("verify_asio_timing", checked)
+        )
         options.addWidget(self.monitor_return)
         options.addWidget(self.verify_asio_timing)
         layout.addLayout(options)
@@ -2066,8 +2074,9 @@ class WizardWindow(
             '</span>  ·  Automatically saved'
         )
         audio = workspace.project.audio
-        self.monitor_return.setChecked(audio.monitor_return_enabled)
-        self.verify_asio_timing.setChecked(audio.verify_asio_timing)
+        with QSignalBlocker(self.monitor_return), QSignalBlocker(self.verify_asio_timing):
+            self.monitor_return.setChecked(audio.monitor_return_enabled)
+            self.verify_asio_timing.setChecked(audio.verify_asio_timing)
         if register_recent:
             paths = self.settings.value("recent", [])
             if isinstance(paths, str):
@@ -2340,6 +2349,22 @@ class WizardWindow(
         self.loop_input.setEnabled(self.loop_enabled.isChecked())
         self.loop_output.setEnabled(self.loop_enabled.isChecked())
 
+    def _save_capture_audio_option(self, name, checked):
+        if self._loading or self.workspace is None:
+            return
+        if name == "verify_asio_timing" and self.worker is not None:
+            with QSignalBlocker(self.verify_asio_timing):
+                self.verify_asio_timing.setChecked(self.workspace.project.audio.verify_asio_timing)
+            return
+        setattr(self.workspace.project.audio, name, checked)
+        if self.session is not None:
+            setattr(self.session.project.audio, name, checked)
+        if self.worker is None:
+            save_project(self.workspace.project, self.workspace.directory)
+            self.remember_setup()
+        else:
+            self._capture_monitor_dirty = True
+
     def save_audio(self, *_):
         if self._loading or self.busy():
             return
@@ -2557,6 +2582,7 @@ class WizardWindow(
             )
         )
         self.worker.finished.connect(self._audio_finished)
+        self.verify_asio_timing.setEnabled(False)
         self.worker.start()
         self.update_enabled()
 
@@ -2566,6 +2592,12 @@ class WizardWindow(
         self.worker.deleteLater()
         self.worker = None
         self.cancel_token = None
+        self.verify_asio_timing.setEnabled(True)
+        if self._capture_monitor_dirty:
+            self._capture_monitor_dirty = False
+            if self.workspace is not None:
+                save_project(self.workspace.project, self.workspace.directory)
+                self.remember_setup()
         if self._pending_capture_metadata is not None:
             metadata = self._pending_capture_metadata
             self._pending_capture_metadata = None
