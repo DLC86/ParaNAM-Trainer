@@ -47,10 +47,10 @@ def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_pa
     workspace = Workspace.create(tmp_path / "New rig", "New rig")
     expected = dict(
         requested_settings(),
-        waveform_loss="segment_esr",
-        hypernetwork_learning_rate=0.004,
-        hypernetwork_lr_decay=0.994,
-        segment_esr_min_rms_dbfs=-60.0,
+        waveform_loss="dual_file_esr",
+        dual_pre_emphasis=0.0,
+        dual_floor_db=40.0,
+        weight_decay=0.0,
     )
     assert Workspace(workspace.directory).training_options() == expected
     assert workspace.preferences["epochs"] == 100
@@ -60,12 +60,18 @@ def test_new_projects_use_requested_preset_and_old_projects_keep_settings(tmp_pa
     ready(workspace)
     spec = read_json(training.make_job(workspace) / "spec.json")
     model = spec["model"]
-    assert model["optimizer"]["lr"] * model["hypernet_lr_scale"] == 0.004
-    assert model["lr_scheduler"]["kwargs"]["hypernetwork"] == {
-        "interval": "step", "step_size": 62, "gamma": 0.994,
+    assert model["optimizer"]["lr"] == 0.004
+    assert model["optimizer"]["weight_decay"] == 0.0
+    assert model["optimizer"]["lr"] * model["hypernet_lr_scale"] == 0.001
+    assert model["lr_scheduler"]["kwargs"] == {
+        "audio": {"interval": "step", "step_size": 62, "gamma": 0.994},
+        "hypernetwork": {"interval": "step", "step_size": 62, "gamma": 0.998496613},
     }
-    assert spec["learning"]["waveform_loss"] == "segment_esr"
-    assert spec["learning"]["segment_esr_min_rms_dbfs"] == -60.0
+    learning = spec["learning"]
+    assert learning["waveform_loss"] == "dual_file_esr"
+    assert learning["dual_pre_emphasis"] == 0.0
+    assert learning["dual_raw_weight"] == 1.0
+    assert learning["dual_floor_db"] == 40.0
 
     legacy = training_preset("HyperWaveNet")
     workspace.preferences["advanced_parametric"] = {

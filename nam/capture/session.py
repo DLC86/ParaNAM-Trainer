@@ -843,22 +843,6 @@ class CaptureSession:
             )
         return resolved
 
-    @staticmethod
-    def _loopback_playback(playback: _np.ndarray) -> _np.ndarray:
-        """
-        The signal for the loopback output channel: the same playback the amp gets,
-        blips and all.
-
-        It used to be the blips alone, on the grounds that the loopback only had to
-        carry timing. Sending the program material too costs the measurement nothing --
-        detection and the sub-sample peak both look only inside the blip section, which
-        is silent either way (see :mod:`nam.capture.latency`) -- and it makes the
-        recorded loopback a clean, delay-bearing copy of the input as the rig actually
-        played it, which is what makes a session recoverable from ``captures_raw/``
-        rather than only re-recordable.
-        """
-        return _np.asarray(playback, dtype=_np.float32)
-
     def _playrec(
         self,
         playback: _np.ndarray,
@@ -1184,13 +1168,10 @@ class CaptureSession:
         playback, preamble = build_playback(
             _np.zeros(0, dtype=_np.float32), sample_rate
         )
-        loopback_playback = (
-            self._loopback_playback(playback)
-            if self.project.audio.loopback_enabled
-            else None
-        )
+        send = playback * self._send_gain()
+        loopback_playback = send if self.project.audio.loopback_enabled else None
         main, loopback = self._playrec(
-            playback * self._send_gain(),
+            send,
             sample_rate,
             progress,
             cancel,
@@ -1256,13 +1237,8 @@ class CaptureSession:
             if volume_reference else x
         )
         playback, preamble = build_playback(played_input, sample_rate)
-        loopback_playback = (
-            self._loopback_playback(playback)
-            if self.project.audio.loopback_enabled
-            else None
-        )
-
         main_playback = playback * self._send_gain()
+        loopback_playback = main_playback if self.project.audio.loopback_enabled else None
         main, loopback = self._playrec(
             main_playback,
             sample_rate,
@@ -1297,7 +1273,7 @@ class CaptureSession:
 
         ending_offset = preamble.n_samples + len(played_input)
         ending_preamble = _PlayedPreamble.from_playback(
-            playback[ending_offset:], preamble.n_samples, sample_rate
+            main_playback[ending_offset:], preamble.n_samples, sample_rate
         )
         timing_recording = loopback if loopback_used else main
         end_latency = _measure_delay(timing_recording[ending_offset:], ending_preamble)
