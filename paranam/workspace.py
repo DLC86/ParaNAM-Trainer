@@ -57,7 +57,7 @@ DEFAULTS = {
 
 def recommended_epochs(kind: str, input_mode: str) -> int:
     """Suggested budget for a fresh run, not a mandatory training limit."""
-    return 200 if kind == "static" else 100
+    return 100
 
 
 def read_json(path: Path, default=None, *, tolerate_corrupt=False):
@@ -171,14 +171,11 @@ class Workspace:
                     if kind == current_kind else default_mode
                 )
         if "epochs" not in stored:
-            self.preferences["epochs"] = (
-                200 if current_kind == "static"
-                else recommended_epochs("parametric", self.preferences["input_mode"])
+            self.preferences["epochs"] = recommended_epochs(
+                current_kind, self.preferences["input_mode"]
             )
-        for kind, epochs in (
-            ("parametric", recommended_epochs("parametric", self.preferences["input_mode"])),
-            ("static", 200),
-        ):
+        for kind in ("parametric", "static"):
+            epochs = recommended_epochs(kind, self.preferences[kind + "_input_mode"])
             self.preferences.setdefault(
                 kind + "_epochs",
                 stored.get("epochs", epochs) if kind == current_kind else epochs,
@@ -310,8 +307,9 @@ class Workspace:
             lhs_method="sobol",
             epochs=100,
             parametric_epochs=100,
-            static_epochs=200,
+            static_epochs=recommended_epochs("static", "standard"),
             batch_size=preset_batch_size("HyperA2"),
+            advanced_static={"cudnn_benchmark": False},
             advanced_parametric=dict(
                 training_preset("HyperA2"),
                 waveform_loss="dual_file_esr",

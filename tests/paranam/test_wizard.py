@@ -39,6 +39,7 @@ def test_capture_modes_keep_independent_batch_defaults(window, tmp_path):
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert window.batch_size.value() == 16
     assert ws.training_batch_size() == 16
+    assert ws.training_options()["cudnn_benchmark"] is False
     window.batch_size.setValue(8)
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
     assert window.batch_size.value() == 4
@@ -76,7 +77,7 @@ def test_input_mode_changes_preserve_epoch_defaults_and_custom_values(window, tm
 
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
     assert window.signal_mode.currentData() == "standard"
-    assert window.epochs.value() == 200
+    assert window.epochs.value() == 100
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))
     assert window.signal_mode.currentData() == "standard"
     assert window.epochs.value() == 123

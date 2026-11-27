@@ -26,7 +26,7 @@ def reserve_validation_audio(data):
 class TrainEvaluator:
     """Evaluate frozen end-of-epoch weights; average ESR equally over captures."""
 
-    def __init__(self, data, model_config, net, *, synthetic_indices=()):
+    def __init__(self, data, model_config, net, *, synthetic_indices=(), target_scale=1.0):
         from nam.data import ConcatDataset, Split, init_dataset
 
         config = deepcopy(data)
@@ -45,6 +45,7 @@ class TrainEvaluator:
 
             config = data_config_from_model(config, model_config)
         self.dataset = init_dataset(config, Split.VALIDATION)
+        self.target_scale = target_scale
         self.captures = (
             self.dataset.datasets
             if isinstance(self.dataset, ConcatDataset)
@@ -65,6 +66,8 @@ class TrainEvaluator:
                     check_action()
                     batch = tuple(t.unsqueeze(0).to(device) for t in capture[0])
                     target = batch[-1]
+                    if self.target_scale != 1.0:
+                        target = target * self.target_scale
                     predictions = (
                         net.forward_sizes(*batch[:-1], pad_start=False)
                         if hasattr(net, "forward_sizes")

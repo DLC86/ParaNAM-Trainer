@@ -278,7 +278,7 @@ def test_new_recipe_and_independent_epoch_budgets(window, workspace):
     window.epochs.setValue(57)
     window.save_preferences()
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("static"))
-    assert window.epochs.value() == 200
+    assert window.epochs.value() == 100
     window.epochs.setValue(210)
     window.save_preferences()
     window.capture_kind.setCurrentIndex(window.capture_kind.findData("parametric"))

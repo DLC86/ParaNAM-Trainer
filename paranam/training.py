@@ -493,6 +493,14 @@ def make_job(workspace, resume=False, job_directory=None):
             from .static_training import model_config
 
             model = model_config(workspace.project)
+            # The simplified NAM A2 trainer uses one gain derived from the
+            # training target for both splits. Static members normalize separately.
+            data["joint"] = [
+                {
+                    "name": "nam.data.normalize_joint_dataset_output",
+                    "kwargs": {"level_rms_dbfs": -18.0},
+                }
+            ]
         else:
             model = build_hyper_a2_model_config(workspace.project)
             # The only mute objective is ordinary MSE against the
@@ -640,6 +648,8 @@ def make_job(workspace, resume=False, job_directory=None):
             prefs["rate_schedule"] = schedule
         data["allow_variable_validation_lengths"] = True
         learning = build_hyper_a2_learning_config(workspace.project)
+        if is_static:
+            learning["seed"] = 0
         waveform_loss, threshold = waveform_loss_settings(options)
         if waveform_loss == "segment_esr":
             learning.update(waveform_loss=waveform_loss, segment_esr_min_rms_dbfs=threshold)
@@ -899,6 +909,13 @@ def export_best_model(trainer, spec, member, target, selection=None):
         if static:
             net.import_submodel(0, models["lite"].net.extract_submodel(0))
             net.apply_mask()
+            scale = checkpoints["full"].get("output_scale")
+            if scale != checkpoints["lite"].get("output_scale"):
+                raise ValueError("Full and Lite checkpoints use different training output scales")
+            if scale is not None:
+                from nam.data import Dataset
+
+                net.export_model_dict_post_hooks.append(Dataset._ScaleOutputHook(1.0 / scale))
             export_net = net
         elif film:
             export_net = net
@@ -1064,6 +1081,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             self.best = None
             self.best_train = None
             self.train_evaluator = None
+            self.train_output_scale = None
             self.best_metrics = None
             self.last_metrics = None
             self.best_lite_metrics = None
@@ -1246,6 +1264,8 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
             }
 
         def on_save_checkpoint(self, trainer, module, checkpoint):
+            if self.train_output_scale is not None:
+                checkpoint["output_scale"] = self.train_output_scale
             checkpoint["validation_reference"] = "full"
             checkpoint["validation_esr"] = (self.last_metrics or {}).get("full")
             checkpoint["validation_esr_full"] = (self.last_metrics or {}).get("full")
@@ -1454,6 +1474,7 @@ def build_progress_callback(job, spec, member, shared, evaluation_data=None):
                         synthetic_indices=spec["learning"].get(
                             "synthetic_mute_train_indices", ()
                         ),
+                        target_scale=self.train_output_scale or 1.0,
                     )
                 self.print_progress(trainer, 1, "Evaluating Train ESR")
                 train_scores = self.train_evaluator.compute(

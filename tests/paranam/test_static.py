@@ -179,16 +179,19 @@ def test_real_static_batch_pause_resume_and_metadata(
     first = ws.static_groups()[0][0]
     ws.set_static_metadata(first.capture_id, {"gear_model": "Test amp"})
     x = (0.1 * np.sin(np.arange(6500) * 0.03)).astype(np.float32)
+    y = np.tanh(2 * x)
+    expected_head_scale = 0.01 * np.sqrt(np.mean(y**2)) / 10 ** (-18.0 / 20.0)
     np_to_wav(x, ws.directory / "test-input.wav", rate=48000)
     for entry in ws.project.entries:
         target = ws.directory / entry.y_path
         target.parent.mkdir(exist_ok=True)
-        np_to_wav(np.tanh(2 * x), target, rate=48000)
+        np_to_wav(y, target, rate=48000)
         entry.status, entry.delay = "captured", 0
     ws.save()
     job = training.make_job(ws)
     spec = read_json(job / "spec.json")
     assert spec["model"]["net"]["name"] == "PackedWaveNet"
+    assert spec["learning"]["seed"] == 0
     spec["data"]["common"].update(
         x_path="test-input.wav", ny=32, require_input_pre_silence=None
     )
@@ -235,6 +238,10 @@ def test_real_static_batch_pause_resume_and_metadata(
             child["model"]["version"] == "0.7.0"
             for child in snapshot["config"]["submodels"]
         )
+        assert [
+            child["model"]["config"]["head_scale"]
+            for child in snapshot["config"]["submodels"]
+        ] == pytest.approx([expected_head_scale] * 2, rel=1e-5)
         assert snapshot["metadata"]["name"] == "Capture 1"
         assert snapshot["metadata"]["input_level_dbu"] == 18
         assert snapshot["metadata"]["custom"] == {"keep": True}
@@ -253,6 +260,9 @@ def test_real_static_batch_pause_resume_and_metadata(
         assert model["architecture"] == "SlimmableContainer"
         assert model["version"] == "0.7.0"
         children = model["config"]["submodels"]
+        assert [child["model"]["config"]["head_scale"] for child in children] == pytest.approx(
+            [expected_head_scale] * 2, rel=1e-5
+        )
         assert all(child["model"]["version"] == "0.7.0" for child in children)
         assert [child["max_value"] for child in children] == [0.5, 1.0]
         assert [

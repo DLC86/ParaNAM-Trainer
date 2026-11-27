@@ -11,30 +11,11 @@ from .model_names import model_basename
 
 
 def model_config(project, size=None):
-    from nam.models.parametric._hyper_a2 import _template_config
+    from nam.train.core import _get_packed_model_config
 
-    submodels = []
-    for channels in (3, 8):
-        template = _template_config(channels, 0.01)
-        submodels.append(
-            dict(
-                name=f"channels_{channels}",
-                config=dict(
-                    layers_configs=template["layers"], head_scale=template["head_scale"]
-                ),
-            )
-        )
-    config = dict(
-        submodels=submodels,
-        sample_rate=project.sample_rate,
-        export=dict(container_max_values="uniform"),
-    )
-    return dict(
-        net=dict(name="PackedWaveNet", config=config),
-        loss=dict(val_loss="esr", mrstft_weight=0.0005),
-        optimizer=dict(lr=0.004, weight_decay=3.17e-7),
-        lr_scheduler=dict(**{"class": "ExponentialLR"}, kwargs=dict(gamma=0.994)),
-    )
+    config = _get_packed_model_config()
+    config["net"]["config"]["sample_rate"] = project.sample_rate
+    return config
 
 
 def train(data_config, model_config, learning, output, callback):
@@ -47,6 +28,7 @@ def train(data_config, model_config, learning, output, callback):
         get_joint_dataset_hooks,
     )
     from nam.train.lightning_module import LightningModule, PackedLightningModule
+    from nam.models.parametric._export import output_scale_from_datasets
     from .training import epoch_checkpoint
 
     module_class = (
@@ -57,6 +39,10 @@ def train(data_config, model_config, learning, output, callback):
     model = module_class.init_from_config(model_config)
     data = copy.deepcopy(data_config)
     data.setdefault("common", {})["nx"] = model.net.receptive_field
+    for split in (Split.TRAIN, Split.VALIDATION):
+        rows = data[split.value]
+        if isinstance(rows, list) and len(rows) == 1:
+            data[split.value] = rows[0]
     datasets = []
     try:
         datasets = [
@@ -67,6 +53,7 @@ def train(data_config, model_config, learning, output, callback):
             dataset_validation=datasets[1],
             hooks=get_joint_dataset_hooks(data.get("joint", [])),
         )
+        callback.train_output_scale = output_scale_from_datasets(datasets)
         model.net.sample_rate = datasets[0].sample_rate
         for dataset in datasets:
             dataset.handshake(model.net)
@@ -125,6 +112,9 @@ def train(data_config, model_config, learning, output, callback):
             _apply_packed_best_checkpoints(
                 model, model_config, best_by_size.checkpoint_paths
             )
+        # Loading the best checkpoint creates a fresh net without dataset export
+        # hooks. Restore the recorded level after the Full/Lite weights are chosen.
+        datasets[0].handshake(model.net)
         model.net.sample_rate = datasets[0].sample_rate
         model.net.export(output)
     finally:
@@ -160,7 +150,8 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
             completed.remove(member)
             shared["completed_members"] = list(completed)
         capture = spec["static_captures"][member]
-        pl.seed_everything(938 + member, workers=True)
+        seed = spec["learning"].get("seed", 938 + member)
+        pl.seed_everything(seed, workers=True)
         paths = {
             e.y_path for e in workspace.project.entries if e.capture_id == capture["id"]
         }
@@ -177,8 +168,8 @@ def run_batch(job, spec, workspace, shared, elapsed_base, clock_start):
         output.mkdir(exist_ok=True)
         learning = copy.deepcopy(spec["learning"])
         if learning["trainer"].get("deterministic") is True:
-            learning["train_dataloader"]["sampler_seed"] = 938 + member
-            learning["val_dataloader"]["sampler_seed"] = 939 + member
+            learning["train_dataloader"]["sampler_seed"] = seed
+            learning["val_dataloader"]["sampler_seed"] = seed + 1
         learning["trainer"]["enable_progress_bar"] = False
         checkpoint = job / f"resume-{member}.ckpt"
         if checkpoint.exists():
