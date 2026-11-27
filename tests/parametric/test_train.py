@@ -10,6 +10,7 @@ import torch as _torch
 
 from nam.data import Dataset as _Dataset
 from nam.data import np_to_wav as _np_to_wav
+from nam.models.losses import rms_level_loss as _rms_level_loss
 from nam.models.parametric import ParametricDataset as _ParametricDataset
 from nam.models._from_nam import init_from_nam as _init_from_nam
 from nam.models.wavenet import WaveNet as _WaveNet
@@ -273,7 +274,7 @@ def _build_data_config(tmp_path, *, normalize: bool) -> dict:
     return data_config
 
 
-@_pytest.mark.parametrize("waveform_loss", ["mse", "segment_esr"])
+@_pytest.mark.parametrize("waveform_loss", ["mse", "segment_esr", "dual_file_esr_level"])
 def test_parametric_training_main_exports_baked_and_parametric_models(tmp_path, waveform_loss):
     model_config = _tiny_model_config()
     data_config = _build_data_config(tmp_path, normalize=True)
@@ -281,7 +282,7 @@ def test_parametric_training_main_exports_baked_and_parametric_models(tmp_path, 
     run_dir.mkdir()
 
     learning = _learning_config()
-    if waveform_loss == "segment_esr":
+    if waveform_loss != "mse":
         learning["waveform_loss"] = waveform_loss
     _main(
         data_config=data_config,
@@ -610,6 +611,50 @@ def test_segment_esr_all_quiet_is_differentiable_but_synthetic_mute_keeps_mse():
     assert mute.item() == _pytest.approx(0.25)
     mute.backward()
     assert prediction.grad.count_nonzero() == 8
+
+
+def test_rms_level_loss_uses_raw_db_and_excludes_only_quiet_targets():
+    target = _torch.tensor([[0.01] * 8, [-0.01, 0.01] * 4, [0.00001] * 8])
+    prediction = target.clone()
+    prediction[0] *= 10 ** (6 / 20)
+    prediction[1] *= 10 ** (-6 / 20)
+    prediction[2] = 0.1
+    prediction.requires_grad_()
+    loss = _rms_level_loss(prediction, target, 1e-6)
+    assert loss.item() == _pytest.approx(1.5)
+    loss.backward()
+    assert prediction.grad[0].mean() > 0
+    assert (prediction.grad[1] * prediction[1]).sum() < 0
+    assert prediction.grad[2].count_nonzero() == 0
+
+    silence = _torch.zeros((1, 8), requires_grad=True)
+    quiet = _rms_level_loss(silence, _torch.zeros_like(silence), 1e-6)
+    assert quiet.item() == 0.0
+    quiet.backward()
+    assert silence.grad.count_nonzero() == 0
+    assert _torch.isfinite(_rms_level_loss(silence, target[:1], 1e-6))
+
+
+def test_rms_level_loss_adds_to_dual_esr_and_preserves_synthetic_mute_loss():
+    module = _ParametricLightningModule(_MockBaseNet(1.0))
+    sampler = _CaptureBatchSampler((1, 1), batch_size=1, shuffle=False, drop_last=False)
+    list(sampler)
+    module.set_capture_batch_samplers(train_sampler=sampler)
+    module.set_synthetic_mute_indices(train_indices=(1,))
+    module._dual_energies = ((1.0, 1.0), None)
+    prediction = _torch.full((1, 8), 0.1 * 10 ** (3 / 20), requires_grad=True)
+    active = (prediction, _torch.full_like(prediction, 0.1))
+    muted = (prediction, _torch.zeros_like(prediction))
+    module.on_train_epoch_start()
+    module.set_waveform_loss({"waveform_loss": "dual_file_esr"})
+    dual = module.training_step(active, 0).item()
+    mute = module.training_step(muted, 1).item()
+
+    module.set_waveform_loss({"waveform_loss": "dual_file_esr_level", "rms_level_weight": 0.2})
+    assert module.training_step(active, 0).item() == _pytest.approx(dual + 0.2 * 0.5)
+    assert module.training_step(muted, 1).item() == mute
+    module.set_waveform_loss({"waveform_loss": "dual_file_esr_level", "rms_level_weight": 0.0})
+    assert module.training_step(active, 0).item() == dual
 
 
 def test_parametric_lightning_training_logs_seen_audio_seen_params_bucket(monkeypatch):

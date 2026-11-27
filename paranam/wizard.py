@@ -1240,15 +1240,23 @@ class WizardWindow(
             field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
-        from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS, SEGMENT_ESR_RMS_RANGE_DBFS
+        from nam.models.losses import (
+            DEFAULT_RMS_LEVEL_WEIGHT,
+            DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
+            RMS_LEVEL_LOSS_MODE,
+            RMS_LEVEL_WEIGHT_RANGE,
+            SEGMENT_ESR_RMS_RANGE_DBFS,
+        )
 
         waveform_loss = QComboBox()
         waveform_loss.addItem("MSE", "mse")
         waveform_loss.addItem("ESR per segment", "segment_esr")
         waveform_loss.addItem("Dual File-normalized ESR (Faverooo)", "dual_file_esr")
+        waveform_loss.addItem("Dual File-normalized ESR + RMS level (dB)", RMS_LEVEL_LOSS_MODE)
         waveform_loss.setToolTip(
-            "ESR divides each real window's squared error by its own target energy. "
-            "Synthetic Mute targets use unweighted MSE. Reported ESR stays the same."
+            "Choose the waveform objective for parametric training. The RMS level "
+            "option also matches raw RMS in dB on active windows. Synthetic Mute "
+            "targets keep their separate loss. Reported ESR stays the same."
         )
         self.advanced_fields["waveform_loss"] = waveform_loss
         advanced_form.addRow("Waveform loss", waveform_loss)
@@ -1275,6 +1283,24 @@ class WizardWindow(
             field.setFixedWidth(260)
             self.advanced_fields[key] = field
             advanced_form.addRow(caption, field)
+        level_weight = QDoubleSpinBox()
+        level_weight.setDecimals(4)
+        level_weight.setRange(*RMS_LEVEL_WEIGHT_RANGE)
+        level_weight.setSingleStep(0.01)
+        level_weight.setValue(DEFAULT_RMS_LEVEL_WEIGHT)
+        level_weight.setFixedWidth(260)
+        level_weight.setToolTip("Weight of the RMS level penalty. Zero uses ordinary Dual File-normalized ESR.")
+        self.advanced_fields["rms_level_weight"] = level_weight
+        advanced_form.addRow("RMS level weight", level_weight)
+        level_threshold = QDoubleSpinBox()
+        level_threshold.setRange(*SEGMENT_ESR_RMS_RANGE_DBFS)
+        level_threshold.setDecimals(1)
+        level_threshold.setValue(DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
+        level_threshold.setSuffix(" dBFS")
+        level_threshold.setFixedWidth(260)
+        level_threshold.setToolTip("Skip windows below this target RMS in the level penalty.")
+        self.advanced_fields["rms_level_min_rms_dbfs"] = level_threshold
+        advanced_form.addRow("Minimum target RMS for level loss", level_threshold)
         rms = QCheckBox("RMS loss normalization")
         rms.setToolTip(
             "Weight each capture's training MSE relative to -18 dBFS RMS, "
@@ -1702,6 +1728,8 @@ class WizardWindow(
         self.refresh_rate_preview(kind)
 
     def refresh_loss_normalization_controls(self, parametric=None):
+        from nam.models.losses import DUAL_FILE_ESR_MODES, RMS_LEVEL_LOSS_MODE
+
         if parametric is None:
             parametric = self.capture_kind.currentData() == "parametric"
         rms = self.advanced_fields["rms_loss_normalization"]
@@ -1711,12 +1739,17 @@ class WizardWindow(
         mute_reference = self.advanced_fields["synthetic_mute_reference_rms"]
         form = self.advanced_panel.layout()
         esr = parametric and waveform_loss.currentData() == "segment_esr"
-        dual = parametric and waveform_loss.currentData() == "dual_file_esr"
+        dual = parametric and waveform_loss.currentData() in DUAL_FILE_ESR_MODES
+        level = parametric and waveform_loss.currentData() == RMS_LEVEL_LOSS_MODE
         capture_rms = parametric and not (esr or dual)
         for key in ("dual_pre_emphasis", "dual_raw_weight", "dual_floor_db"):
             field = self.advanced_fields[key]
             form.setRowVisible(field, dual)
             field.setEnabled(dual)
+        for key in ("rms_level_weight", "rms_level_min_rms_dbfs"):
+            field = self.advanced_fields[key]
+            form.setRowVisible(field, level)
+            field.setEnabled(level)
         form.setRowVisible(waveform_loss, parametric)
         form.setRowVisible(threshold, esr)
         form.setRowVisible(rms, not (esr or dual))

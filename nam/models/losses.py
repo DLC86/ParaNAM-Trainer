@@ -17,13 +17,18 @@ from .._dependencies.auraloss.freq import (
 
 DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS = -58.0
 SEGMENT_ESR_RMS_RANGE_DBFS = (-120.0, -1.0)
+RMS_LEVEL_LOSS_MODE = "dual_file_esr_level"
+DUAL_FILE_ESR_MODES = ("dual_file_esr", RMS_LEVEL_LOSS_MODE)
+DEFAULT_RMS_LEVEL_WEIGHT = 0.01
+RMS_LEVEL_WEIGHT_RANGE = (0.0, 1.0)
 
 
 def waveform_loss_settings(config):
     """Resolve the parametric waveform objective; old configs use MSE."""
     loss = config.get("waveform_loss", "mse")
-    if loss not in ("mse", "segment_esr", "dual_file_esr"):
-        raise ValueError("Waveform loss must be mse, segment_esr or dual_file_esr")
+    modes = ("mse", "segment_esr", *DUAL_FILE_ESR_MODES)
+    if loss not in modes:
+        raise ValueError(f"Waveform loss must be one of {', '.join(modes)}")
     threshold = config.get("segment_esr_min_rms_dbfs", DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
     low, high = SEGMENT_ESR_RMS_RANGE_DBFS
     if loss == "segment_esr" and (
@@ -88,6 +93,41 @@ def dual_file_esr(preds, targets, energies, pre=0.85, raw_weight=1.0):
     error = preds.to(dtype) - targets.to(dtype)
     return (apply_pre_emphasis_filter(error, pre).square().mean() / emphasized
             + raw_weight * error.square().mean() / raw)
+
+
+def rms_level_loss_settings(config):
+    weight = config.get("rms_level_weight", DEFAULT_RMS_LEVEL_WEIGHT)
+    threshold = config.get("rms_level_min_rms_dbfs", DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS)
+    for value, (low, high), label in (
+        (weight, RMS_LEVEL_WEIGHT_RANGE, "RMS level loss weight"),
+        (threshold, SEGMENT_ESR_RMS_RANGE_DBFS, "RMS level loss minimum target dBFS"),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not low <= value <= high
+        ):
+            raise ValueError(f"{label} must be between {low:g} and {high:g}")
+    return float(weight), float(threshold)
+
+
+def rms_level_loss(preds: _torch.Tensor, targets: _torch.Tensor, min_power: float) -> _torch.Tensor:
+    """Huber loss on raw block RMS error, with a knee at 3 dB."""
+    if preds.shape != targets.shape or preds.ndim not in (1, 2):
+        raise ValueError("RMS level loss requires matching (samples,) or (batch, samples) tensors")
+    dtype = _torch.promote_types(_torch.float32, _torch.promote_types(preds.dtype, targets.dtype))
+    pred_power = preds.to(dtype).square().mean(dim=-1)
+    target_power = targets.to(dtype).square().mean(dim=-1)
+    eligible = target_power >= min_power
+    # -140 dBFS is below any selectable target threshold. Adding power instead
+    # of clamping the prediction preserves gradients for small nonzero outputs.
+    floor = 1e-14
+    error_db = 10.0 * ((pred_power + floor).log10() - (target_power + floor).log10())
+    scaled_error = _torch.where(eligible, error_db / 3.0, 0.0)
+    loss = _torch.nn.functional.huber_loss(
+        scaled_error, _torch.zeros_like(scaled_error), reduction="sum", delta=1.0
+    )
+    return loss / eligible.sum().clamp_min(1)
 
 
 def esr(preds: _torch.Tensor, targets: _torch.Tensor) -> _torch.Tensor:

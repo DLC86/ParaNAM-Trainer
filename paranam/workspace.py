@@ -24,7 +24,13 @@ from nam.capture.project import (
     reconcile_with_disk,
     save_project,
 )
-from nam.models.losses import DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS, waveform_loss_settings
+from nam.models.losses import (
+    DEFAULT_RMS_LEVEL_WEIGHT,
+    DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
+    DUAL_FILE_ESR_MODES,
+    RMS_LEVEL_LOSS_MODE,
+    waveform_loss_settings,
+)
 
 DEFAULTS = {
     "capture_level_dbfs": 0.0,
@@ -1116,6 +1122,8 @@ class Workspace:
             dual_pre_emphasis=0.85,
             dual_raw_weight=1.0,
             dual_floor_db=30.0,
+            rms_level_weight=DEFAULT_RMS_LEVEL_WEIGHT,
+            rms_level_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
             segment_esr_min_rms_dbfs=DEFAULT_SEGMENT_ESR_MIN_RMS_DBFS,
             snr_weighted_loss_normalization=False,
             mrstft_weight=0.0005,
@@ -1249,7 +1257,10 @@ class Workspace:
                 options.pop("synthetic_mute_reference_rms", None)
             static = self.project.capture_type == "static"
             segment_esr = not static and options["waveform_loss"] == "segment_esr"
-            dual = not static and options["waveform_loss"] == "dual_file_esr"
+            dual = not static and options["waveform_loss"] in DUAL_FILE_ESR_MODES
+            if static or options["waveform_loss"] != RMS_LEVEL_LOSS_MODE:
+                options.pop("rms_level_weight", None)
+                options.pop("rms_level_min_rms_dbfs", None)
             if not dual:
                 for key in ("dual_pre_emphasis", "dual_raw_weight", "dual_floor_db"):
                     options.pop(key, None)

@@ -405,6 +405,44 @@ def test_segment_esr_editor_freezes_objective_and_threshold_on_enqueue(window, w
     assert training.job_can_resume(Workspace(workspace.directory), mse_job)
 
 
+def test_rms_level_loss_settings_persist_and_freeze_on_enqueue(window, workspace):
+    ready(workspace)
+    window._attach(workspace)
+    fields = window.advanced_fields
+    form = window.advanced_panel.layout()
+    mode, weight, threshold = (fields[key] for key in (
+        "waveform_loss", "rms_level_weight", "rms_level_min_rms_dbfs"
+    ))
+    mode.setCurrentIndex(mode.findData("dual_file_esr"))
+    assert not form.isRowVisible(weight)
+    dual_job = training.make_job(workspace)
+    (dual_job / "resume-0.ckpt").touch()
+    assert "rms_level_weight" not in read_json(dual_job / "spec.json")["learning"]
+
+    mode.setCurrentIndex(mode.findData("dual_file_esr_level"))
+    assert form.isRowVisible(weight) and form.isRowVisible(threshold)
+    assert form.isRowVisible(fields["dual_pre_emphasis"])
+    assert weight.value() == 0.01
+    weight.setValue(0.02)
+    threshold.setValue(-60)
+    reopened = Workspace(workspace.directory)
+    assert not training.job_can_resume(reopened, dual_job)
+    level_job = training.make_job(reopened)
+    (level_job / "resume-0.ckpt").touch()
+    learning = read_json(level_job / "spec.json")["learning"]
+    assert learning["waveform_loss"] == "dual_file_esr_level"
+    assert learning["rms_level_weight"] == 0.02
+    assert learning["rms_level_min_rms_dbfs"] == -60
+    assert learning["dual_pre_emphasis"] == 0.85
+    assert training.job_can_resume(reopened, level_job)
+    weight.setValue(0.03)
+    assert not training.job_can_resume(Workspace(workspace.directory), level_job)
+
+    mode.setCurrentIndex(mode.findData("dual_file_esr"))
+    assert not form.isRowVisible(weight)
+    assert training.job_can_resume(Workspace(workspace.directory), dual_job)
+
+
 def test_synthetic_mute_reference_is_only_visible_option(window, workspace):
     from nam.capture.params import KnobSpec
 

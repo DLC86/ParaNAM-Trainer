@@ -32,6 +32,9 @@ from nam.data import get_joint_dataset_hooks as _get_joint_dataset_hooks
 from nam.data import init_dataset as _init_dataset
 from nam.models.losses import segment_esr as _segment_esr
 from nam.models.losses import dual_file_esr as _dual_file_esr, dual_file_energies as _dual_file_energies, dual_file_esr_settings as _dual_file_esr_settings
+from nam.models.losses import DUAL_FILE_ESR_MODES as _DUAL_FILE_ESR_MODES
+from nam.models.losses import RMS_LEVEL_LOSS_MODE as _RMS_LEVEL_LOSS_MODE
+from nam.models.losses import rms_level_loss as _rms_level_loss, rms_level_loss_settings as _rms_level_loss_settings
 from nam.models.losses import waveform_loss_settings as _waveform_loss_settings
 from nam.models.exportable import Exportable as _Exportable
 from nam.models.metadata import UserMetadata as _UserMetadata
@@ -812,6 +815,7 @@ class _ParametricLightningModule(_LightningModule):
         self._val_capture_sampler: _Optional[_CaptureBatchSampler] = None
         self._capture_mse_scales: tuple[float, ...] = ()
         self._segment_esr_min_power: _Optional[float] = None
+        self._rms_level_settings: _Optional[tuple[float, float]] = None
         self._dual_settings = None
         self._dual_energies = ()
         self._capture_mrstft_scales: tuple[float, ...] = ()
@@ -993,7 +997,12 @@ class _ParametricLightningModule(_LightningModule):
 
     def set_waveform_loss(self, learning_config):
         mode, min_rms_dbfs = _waveform_loss_settings(learning_config)
-        self._dual_settings = _dual_file_esr_settings(learning_config) if mode == "dual_file_esr" else None
+        self._dual_settings = _dual_file_esr_settings(learning_config) if mode in _DUAL_FILE_ESR_MODES else None
+        self._rms_level_settings = None
+        if mode == _RMS_LEVEL_LOSS_MODE:
+            weight, threshold = _rms_level_loss_settings(learning_config)
+            if weight > 0.0:
+                self._rms_level_settings = weight, 10.0 ** (threshold / 10.0)
         self._segment_esr_min_power = (
             10.0 ** (min_rms_dbfs / 10.0) if mode == "segment_esr" else None
         )
@@ -1399,6 +1408,9 @@ class _ParametricLightningModule(_LightningModule):
                     raise RuntimeError("Dual file ESR requires capture-grouped training")
                 pre, raw_weight, _ = self._dual_settings
                 loss = mse_scale * _dual_file_esr(preds, targets, self._dual_energies[capture_index], pre, raw_weight)
+                if self._rms_level_settings is not None:
+                    level_weight, min_power = self._rms_level_settings
+                    loss = loss + level_weight * _rms_level_loss(preds, targets, min_power)
             elif segment_esr and not synthetic_mute:
                 loss = _segment_esr(preds, targets, self._segment_esr_min_power)
             for name, v in loss_dict.items():

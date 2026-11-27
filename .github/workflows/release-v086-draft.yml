@@ -101,8 +101,8 @@ jobs:
           tests/paranam/test_static.py::test_static_plan_keeps_validation_only_with_the_active_train_take
           tests/paranam/test_workflow052.py::test_static_progress_reaches_one_for_each_recording
           tests/paranam/test_workspace.py::test_parametric_training_rejects_mixed_routes_but_allows_buffer_changes
-      - name: Segment ESR regression tests
-        run: python -m pytest tests/parametric/test_train.py tests/paranam/test_advanced_training.py -k segment_esr -q -o addopts= --basetemp .test-temp
+      - name: Waveform loss regression tests
+        run: python -m pytest tests/parametric/test_train.py tests/paranam/test_advanced_training.py -k "segment_esr or rms_level_loss or dual_file_esr_level" -q -o addopts= --basetemp .test-temp
       - name: Verify static capture removal, ESR defaults and ASIO metering
         run: >-
           python -m pytest -q -o addopts= --basetemp .test-temp

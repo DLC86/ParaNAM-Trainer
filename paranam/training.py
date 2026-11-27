@@ -16,7 +16,13 @@ import uuid
 from pathlib import Path
 
 from nam.capture.project import atomic_write_json, replace_file
-from nam.models.losses import waveform_loss_settings
+from nam.models.losses import (
+    DUAL_FILE_ESR_MODES,
+    RMS_LEVEL_LOSS_MODE,
+    dual_file_esr_settings,
+    rms_level_loss_settings,
+    waveform_loss_settings,
+)
 from .workspace import Workspace, read_json
 
 TERMINAL = {"completed", "paused", "stopped", "failed", "needs_captures"}
@@ -151,10 +157,11 @@ def job_can_resume(workspace, job):
         waveform_loss = waveform_loss_settings(options)
         if waveform_loss_settings(saved_learning) != waveform_loss:
             return False
-        if waveform_loss[0] == "dual_file_esr":
-            from nam.models.losses import dual_file_esr_settings
-
+        if waveform_loss[0] in DUAL_FILE_ESR_MODES:
             if dual_file_esr_settings(saved_learning) != dual_file_esr_settings(options):
+                return False
+        if waveform_loss[0] == RMS_LEVEL_LOSS_MODE:
+            if rms_level_loss_settings(saved_learning) != rms_level_loss_settings(options):
                 return False
         if waveform_loss[0] == "mse":
             if saved_learning.get("rms_loss_normalization", True) != options["rms_loss_normalization"]:
@@ -636,12 +643,13 @@ def make_job(workspace, resume=False, job_directory=None):
         waveform_loss, threshold = waveform_loss_settings(options)
         if waveform_loss == "segment_esr":
             learning.update(waveform_loss=waveform_loss, segment_esr_min_rms_dbfs=threshold)
-        if waveform_loss == "dual_file_esr" and not is_static:
-            from nam.models.losses import dual_file_esr_settings
-
+        if waveform_loss in DUAL_FILE_ESR_MODES and not is_static:
             pre, raw, floor = dual_file_esr_settings(options)
             learning.update(waveform_loss=waveform_loss, dual_pre_emphasis=pre,
                             dual_raw_weight=raw, dual_floor_db=floor)
+            if waveform_loss == RMS_LEVEL_LOSS_MODE:
+                weight, min_rms = rms_level_loss_settings(options)
+                learning.update(rms_level_weight=weight, rms_level_min_rms_dbfs=min_rms)
         rms = options["rms_loss_normalization"]
         if not isinstance(rms, bool):
             raise ValueError("rms_loss_normalization must be a boolean")
