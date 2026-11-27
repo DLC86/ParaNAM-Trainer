@@ -20,10 +20,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_ID: '458530091'
-      BUILD_RUN: '46008259238'
-      BUILD_SHA: '5a564af939f7fba64afbe34b8ee44d3c067ca6f0'
-      TEST_RUN: '46008259165'
-      TEST_SHA: '5a564af939f7fba64afbe34b8ee44d3c067ca6f0'
+      BUILD_RUN: '46009140689'
+      BUILD_SHA: 'e71531cc22b51eb5e5d5cd02680a482742a1f9ca'
+      TEST_RUN: '46009140645'
+      TEST_SHA: 'e71531cc22b51eb5e5d5cd02680a482742a1f9ca'
       OLD_TARGET: '5508c0f15941ac854ed2e75ff77076fc6d8ec20c'
     steps:
       - name: Verify successful builds and tests and the exact existing draft
