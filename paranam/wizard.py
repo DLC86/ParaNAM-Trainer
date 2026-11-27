@@ -1982,7 +1982,7 @@ class WizardWindow(
             if not self.apply_plan():
                 return
         if index == 2 and not self.workspace.training_ready():
-            self.notify_error("Complete every capture in the plan first.")
+            self.notify_error(self.workspace.capture_setup_problem() or "Complete every capture in the plan first.")
             return
         self.navigate(min(3, index + 1))
 

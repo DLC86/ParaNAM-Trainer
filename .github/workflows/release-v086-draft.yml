@@ -92,6 +92,14 @@ jobs:
         run: python tests/run_pytest_isolated.py tests/paranam/test_model_editor_ui.py -q -o addopts= --basetemp .test-temp
       - name: Capture stream integrity regression tests
         run: python -m pytest tests/capture/test_audio.py tests/capture/test_asio_stream.py -q -o addopts= --basetemp .test-temp
+      - name: Verify static pairing, capture levels, and loopback timing
+        run: >-
+          python -m pytest -q -o addopts= --basetemp .test-temp
+          tests/capture/test_capture_gain.py
+          tests/capture/test_session.py::test_clipped_loopback_is_rejected_before_capture_is_saved
+          tests/capture/test_session.py::test_coreaudio_parametric_rejects_mid_program_shift_with_stable_ends
+          tests/paranam/test_static.py::test_static_plan_keeps_validation_only_with_the_active_train_take
+          tests/paranam/test_workspace.py::test_parametric_training_rejects_mixed_routes_but_allows_buffer_changes
       - name: Segment ESR regression tests
         run: python -m pytest tests/parametric/test_train.py tests/paranam/test_advanced_training.py -k segment_esr -q -o addopts= --basetemp .test-temp
       - name: Verify static capture removal, ESR defaults and ASIO metering

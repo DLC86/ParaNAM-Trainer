@@ -1714,3 +1714,46 @@ def test_fresh_plan_synthetic_mutes_do_not_block_timing_margin(tmp_path):
     saved = _json.loads((root / "data.json").read_text())
     assert any(row["y_path"] == mute.y_path and row["delay"] == 0
                for row in saved["train"])
+
+
+def test_clipped_loopback_is_rejected_before_capture_is_saved(tmp_path):
+    project_dir = _make_project_dir(tmp_path)
+    project = _load_project(project_dir)
+    _enable_loopback(project)
+
+    class ClippedLoopback(_FakeRecorder):
+        def playrec(self, playback, sample_rate, **kwargs):
+            main, loopback = super().playrec(playback, sample_rate, **kwargs)
+            loopback[len(loopback) // 2] = 1.0
+            return main, loopback
+
+    entry = project.pending_entries()[0]
+    with _pytest.raises(_CaptureSessionError, match="clean loopback clipped"):
+        _CaptureSession(project, project_dir, recorder=ClippedLoopback(480)).capture_entry(entry)
+    assert entry.status == "pending"
+    assert not (project_dir / entry.y_path).exists()
+
+
+def test_coreaudio_parametric_rejects_mid_program_shift_with_stable_ends(tmp_path):
+    from nam.capture.audio import AudioDeviceError
+
+    project_dir = _make_project_dir(tmp_path)
+    x = _np.random.default_rng(42).normal(0, 0.04, 5 * _RATE).astype(_np.float32)
+    _np_to_wav(x, project_dir / "input_train.wav", rate=_RATE)
+    project = _load_project(project_dir)
+    project.capture_type = "parametric"
+    project.audio.host_api = "Core Audio"
+    _enable_loopback(project)
+
+    class ShiftedLoopback(_FakeRecorder):
+        def playrec(self, playback, sample_rate, **kwargs):
+            main, loopback = super().playrec(playback, sample_rate, **kwargs)
+            start, end = 4 * _RATE, 6 * _RATE
+            loopback[start:end] = loopback[start + 7 : end + 7].copy()
+            return main, loopback
+
+    entry = project.pending_entries()[0]
+    with _pytest.raises(AudioDeviceError, match="timing changed"):
+        _CaptureSession(project, project_dir, recorder=ShiftedLoopback(480, noise=0)).capture_entry(entry)
+    assert entry.status == "pending"
+    assert not (project_dir / entry.y_path).exists()

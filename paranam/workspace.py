@@ -1031,6 +1031,30 @@ class Workspace:
             e for e in entries if e.split != "validation" or e.capture_id not in imported
         ]
 
+    def capture_setup_problem(self):
+        if self.project.capture_type != "parametric":
+            return None
+
+        entries = self.training_capture_entries() + self.project.entries_for_split("gain")
+        first_by_route = {}
+        for entry in entries:
+            if entry.status != "captured" or entry.synthetic_mute:
+                continue
+            if entry.qa and entry.qa.clipping:
+                return f"Capture {entry.y_path} clipped. Lower the return level and record it again."
+            if not entry.stream_config:
+                continue
+            # The last fields hold buffer size and latency. Each take has its own delay.
+            route = entry.stream_config.rsplit("|", 2)[0]
+            first_by_route.setdefault(route, entry.y_path)
+        if len(first_by_route) > 1:
+            first, second = list(first_by_route.values())[:2]
+            return (
+                "Captures use different audio devices, drivers, or channels "
+                f"({first} and {second}). Record the affected takes with a single audio route before training."
+            )
+        return None
+
     def training_ready(self):
         from nam.capture.output_gain import volume_control
 
@@ -1041,7 +1065,7 @@ class Workspace:
             return False
         if self.preferences["capture_level_dbfs"] != self.project.capture_level_dbfs:
             return False
-        if not self.project.entries or not self.validation_matches():
+        if self.capture_setup_problem() or not self.project.entries or not self.validation_matches():
             return False
         required = self.training_capture_entries()
         if not any(e.split == "train" for e in required):

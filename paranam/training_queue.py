@@ -226,7 +226,7 @@ class TrainingQueue:
 
     def add(self, workspace):
         if not workspace.training_ready():
-            raise ValueError("Complete every planned capture before adding training.")
+            raise ValueError(workspace.capture_setup_problem() or "Complete every planned capture before adding training.")
         frozen = snapshot_workspace(workspace, self.snapshot_root(workspace))
         from .cadences import editable_cadences
 

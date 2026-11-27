@@ -188,3 +188,26 @@ def test_new_workspace_defaults_to_sobol_but_preserves_existing_lhs_choice(tmp_p
     reopened = Workspace(project.directory)
     assert reopened.preferences["lhs_method"] == "standard"
     assert reopened.project.lhs_method == "standard"
+
+
+def test_parametric_training_rejects_mixed_routes_but_allows_buffer_changes(workspace):
+    from nam.capture.project import AudioSettingsModel
+
+    entries = workspace.training_capture_entries()
+    settings = AudioSettingsModel(host_api="Core Audio", input_device="Interface",
+                                  output_device="Interface", blocksize=256)
+    for entry in entries:
+        target = workspace.directory / entry.y_path
+        target.parent.mkdir(exist_ok=True)
+        target.touch()
+        entry.status = "captured"
+        entry.stream_config = settings.stream_fingerprint()
+
+    validation = next(entry for entry in entries if entry.split == "validation")
+    validation.stream_config = settings.model_copy(update={"blocksize": 512}).stream_fingerprint()
+    assert workspace.training_ready()
+
+    validation.stream_config = settings.model_copy(update={"host_api": "ASIO"}).stream_fingerprint()
+    assert not workspace.training_ready()
+    assert "different audio devices, drivers, or channels" in workspace.capture_setup_problem()
+    assert validation.y_path in workspace.capture_setup_problem()

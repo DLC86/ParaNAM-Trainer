@@ -336,11 +336,20 @@ def audit_captures(
     return audits
 
 
+def _check_loopback_program(playback, recorded, rate, preamble, peak_delay, cancel):
+    from ._asio_stream import check_timing, transfer
+
+    delay = int(round(peak_delay))
+    reference = transfer(playback[:preamble], recorded[delay : delay + preamble], rate)
+    check_timing(
+        playback, recorded, rate, delay, reference, require_measurable=False, cancel=cancel
+    )
+
+
 def _audit_stream_timing(project_dir, y_path, latency, cancel=None):
     """Check the program, not only the preamble, in a preserved raw loopback."""
     from ..data import wav_to_np
     from .audio import AudioDeviceError
-    from ._asio_stream import check_timing, transfer
 
     try:
         manifest = _json.loads(
@@ -353,18 +362,8 @@ def _audit_stream_timing(project_dir, y_path, latency, cancel=None):
         playback, info = wav_to_np(base / record["playback"], info=True)
         recorded = wav_to_np(base / record["raw_loopback"])
         preamble = int(record["preamble_samples"])
-        delay = int(round(latency.peak_delay))
-        reference = transfer(
-            playback[:preamble], recorded[delay : delay + preamble], info.rate
-        )
-        check_timing(
-            playback,
-            recorded,
-            info.rate,
-            delay,
-            reference,
-            require_measurable=False,
-            cancel=cancel,
+        _check_loopback_program(
+            playback, recorded, info.rate, preamble, latency.peak_delay, cancel,
         )
     except AudioDeviceError as exc:
         return (
@@ -1256,6 +1255,11 @@ class CaptureSession:
             loopback_playback,
         )
 
+        if loopback is not None and _np.max(_np.abs(loopback)) >= CLIPPING_THRESHOLD:
+            raise CaptureSessionError(
+                "The clean loopback clipped. Lower the loopback input level and record again."
+            )
+
         latency, crosscheck, loopback_disagreement, loopback_failed = (
             self._resolve_latency(main, loopback, preamble)
         )
@@ -1359,6 +1363,22 @@ class CaptureSession:
                 f"Capture discarded: timing {drift} between the beginning and end "
                 f"(allowed variation is below {MAX_CAPTURE_DRIFT_SAMPLES:g} sample). "
                 "Increase the audio-interface buffer and record this capture again."
+            )
+
+        audio = self.project.audio
+        if (
+            self.project.capture_type == "parametric"
+            and audio.host_api is not None
+            and loopback is not None
+            and loopback_playback is not None
+            and latency.peak_delay is not None
+            and (audio.host_api != "ASIO" or not audio.verify_asio_timing)
+        ):
+            # ASIO verification already checks the program against a broadband probe.
+            # Other drivers can use the preamble from this take as their reference.
+            _check_loopback_program(
+                loopback_playback, loopback, sample_rate,
+                preamble.n_samples, latency.peak_delay, cancel,
             )
 
         self._write_raw_recordings(

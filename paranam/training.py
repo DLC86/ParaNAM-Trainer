@@ -325,7 +325,7 @@ def make_job(workspace, resume=False, job_directory=None):
     )
 
     if not workspace.training_ready():
-        raise ValueError("Complete every planned capture before training.")
+        raise ValueError(workspace.capture_setup_problem() or "Complete every planned capture before training.")
     root = workspace.directory / "training"
     root.mkdir(exist_ok=True)
     if resume:
